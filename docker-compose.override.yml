@@ -1,0 +1,16 @@
+# Auto-merged by `docker compose up`: E2E stubs. For real use: `docker compose -f docker-compose.yml up -d`.
+services:
+  stub:
+    build:
+      context: e2e/stubs
+    ports:
+      - "4010:4010"
+  backend:
+    environment:
+      ORACUL_CHATGPT_AUTHORIZE_URL: http://localhost:4010/oauth/authorize
+      ORACUL_CHATGPT_TOKEN_URL: http://stub:4010/oauth/token
+    depends_on:
+      db:
+        condition: service_healthy
+      stub:
+        condition: service_started

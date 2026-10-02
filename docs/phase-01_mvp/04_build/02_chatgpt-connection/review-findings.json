@@ -1,0 +1,117 @@
+{
+  "slice": "02_chatgpt-connection",
+  "round": 6,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "dimension": "spec-compliance",
+      "file": "frontend/nginx.conf",
+      "line": 6,
+      "fr": "FR-7",
+      "problem": "The spec (Test hooks / Web-server routing) requires nginx `location = /auth/callback { proxy_pass http://backend:8080/api/auth/chatgpt/callback$is_args$args; }` and proxy.conf.json `/auth/callback` -> `/api/auth/chatgpt/callback`. Neither file is changed. OpenAI redirects to http://127.0.0.1:4200/auth/callback, but nginx's `location /` catches it and serves index.html, so the backend callback never runs. The token exchange cannot happen and the FR-7 happy path ('I land on ORACUL connected') cannot work in docker or the dev server.",
+      "fix": "Add the `/auth/callback` forward to frontend/nginx.conf (exact-match location before `/`, query preserved) and to frontend/proxy.conf.json with the pathRewrite given in the spec.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "high",
+      "dimension": "tests",
+      "file": "e2e/tests/chatgpt-connection.spec.ts",
+      "line": 4,
+      "fr": "FR-7",
+      "problem": "The E2E spec depends on the stub service at http://localhost:4010 (/__control/mode, /__control/reset, /__control/issued, /oauth/authorize, /oauth/token). The spec requires `e2e/stubs` (Node stub) and `docker-compose.override.yml`, which wire the stub and set ORACUL_CHATGPT_AUTHORIZE_URL/TOKEN_URL on the backend. Neither exists. Every test's beforeEach POST to /__control/reset fails, so none of the FR-7/FR-8/FR-9 E2E acceptance tests can run. Without the override the backend would also call the real auth.openai.com, which breaks NFR-7. Round 2: still not fixed. e2e/stubs/ and docker-compose.override.yml are still missing from the app. Round 3: still not fixed. e2e/stubs/ and docker-compose.override.yml are still missing, and nothing else in the app serves port 4010. Round 4: still not fixed. e2e/stubs/ and docker-compose.override.yml are still missing (only docker-compose.yml exists), and nothing in the app serves port 4010. Round 5: still not fixed. e2e/stubs/ and docker-compose.override.yml are still missing (e2e/ has only tests/, playwright config and package files), so the chatgpt-connection E2E spec cannot run. Round 6: fixed. e2e/stubs/server.mjs (node:http only, port 4010) implements /oauth/authorize, /oauth/token (PKCE S256 check, token_error/refresh_error/not_eligible modes, STUBSECRET tokens), /__control/mode|reset|issued as in the spec table; docker-compose.override.yml adds service stub (4010:4010) and sets ORACUL_CHATGPT_AUTHORIZE_URL=http://localhost:4010/oauth/authorize and ORACUL_CHATGPT_TOKEN_URL=http://stub:4010/oauth/token on the backend.",
+      "fix": "Add e2e/stubs (no npm deps, port 4010, endpoints and modes exactly as in the spec table) and docker-compose.override.yml (service `stub` with 4010:4010; backend env ORACUL_CHATGPT_AUTHORIZE_URL=http://localhost:4010/oauth/authorize, ORACUL_CHATGPT_TOKEN_URL=http://stub:4010/oauth/token).",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "high",
+      "dimension": "correctness",
+      "file": "frontend/src/app/app.ts",
+      "line": 717,
+      "fr": "FR-7",
+      "problem": "`this.router.parseUrl(this.router.url).queryParams['chatgpt']` is read in the root component's ngOnInit. In a real bootstrap this runs before the router's initial navigation, so router.url is still '/'. The outcome is then always null: no 'ChatGPT connected' / 'ChatGPT connection was not completed' / 'not eligible' snackbar appears, and `?chatgpt=` is never removed from the URL. The unit tests hide this because they call `router.navigateByUrl('/?chatgpt=…')` before the first detectChanges, which is not how the app boots.",
+      "fix": "Read the outcome after the initial navigation, e.g. subscribe to the first NavigationEnd (router.events.pipe(filter(e => e instanceof NavigationEnd), take(1))) and then call handleReturn with the parsed query param, or read window.location.search once at startup. Add a test where the URL contains ?chatgpt= before the app bootstraps (e.g. RouterTestingHarness / initial navigation).",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "severity": "medium",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/ChatGptCredentialStore.java",
+      "line": 36,
+      "fr": "FR-9",
+      "problem": "PendingAuthorization entries (state + code verifier) are only removed when their own state comes back in a callback, or on disconnect. An abandoned sign-in leaves its verifier in memory forever, which goes against FR-9's 'minimum lifetime'. Every unauthenticated GET /api/auth/chatgpt/authorize also adds one entry for good, so repeated requests grow the map without limit (memory DoS).",
+      "fix": "Purge entries with now >= createdAt + pending-ttl on every putPending (or on a scheduled task using the injected Clock), and optionally cap pending entries per session.",
+      "status": "fixed"
+    },
+    {
+      "id": "R5",
+      "severity": "medium",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/session/SessionFilter.java",
+      "line": 42,
+      "fr": "FR-8",
+      "problem": "sessions.resolve() (a DB insert/select) runs in a servlet filter outside the DispatcherServlet, so ApiExceptionHandler does not handle its exceptions. If the DB fails, GET/DELETE /api/auth/chatgpt/connection return Spring Boot's default /error body ({timestamp,status,error,path}) instead of the contract's `500 ApiError {code: INTERNAL_ERROR}`. GET /api/auth/chatgpt/authorize shows a 500 error page instead of the spec's 302 to ?chatgpt=not_completed ('never a 500 page').",
+      "fix": "Catch exceptions in SessionFilter.doFilterInternal: for /api/auth/chatgpt/authorize send 302 to <frontend-base-url>/?chatgpt=not_completed; otherwise write a 500 JSON {\"code\":\"INTERNAL_ERROR\",\"message\":\"Something went wrong — try again\"}. Alternatively resolve the session lazily inside the MVC layer.",
+      "status": "fixed"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/ChatGptAuthService.java",
+      "line": 198,
+      "fr": "FR-8",
+      "problem": "disconnect() does not take the per-session lock that requireUsableCredentials holds. If a refresh is in flight when Disconnect runs, refresh() then calls store.putCredentials(renewed) after clearSession and brings the tokens back, so the backend holds tokens after a 204 Disconnect. The window is narrow (startRun at the same time as Disconnect).",
+      "fix": "Run disconnect (and the credential write in complete) under the same per-session lock, or have refresh store the new value only if the current entry is still the one it read (credentials.replace(id, old, renewed)).",
+      "status": "fixed"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/ChatGptAuthService.java",
+      "line": 48,
+      "fr": "FR-8",
+      "problem": "The `locks` map gets one entry per session that ever calls startRun and never drops it, so memory grows without limit over the process lifetime.",
+      "fix": "Remove the lock entry in disconnect/clearAll, or use a striped lock or Guava Interner with weak values.",
+      "status": "fixed"
+    },
+    {
+      "id": "R8",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "frontend/src/app/chatgpt/chatgpt-connection.spec.ts",
+      "line": 258,
+      "fr": "FR-7",
+      "problem": "The R3 fix added a bootstrap branch to App.ngOnInit (router.navigated false, so it reads window.location.search). No unit test covers that branch. The '?chatgpt=' tests still call router.navigateByUrl before the first detectChanges, so they only cover the router.navigated=true path. The production path is covered only by the E2E spec, which cannot run until R2 is fixed. Round 3: still open. No test sets window.location.search before bootstrap. Round 4: still open. Round 5: still open. Round 6: fixed. chatgpt-connection.spec.ts 'at bootstrap (router not navigated yet)' sets history.replaceState('/?chatgpt=connected'), asserts router.navigated is false, then checks the snackbar text, router.url '/' and the connected header.",
+      "fix": "Add an App test that sets window.history.replaceState(null,'','/?chatgpt=connected') before creating the component with router.navigated false. Assert that the snackbar text appears and that the query param is removed after the initial navigation.",
+      "status": "fixed"
+    },
+    {
+      "id": "R9",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/chatgpt/connection.store.ts",
+      "line": 72,
+      "fr": "FR-7",
+      "problem": "The snackbar-overlap fix removes '.mat-mdc-snack-bar-container' elements with el.remove(), outside Angular/CDK. The overlay pane and the component view of the old snackbar stay alive until MatSnackBar's own dismiss finishes, so the DOM and Material's state disagree for a moment. MatSnackBar already allows only one snackbar at a time (opening a new one dismisses the previous one), so the manual removal only hides the exit animation. It works (E2E green), but it depends on Material's internal class names.",
+      "fix": "Rely on this.current?.dismiss() plus MatSnackBar's single-snackbar rule. If tests need exactly one node at once, make the E2E/unit assertions target the newest message (e.g. .last()) instead of removing DOM nodes by hand.",
+      "status": "open"
+    },
+    {
+      "id": "R10",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "e2e/tests/chatgpt-connection.spec.ts",
+      "line": 66,
+      "fr": "FR-7",
+      "problem": "'a callback with an unknown state ends not connected' visits the callback and then calls page.goto('/') again. It only asserts 'Not connected', which a fresh session shows anyway, so the test would pass even if the callback answered 500 or redirected somewhere else. It checks neither the not_completed snackbar nor the clean URL after the redirect. The backend ITs (ChatGptSignInIT) do cover the unknown-state rule, so this is only a weak E2E check.",
+      "fix": "Drop the second goto('/'). After the callback navigation, assert the page landed on '/' with chatgpt-message 'ChatGPT connection was not completed' and status 'Not connected'.",
+      "status": "open"
+    }
+  ]
+}

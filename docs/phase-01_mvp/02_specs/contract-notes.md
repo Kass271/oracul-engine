@@ -68,6 +68,10 @@ Run failures inside the async pipeline are not HTTP errors: they appear as `Gene
 `/auth/callback` → backend `/api/auth/chatgpt/callback` with the query string. Because the callback arrives on host
 `127.0.0.1` while the app usually runs on `localhost:4200` (different cookie jar), the callback identifies the session
 through the in-memory `state` entry, not the cookie, and then redirects to `oracul.frontend-base-url`.
+The callback query parameters carry no `maxLength` in the contract on purpose: generated Bean Validation would turn an
+oversize value into a 400, but this endpoint must always redirect. The length limits (code 4096, state 512, error 256,
+error_description 2048, client_id 256) are enforced by the service and lead to `?chatgpt=not_completed`
+(chatgpt-connection.md, callback rule 1).
 
 ## Data contracts required by spec §48
 | §48 item | Where defined |
@@ -144,6 +148,10 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    verifiable; they contain no credentials.
 8. The redirect URI port defaults to the frontend port 4200 on 127.0.0.1; if OpenAI's dynamic registration only
    accepts a specific loopback port, only `oracul.chatgpt.redirect-uri` and the web-server forward change.
+9. E2E stubs are wired through `docker-compose.override.yml`, which `docker compose up` merges automatically, because
+   `factory-engine/bin/stack.mjs` runs plain `docker compose up`. To use the real OpenAI endpoints, run
+   `docker compose -f docker-compose.yml up -d` (documented in how-to-run). Until slice 04, `startRun` with a valid body
+   and a usable connection answers an interim `501` without a body; no test asserts it.
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

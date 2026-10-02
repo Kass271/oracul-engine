@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ORACUL API
-  version: 0.2.1
+  version: 0.3.0
   description: |
     Contract between the Spring Boot backend and the Angular frontend. Both sides are generated from this file.
     Every request is tied to an anonymous browser session (HttpOnly cookie ORACUL_SID, created by the backend on the
@@ -75,13 +75,16 @@ paths:
       summary: Browser navigation — starts Sign in with ChatGPT (OAuth 2.0 + PKCE) and redirects to OpenAI
       description: |
         Creates a fresh state and PKCE verifier in backend memory (bound to this session, single use, 10 min) and
-        answers 302 to the OpenAI authorize endpoint. Never answers with a body the user has to read.
+        answers 302 to the OpenAI authorize endpoint. Never answers with a body the user has to read and never 4xx/5xx:
+        if the authorize URL cannot be built it answers 302 to <frontend-base-url>/?chatgpt=not_completed.
+        First sign-in (no persisted client id) uses client_id=dynamic_agent_client plus ext_agent_host_id and
+        agent_name_hint=ORACUL; later sign-ins use the persisted oaiapp_… client id.
       responses:
         '302':
-          description: Redirect to the OpenAI authorization endpoint
+          description: Redirect to the OpenAI authorization endpoint (or to <frontend-base-url>/?chatgpt=not_completed on misconfiguration)
           headers:
             Location:
-              description: Authorize URL with response_type=code, client_id, redirect_uri (127.0.0.1), scope, state, code_challenge, code_challenge_method=S256, resource
+              description: Authorize URL with response_type=code, client_id, [ext_agent_host_id, agent_name_hint], redirect_uri (http://127.0.0.1:<port>/auth/callback), scope (6 scopes, space-separated), state, code_challenge (BASE64URL(SHA-256(verifier))), code_challenge_method=S256, resource
               schema:
                 type: string
 
@@ -98,40 +101,39 @@ paths:
         - name: code
           in: query
           required: false
+          description: Authorization code. Longer than 4096 characters → redirect ?chatgpt=not_completed (checked by the service, not by Bean Validation, so the endpoint never answers 400).
           schema:
             type: string
-            maxLength: 4096
         - name: state
           in: query
           required: false
+          description: State created by startChatGptSignIn (single use, 10 min). Missing, unknown, used, expired or longer than 512 → ?chatgpt=not_completed without a token request.
           schema:
             type: string
-            maxLength: 512
         - name: error
           in: query
           required: false
+          description: OAuth error (e.g. access_denied). Any value → pending entry removed, ?chatgpt=not_completed. Limit 256.
           schema:
             type: string
-            maxLength: 256
         - name: error_description
           in: query
           required: false
+          description: Ignored and never echoed. Limit 2048.
           schema:
             type: string
-            maxLength: 2048
         - name: client_id
           in: query
           required: false
-          description: Issued client id (oaiapp_…) returned on the first sign-in with dynamic client registration
+          description: Issued client id (oaiapp_…, pattern ^oaiapp_[A-Za-z0-9_-]{1,249}$) returned on the first sign-in with dynamic client registration; persisted after a successful token exchange. Limit 256; other values are ignored.
           schema:
             type: string
-            maxLength: 256
       responses:
         '302':
           description: Redirect back to the ORACUL frontend with the outcome in the chatgpt query parameter
           headers:
             Location:
-              description: <frontend-base-url>/?chatgpt=connected|not_completed|not_eligible
+              description: Exactly <frontend-base-url>/?chatgpt=connected|not_completed|not_eligible (never contains code, state, error or error_description)
               schema:
                 type: string
 
@@ -140,6 +142,7 @@ paths:
       tags: [chatgpt]
       operationId: getChatGptConnection
       summary: ChatGPT connection state of this session
+      description: Reads backend memory only (no call to OpenAI, no refresh). Creates the ORACUL_SID session cookie when missing.
       responses:
         '200':
           description: Connection state (never contains a token)
@@ -147,6 +150,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatGptConnection'
+              examples:
+                notConnected:
+                  value: { state: NOT_CONNECTED, canGenerate: false }
+                connected:
+                  value: { state: CONNECTED, canGenerate: true }
+                planNotEligible:
+                  value: { state: PLAN_NOT_ELIGIBLE, canGenerate: false }
+                sessionExpired:
+                  value: { state: SESSION_EXPIRED, canGenerate: false }
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -418,6 +430,9 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            planNotEligible:
+              value: { code: CHATGPT_PLAN_NOT_ELIGIBLE, message: Your ChatGPT plan is not eligible for ORACUL }
     NotFound:
       description: RUN_NOT_FOUND
       content:
@@ -436,6 +451,9 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            internal:
+              value: { code: INTERNAL_ERROR, message: Something went wrong — try again }
 
   schemas:
     Ping:
