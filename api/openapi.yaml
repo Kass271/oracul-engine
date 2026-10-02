@@ -1,8 +1,29 @@
 openapi: 3.0.3
 info:
   title: ORACUL API
-  version: 0.1.0
-  description: Contract between the Spring Boot backend and the Angular frontend. Both sides are generated from this file.
+  version: 0.2.0
+  description: |
+    Contract between the Spring Boot backend and the Angular frontend. Both sides are generated from this file.
+    Every request is tied to an anonymous browser session (HttpOnly cookie ORACUL_SID, created by the backend on the
+    first /api request). Data of another session is never visible: it answers 404 like a missing resource.
+    Every non-2xx response body is an ApiError { code, message }. No response ever contains a ChatGPT credential.
+tags:
+  - name: system
+    description: Liveness of the backend
+  - name: scenario
+    description: Scenario Panel — catalogue, defaults and current configuration (spec scenario-panel.md)
+  - name: chatgpt
+    description: Sign in with ChatGPT, connection status and sign-out (spec chatgpt-connection.md)
+  - name: runs
+    description: Generation runs — start, progress, alternative futures (spec generation-runs.md)
+  - name: research
+    description: Research profile, search plan, sources, events and Evidence Pack of a run (spec research-pipeline.md)
+  - name: reasoning
+    description: Structured scenario, Evidence Guard and critic reports of a run (spec scenario-reasoning.md)
+  - name: result
+    description: The rendered future — story, metadata, WHY, SOURCES, WHY THESE NEWS (spec future-result.md)
+  - name: history
+    description: Recent futures of the browser session (spec recent-futures.md)
 paths:
   /api/ping:
     get:
@@ -16,7 +37,385 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Ping'
+
+  /api/scenario/catalogue:
+    get:
+      tags: [scenario]
+      operationId: getScenarioCatalogue
+      summary: Wildcard catalogue, horizon options, defaults and limits for the Scenario Panel
+      responses:
+        '200':
+          description: The catalogue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioCatalogue'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/scenario/configuration:
+    get:
+      tags: [scenario]
+      operationId: getScenarioConfiguration
+      summary: Current configuration of this session (configuration of the newest run, else the defaults)
+      responses:
+        '200':
+          description: The configuration the panel starts with
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioConfiguration'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/auth/chatgpt/authorize:
+    get:
+      tags: [chatgpt]
+      operationId: startChatGptSignIn
+      summary: Browser navigation — starts Sign in with ChatGPT (OAuth 2.0 + PKCE) and redirects to OpenAI
+      description: |
+        Creates a fresh state and PKCE verifier in backend memory (bound to this session, single use, 10 min) and
+        answers 302 to the OpenAI authorize endpoint. Never answers with a body the user has to read.
+      responses:
+        '302':
+          description: Redirect to the OpenAI authorization endpoint
+          headers:
+            Location:
+              description: Authorize URL with response_type=code, client_id, redirect_uri (127.0.0.1), scope, state, code_challenge, code_challenge_method=S256, resource
+              schema:
+                type: string
+
+  /api/auth/chatgpt/callback:
+    get:
+      tags: [chatgpt]
+      operationId: completeChatGptSignIn
+      summary: Browser navigation — OAuth redirect target; exchanges the code and redirects back to ORACUL
+      description: |
+        Reached through the registered loopback redirect URI http://127.0.0.1:<port>/auth/callback, which the
+        frontend web server forwards to this path with the query string unchanged. Always answers 302 to the
+        ORACUL frontend with ?chatgpt=connected | not_completed | not_eligible. Never answers 4xx/5xx.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 4096
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 512
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+        - name: error_description
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 2048
+        - name: client_id
+          in: query
+          required: false
+          description: Issued client id (oaiapp_…) returned on the first sign-in with dynamic client registration
+          schema:
+            type: string
+            maxLength: 256
+      responses:
+        '302':
+          description: Redirect back to the ORACUL frontend with the outcome in the chatgpt query parameter
+          headers:
+            Location:
+              description: <frontend-base-url>/?chatgpt=connected|not_completed|not_eligible
+              schema:
+                type: string
+
+  /api/auth/chatgpt/connection:
+    get:
+      tags: [chatgpt]
+      operationId: getChatGptConnection
+      summary: ChatGPT connection state of this session
+      responses:
+        '200':
+          description: Connection state (never contains a token)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatGptConnection'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [chatgpt]
+      operationId: disconnectChatGpt
+      summary: Disconnect — drops every credential of this session from backend memory (idempotent)
+      responses:
+        '204':
+          description: Disconnected (also when nothing was connected)
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs:
+    post:
+      tags: [runs]
+      operationId: startRun
+      summary: GENERATE THE FUTURE — snapshot the configuration into a new Generation Run and start the pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioConfiguration'
+      responses:
+        '202':
+          description: Run accepted and started asynchronously (status QUEUED or RUNNING)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/ChatGptRequired'
+        '403':
+          $ref: '#/components/responses/PlanNotEligible'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [history]
+      operationId: listRecentRuns
+      summary: Recent futures — the 20 newest COMPLETED runs of this session, newest first
+      responses:
+        '200':
+          description: Recent futures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecentRunList'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}:
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: Run status, current stage and counts — polled about every second while the run is active
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationRun'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/alternatives:
+    post:
+      tags: [runs]
+      operationId: startAlternativeRun
+      summary: ALTERNATIVE FUTURE — new run with the same configuration and the same Evidence Pack, different causal path
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '202':
+          description: Alternative run accepted (kind ALTERNATIVE, same evidencePackId as the parent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationRun'
+        '401':
+          $ref: '#/components/responses/ChatGptRequired'
+        '403':
+          $ref: '#/components/responses/PlanNotEligible'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/research:
+    get:
+      tags: [research]
+      operationId: getRunResearch
+      summary: Research Profile, search plan (intents, buckets, queries) and research counts of a run
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Research record of the run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResearch'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/sources:
+    get:
+      tags: [research]
+      operationId: listRunSources
+      summary: Every source retrieved for the run after basic filtering (S001…)
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Sources of the run (empty while searching)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceList'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/events:
+    get:
+      tags: [research]
+      operationId: listRunEvents
+      summary: Normalized events of the run with classification, ranking and selection
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Events of the run (empty before normalisation), ordered by ranking score descending
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventList'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/evidence-pack:
+    get:
+      tags: [research]
+      operationId: getEvidencePack
+      summary: The Evidence Pack of the run — exactly the current-world context given to ChatGPT
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The Evidence Pack
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidencePack'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/structured-scenario:
+    get:
+      tags: [reasoning]
+      operationId: getStructuredScenario
+      summary: Final structured scenario of the run with its Evidence Guard and critic reports
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Structured scenario record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StructuredScenarioRecord'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/result:
+    get:
+      tags: [result]
+      operationId: getFutureResult
+      summary: Everything the result view renders — story, labels, metadata, causal chain, sources, research summary
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The future result of a COMPLETED run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FutureResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
+  parameters:
+    RunId:
+      name: runId
+      in: path
+      required: true
+      description: Run id (UUID). A malformed id or a run of another session answers 404 RUN_NOT_FOUND.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Validation failed (code VALIDATION_FAILED); message names the first violated rule
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ChatGptRequired:
+      description: CHATGPT_NOT_CONNECTED or CHATGPT_SESSION_EXPIRED
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    PlanNotEligible:
+      description: CHATGPT_PLAN_NOT_ELIGIBLE
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: RUN_NOT_FOUND
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: RUN_ALREADY_ACTIVE, RUN_NOT_COMPLETED, RESEARCH_NOT_READY, EVIDENCE_PACK_NOT_READY, SCENARIO_NOT_READY or RESULT_NOT_READY
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InternalError:
+      description: Last-resort INTERNAL_ERROR without internals (no stack trace, no provider body, no token)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
   schemas:
     Ping:
       type: object
@@ -24,11 +423,1235 @@ components:
       properties:
         message:
           type: string
+
     ApiError:
       type: object
       required: [code, message]
       properties:
         code:
           type: string
+          description: Stable machine code, e.g. VALIDATION_FAILED, RUN_ALREADY_ACTIVE
         message:
           type: string
+          description: User-facing English message; never contains internals or credentials
+
+    # ---------- scenario ----------
+    HorizonCode:
+      type: string
+      description: 1d Tomorrow · 1w 1 week · 1m 1 month · 1y 1 year · 5y 5 years · 10y 10 years · 20y 20 years
+      enum: ['1d', '1w', '1m', '1y', '5y', '10y', '20y']
+
+    ScenarioConfiguration:
+      type: object
+      description: Snapshot of the Scenario Panel. Darkness and Optimism are independent.
+      required: [realism, darkness, optimism, horizon, wildcards, customWildcards, output]
+      properties:
+        realism:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+        darkness:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+        optimism:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+        horizon:
+          $ref: '#/components/schemas/HorizonCode'
+        wildcards:
+          type: array
+          description: Enabled catalogue wildcards only (a disabled wildcard is absent). Ids unique.
+          maxItems: 30
+          items:
+            $ref: '#/components/schemas/WildcardSetting'
+        customWildcards:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/CustomWildcard'
+        output:
+          $ref: '#/components/schemas/OutputSettings'
+
+    WildcardSetting:
+      type: object
+      required: [wildcardId, intensity]
+      properties:
+        wildcardId:
+          type: string
+          minLength: 1
+          maxLength: 60
+          pattern: '^[a-z0-9-]+$'
+          example: biology-new-pandemic
+        intensity:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+
+    CustomWildcard:
+      type: object
+      required: [label, intensity]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: '^\s*\S.*$'
+          description: Free text, trimmed by the backend; 1–40 characters after trimming
+        intensity:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+
+    OutputSettings:
+      type: object
+      required: [story, illustration]
+      properties:
+        story:
+          type: boolean
+          description: Must be true in this version
+        illustration:
+          type: boolean
+          description: Must be false in this version (MVP+1)
+
+    ScenarioCatalogue:
+      type: object
+      required: [categories, horizons, defaults, limits]
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/WildcardCategory'
+        horizons:
+          type: array
+          items:
+            $ref: '#/components/schemas/HorizonOption'
+        defaults:
+          $ref: '#/components/schemas/ScenarioConfiguration'
+        limits:
+          $ref: '#/components/schemas/ScenarioLimits'
+
+    WildcardCategory:
+      type: object
+      required: [id, label, wildcards]
+      properties:
+        id:
+          type: string
+          example: biology
+        label:
+          type: string
+          example: Biology
+        wildcards:
+          type: array
+          items:
+            $ref: '#/components/schemas/WildcardDefinition'
+
+    WildcardDefinition:
+      type: object
+      required: [id, label, categoryId]
+      properties:
+        id:
+          type: string
+          example: biology-new-pandemic
+        label:
+          type: string
+          example: New pandemic
+        categoryId:
+          type: string
+          example: biology
+
+    HorizonOption:
+      type: object
+      required: [code, label]
+      properties:
+        code:
+          $ref: '#/components/schemas/HorizonCode'
+        label:
+          type: string
+          example: 5 years
+
+    ScenarioLimits:
+      type: object
+      required: [intensityMin, intensityMax, customWildcardMax, customWildcardLabelMaxLength, defaultWildcardIntensity]
+      properties:
+        intensityMin:
+          type: integer
+          format: int32
+          example: 1
+        intensityMax:
+          type: integer
+          format: int32
+          example: 10
+        customWildcardMax:
+          type: integer
+          format: int32
+          example: 3
+        customWildcardLabelMaxLength:
+          type: integer
+          format: int32
+          example: 40
+        defaultWildcardIntensity:
+          type: integer
+          format: int32
+          example: 5
+
+    # ---------- chatgpt ----------
+    ChatGptConnectionState:
+      type: string
+      enum: [NOT_CONNECTED, CONNECTED, PLAN_NOT_ELIGIBLE, SESSION_EXPIRED]
+
+    ChatGptConnection:
+      type: object
+      required: [state, canGenerate]
+      properties:
+        state:
+          $ref: '#/components/schemas/ChatGptConnectionState'
+        canGenerate:
+          type: boolean
+          description: true only when state is CONNECTED
+
+    # ---------- runs ----------
+    RunKind:
+      type: string
+      enum: [STANDARD, ALTERNATIVE]
+
+    RunStatus:
+      type: string
+      description: QUEUED and RUNNING are active; the others are terminal
+      enum: [QUEUED, RUNNING, COMPLETED, INSUFFICIENT_EVIDENCE, FAILED]
+
+    RunStage:
+      type: string
+      enum:
+        - UNDERSTANDING
+        - RESEARCH_STRATEGY
+        - SEARCHING
+        - READING_SOURCES
+        - CONNECTING_SIGNALS
+        - RANKING
+        - EXPLORING_FUTURES
+        - CHALLENGING_ASSUMPTIONS
+        - CONSTRUCTING_SCENARIO
+        - WRITING_STORY
+
+    RunFailureCode:
+      type: string
+      enum:
+        - NEWS_UNAVAILABLE
+        - CHATGPT_RATE_LIMITED
+        - CHATGPT_UNAVAILABLE
+        - CHATGPT_SESSION_EXPIRED
+        - RUN_TIMEOUT
+        - INVALID_SCENARIO
+        - SCENARIO_REJECTED
+        - ALTERNATIVE_NOT_DISTINCT
+        - INSUFFICIENT_EVIDENCE
+        - RUN_INTERRUPTED
+        - INTERNAL_ERROR
+
+    RunFailure:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          $ref: '#/components/schemas/RunFailureCode'
+        message:
+          type: string
+          description: User-facing message; never technical details
+
+    ResearchCounts:
+      type: object
+      required: [searches, articlesRetrieved, articlesConsidered, uniqueEvents, eventsSelected, counterSignals, sourcesUsed]
+      properties:
+        searches:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Search queries executed against the news provider
+        articlesRetrieved:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Raw articles returned by the provider
+        articlesConsidered:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Articles left after basic filtering (= stored sources)
+        uniqueEvents:
+          type: integer
+          format: int32
+          minimum: 0
+        eventsSelected:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Evidence Pack size (core + supporting + counter-signals)
+        counterSignals:
+          type: integer
+          format: int32
+          minimum: 0
+        sourcesUsed:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Evidence items cited by factsUsed of the final scenario
+
+    GenerationRun:
+      type: object
+      required: [id, generationId, kind, status, stageIndex, stageCount, configuration, counts, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        generationId:
+          type: string
+          pattern: '^ORC-\d{4}-\d{2}-\d{2}-\d{4}(-\d+)?$'
+          example: ORC-2026-10-02-1842
+        kind:
+          $ref: '#/components/schemas/RunKind'
+        parentRunId:
+          type: string
+          format: uuid
+          description: Set for ALTERNATIVE runs
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        stage:
+          $ref: '#/components/schemas/RunStage'
+        stageLabel:
+          type: string
+          example: Searching current events…
+        stageIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10
+          description: 1-based index of the current stage, 0 while QUEUED, 10 when terminal after WRITING_STORY
+        stageCount:
+          type: integer
+          format: int32
+          example: 10
+        configuration:
+          $ref: '#/components/schemas/ScenarioConfiguration'
+        evidencePackId:
+          type: string
+          format: uuid
+        counts:
+          $ref: '#/components/schemas/ResearchCounts'
+        failure:
+          $ref: '#/components/schemas/RunFailure'
+        suggestedRealism:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+          description: Set when status is INSUFFICIENT_EVIDENCE and realism > 1 (realism − 2, at least 1)
+        headline:
+          type: string
+          description: Set when COMPLETED
+        hasOpenCriticIssues:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    # ---------- history ----------
+    RecentRunList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/RecentRunSummary'
+
+    RecentRunSummary:
+      type: object
+      required: [id, generationId, kind, createdAt, headline, configuration]
+      properties:
+        id:
+          type: string
+          format: uuid
+        generationId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/RunKind'
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        headline:
+          type: string
+        configuration:
+          $ref: '#/components/schemas/ScenarioConfiguration'
+
+    # ---------- research ----------
+    ResearchTopic:
+      type: object
+      required: [key, label, category, weight, custom]
+      properties:
+        key:
+          type: string
+          description: Catalogue wildcard id, or custom-<n> for custom wildcards
+          example: biology-new-pandemic
+        label:
+          type: string
+          example: New pandemic
+        category:
+          type: string
+          description: Catalogue category id, or "custom"
+          example: biology
+        weight:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.8
+        custom:
+          type: boolean
+
+    ResearchProfile:
+      type: object
+      required: [darkness, optimism, realism, horizon, topics]
+      properties:
+        darkness:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        optimism:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        realism:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        horizon:
+          $ref: '#/components/schemas/HorizonCode'
+        topics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResearchTopic'
+
+    QueryBucket:
+      type: string
+      enum: [WILDCARD, MAJOR, ADJACENT, UNEXPECTED]
+
+    QueryExpansionMode:
+      type: string
+      enum: [MODEL, TEMPLATE_FALLBACK]
+
+    BucketAllocation:
+      type: object
+      required: [bucket, share, queries]
+      properties:
+        bucket:
+          $ref: '#/components/schemas/QueryBucket'
+        share:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        queries:
+          type: integer
+          format: int32
+          minimum: 0
+
+    SearchQueryStatus:
+      type: string
+      enum: [PENDING, OK, EMPTY, FAILED]
+
+    SearchQuery:
+      type: object
+      required: [id, intentId, bucket, text, status, articlesReturned]
+      properties:
+        id:
+          type: string
+          example: Q01
+        intentId:
+          type: string
+          example: I01
+        bucket:
+          $ref: '#/components/schemas/QueryBucket'
+        text:
+          type: string
+        status:
+          $ref: '#/components/schemas/SearchQueryStatus'
+        articlesReturned:
+          type: integer
+          format: int32
+          minimum: 0
+
+    SearchIntent:
+      type: object
+      required: [id, bucket, description, drivenBy]
+      properties:
+        id:
+          type: string
+          example: I01
+        bucket:
+          $ref: '#/components/schemas/QueryBucket'
+        description:
+          type: string
+          example: Emerging infectious diseases and unusual disease clusters
+        topicKey:
+          type: string
+          description: ResearchTopic key for WILDCARD intents
+        drivenBy:
+          type: array
+          description: Panel controls that caused this intent, e.g. "New pandemic 8/10", "Darkness 9/10"
+          items:
+            type: string
+
+    SearchPlan:
+      type: object
+      required: [queryBudget, expansionMode, buckets, intents, queries]
+      properties:
+        queryBudget:
+          type: integer
+          format: int32
+          minimum: 1
+        expansionMode:
+          $ref: '#/components/schemas/QueryExpansionMode'
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/BucketAllocation'
+        intents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchIntent'
+        queries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchQuery'
+
+    RunResearch:
+      type: object
+      required: [runId, profile, counts]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        profile:
+          $ref: '#/components/schemas/ResearchProfile'
+        searchPlan:
+          $ref: '#/components/schemas/SearchPlan'
+        counts:
+          $ref: '#/components/schemas/ResearchCounts'
+
+    SourceType:
+      type: string
+      enum: [OFFICIAL, RESEARCH, NEWS, BLOG, OTHER]
+
+    Source:
+      type: object
+      required: [id, url, publisher, title, retrievedAt, sourceType, sourceQuality, metadataFetched]
+      properties:
+        id:
+          type: string
+          pattern: '^S\d{3,}$'
+          example: S001
+        url:
+          type: string
+          format: uri
+        publisher:
+          type: string
+        title:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+        retrievedAt:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        topic:
+          type: string
+        entities:
+          type: array
+          items:
+            type: string
+        sourceType:
+          $ref: '#/components/schemas/SourceType'
+        sourceQuality:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        metadataFetched:
+          type: boolean
+          description: false when the article page timed out or was unreachable (provider metadata kept)
+        queryIds:
+          type: array
+          items:
+            type: string
+
+    SourceList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Source'
+
+    Trend:
+      type: string
+      enum: [EMERGING, ESTABLISHED, DECLINING]
+
+    WildcardMatch:
+      type: object
+      required: [key, score]
+      properties:
+        key:
+          type: string
+          description: ResearchTopic key
+        score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+
+    EventClassification:
+      type: object
+      required: [topic, subtopics, sentiment, risk, opportunity, impact, novelty, sourceQuality, trend, wildcardMatches]
+      properties:
+        topic:
+          type: string
+        subtopics:
+          type: array
+          items:
+            type: string
+        sentiment:
+          type: number
+          format: double
+          minimum: -1
+          maximum: 1
+        risk:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        opportunity:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        impact:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        novelty:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        sourceQuality:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        trend:
+          $ref: '#/components/schemas/Trend'
+        geography:
+          type: string
+          description: Country or region the event is about, "global" when not specific
+        wildcardMatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/WildcardMatch'
+
+    RankingFactors:
+      type: object
+      required: [topicMatch, wildcardMatch, darknessMatch, optimismMatch, recency, sourceQuality, impact, trendStrength, crossTopic, realismCompatibility]
+      properties:
+        topicMatch:
+          type: number
+          format: double
+        wildcardMatch:
+          type: number
+          format: double
+        darknessMatch:
+          type: number
+          format: double
+        optimismMatch:
+          type: number
+          format: double
+        recency:
+          type: number
+          format: double
+        sourceQuality:
+          type: number
+          format: double
+        impact:
+          type: number
+          format: double
+        trendStrength:
+          type: number
+          format: double
+        crossTopic:
+          type: number
+          format: double
+        realismCompatibility:
+          type: number
+          format: double
+
+    EventRanking:
+      type: object
+      required: [relevance, reliability, score, factors]
+      properties:
+        relevance:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        reliability:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        factors:
+          $ref: '#/components/schemas/RankingFactors'
+
+    EvidenceSection:
+      type: string
+      enum: [CORE, SUPPORTING, COUNTER_SIGNAL]
+
+    EventSelection:
+      type: object
+      required: [evidenceId, section]
+      properties:
+        evidenceId:
+          type: string
+          pattern: '^E\d{3}$'
+        section:
+          $ref: '#/components/schemas/EvidenceSection'
+
+    NormalizedEvent:
+      type: object
+      required: [id, category, entities, summary, sourceIds, confidence]
+      properties:
+        id:
+          type: string
+          pattern: '^EV\d{3,}$'
+          example: EV001
+        date:
+          type: string
+          format: date
+        category:
+          type: string
+        entities:
+          type: array
+          items:
+            type: string
+        summary:
+          type: string
+        disagreement:
+          type: string
+          description: Set when credible sources disagree; the summary also states it
+        sourceIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        classification:
+          $ref: '#/components/schemas/EventClassification'
+        ranking:
+          $ref: '#/components/schemas/EventRanking'
+        selection:
+          $ref: '#/components/schemas/EventSelection'
+        excludedReason:
+          type: string
+          description: Why the event was dropped from ranking, e.g. CLASSIFICATION_FAILED
+
+    EventList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NormalizedEvent'
+
+    EvidenceItem:
+      type: object
+      required: [evidenceId, section, eventId, category, summary, entities, sourceIds, sourceQuality, confidence]
+      properties:
+        evidenceId:
+          type: string
+          pattern: '^E\d{3}$'
+          example: E001
+        section:
+          $ref: '#/components/schemas/EvidenceSection'
+        eventId:
+          type: string
+        date:
+          type: string
+          format: date
+        category:
+          type: string
+        summary:
+          type: string
+        disagreement:
+          type: string
+        entities:
+          type: array
+          items:
+            type: string
+        sourceIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        sourceQuality:
+          type: number
+          format: double
+        confidence:
+          type: number
+          format: double
+
+    EvidencePack:
+      type: object
+      required: [id, generationId, cutoff, configuration, profile, core, supporting, counterSignals, sources, promptText]
+      properties:
+        id:
+          type: string
+          format: uuid
+        generationId:
+          type: string
+        cutoff:
+          type: string
+          format: date-time
+        configuration:
+          $ref: '#/components/schemas/ScenarioConfiguration'
+        profile:
+          $ref: '#/components/schemas/ResearchProfile'
+        core:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceItem'
+        supporting:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceItem'
+        counterSignals:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceItem'
+        sources:
+          type: array
+          description: Sources referenced by the evidence items
+          items:
+            $ref: '#/components/schemas/Source'
+        promptText:
+          type: string
+          description: Exact rendered pack text placed in the untrusted-data block of the generation prompt
+
+    # ---------- reasoning ----------
+    InformationClass:
+      type: string
+      enum: [FACT, INFERENCE, SPECULATION, FUTURE_EVENT]
+
+    CandidateFuture:
+      type: object
+      required: [title, summary, evaluation, selected]
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        evaluation:
+          type: string
+        selected:
+          type: boolean
+
+    FactClaim:
+      type: object
+      required: [id, statement, evidenceIds]
+      properties:
+        id:
+          type: string
+          example: F1
+        statement:
+          type: string
+        evidenceIds:
+          type: array
+          items:
+            type: string
+
+    InferenceClaim:
+      type: object
+      required: [id, statement, basedOn, evidenceIds]
+      properties:
+        id:
+          type: string
+          example: I1
+        statement:
+          type: string
+        basedOn:
+          type: array
+          description: Fact ids this inference derives from
+          items:
+            type: string
+        evidenceIds:
+          type: array
+          items:
+            type: string
+
+    SpeculationClaim:
+      type: object
+      required: [id, statement, basedOn]
+      properties:
+        id:
+          type: string
+          example: P1
+        statement:
+          type: string
+        basedOn:
+          type: array
+          description: Fact or inference ids
+          items:
+            type: string
+
+    CounterSignalConsideration:
+      type: object
+      required: [evidenceId, howAddressed]
+      properties:
+        evidenceId:
+          type: string
+        howAddressed:
+          type: string
+
+    CausalStep:
+      type: object
+      required: [order, informationClass, statement, evidenceIds]
+      properties:
+        order:
+          type: integer
+          format: int32
+          minimum: 1
+        informationClass:
+          $ref: '#/components/schemas/InformationClass'
+        claimId:
+          type: string
+          description: F1 / I1 / P1 of the claim this step shows
+        statement:
+          type: string
+        evidenceIds:
+          type: array
+          items:
+            type: string
+        year:
+          type: integer
+          format: int32
+          description: Set on the FUTURE_EVENT step
+
+    FutureEvent:
+      type: object
+      required: [title, summary, date]
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        date:
+          type: string
+          format: date
+          description: Strictly after the cutoff date and within the horizon
+
+    StructuredScenario:
+      type: object
+      required: [candidateFutures, factsUsed, inferences, speculations, counterSignalsConsidered, causalChain, futureEvent]
+      properties:
+        candidateFutures:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/CandidateFuture'
+        factsUsed:
+          type: array
+          items:
+            $ref: '#/components/schemas/FactClaim'
+        inferences:
+          type: array
+          items:
+            $ref: '#/components/schemas/InferenceClaim'
+        speculations:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpeculationClaim'
+        counterSignalsConsidered:
+          type: array
+          items:
+            $ref: '#/components/schemas/CounterSignalConsideration'
+        causalChain:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/CausalStep'
+        futureEvent:
+          $ref: '#/components/schemas/FutureEvent'
+        unknowns:
+          type: array
+          description: Information the model stated as unknown
+          items:
+            type: string
+
+    GuardOutcome:
+      type: string
+      enum: [PASS, PASS_WITH_REMOVALS, FAIL]
+
+    GuardViolationType:
+      type: string
+      enum:
+        - FACT_WITHOUT_EVIDENCE
+        - UNKNOWN_EVIDENCE_ID
+        - UNSUPPORTED_INFERENCE
+        - PRESENT_DAY_CLAIM_WITHOUT_EVIDENCE
+        - CAUSAL_CHAIN_INVALID
+        - FUTURE_EVENT_NOT_IN_HORIZON
+
+    GuardAction:
+      type: string
+      enum: [REMOVED, REGENERATION_REQUESTED, REJECTED]
+
+    GuardViolation:
+      type: object
+      required: [type, detail, action]
+      properties:
+        type:
+          $ref: '#/components/schemas/GuardViolationType'
+        claimId:
+          type: string
+        evidenceId:
+          type: string
+        detail:
+          type: string
+        action:
+          $ref: '#/components/schemas/GuardAction'
+
+    GuardReport:
+      type: object
+      required: [outcome, violations, attempt]
+      properties:
+        outcome:
+          $ref: '#/components/schemas/GuardOutcome'
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuardViolation'
+        attempt:
+          type: integer
+          format: int32
+          minimum: 1
+
+    CriticVerdict:
+      type: string
+      enum: [PASS, FAIL]
+
+    CriticIssueType:
+      type: string
+      enum:
+        - UNSUPPORTED_FACTUAL_JUMP
+        - CONTRADICTION
+        - UNREALISTIC_TIMELINE
+        - IGNORED_COUNTER_SIGNALS
+        - WILDCARD_FORCING
+        - SETTINGS_MISMATCH
+        - INAPPROPRIATE_CERTAINTY
+
+    CriticIssue:
+      type: object
+      required: [type, description]
+      properties:
+        type:
+          $ref: '#/components/schemas/CriticIssueType'
+        description:
+          type: string
+
+    CriticReport:
+      type: object
+      required: [verdict, issues, attempt]
+      properties:
+        verdict:
+          $ref: '#/components/schemas/CriticVerdict'
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriticIssue'
+        attempt:
+          type: integer
+          format: int32
+          minimum: 1
+
+    StructuredScenarioRecord:
+      type: object
+      required: [runId, evidencePackId, structuredScenario, guardReports, criticReports, generationAttempts]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        evidencePackId:
+          type: string
+          format: uuid
+        structuredScenario:
+          $ref: '#/components/schemas/StructuredScenario'
+        guardReports:
+          type: array
+          description: One per guard execution, oldest first
+          items:
+            $ref: '#/components/schemas/GuardReport'
+        criticReports:
+          type: array
+          description: One per critic execution, oldest first
+          items:
+            $ref: '#/components/schemas/CriticReport'
+        generationAttempts:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 5
+          description: Generation calls made for this run (each attempt reason at most once)
+
+    # ---------- result ----------
+    FutureStory:
+      type: object
+      required: [headline, dateline, futureDate, body]
+      properties:
+        headline:
+          type: string
+        dateline:
+          type: string
+          example: ORACUL FUTURE — March 14, 2031
+        futureDate:
+          type: string
+          format: date
+        body:
+          type: string
+          description: Plain text paragraphs separated by blank lines (no HTML)
+
+    WildcardDisplay:
+      type: object
+      required: [label, intensity, custom]
+      properties:
+        label:
+          type: string
+        intensity:
+          type: integer
+          format: int32
+        custom:
+          type: boolean
+
+    ScenarioMetadata:
+      type: object
+      required: [configuration, horizonLabel, wildcards, counts]
+      properties:
+        configuration:
+          $ref: '#/components/schemas/ScenarioConfiguration'
+        horizonLabel:
+          type: string
+          example: 5 years
+        wildcards:
+          type: array
+          items:
+            $ref: '#/components/schemas/WildcardDisplay'
+        counts:
+          $ref: '#/components/schemas/ResearchCounts'
+
+    ResultSource:
+      type: object
+      required: [evidenceId, section, title, publisher, url, usedInScenario, counterSignal]
+      properties:
+        evidenceId:
+          type: string
+        section:
+          $ref: '#/components/schemas/EvidenceSection'
+        title:
+          type: string
+        publisher:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+        url:
+          type: string
+          format: uri
+        usedInScenario:
+          type: boolean
+        counterSignal:
+          type: boolean
+
+    ResearchExplanation:
+      type: object
+      required: [intents, counts]
+      properties:
+        intents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchIntent'
+        counts:
+          $ref: '#/components/schemas/ResearchCounts'
+
+    FutureResult:
+      type: object
+      required: [runId, generationId, labels, story, metadata, causalChain, sources, research, openCriticIssues]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        generationId:
+          type: string
+        labels:
+          type: array
+          description: Always ["AI-GENERATED FUTURE SCENARIO", "POSSIBLE FUTURE — NOT CURRENT NEWS"]
+          items:
+            type: string
+        story:
+          $ref: '#/components/schemas/FutureStory'
+        metadata:
+          $ref: '#/components/schemas/ScenarioMetadata'
+        causalChain:
+          type: array
+          items:
+            $ref: '#/components/schemas/CausalStep'
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultSource'
+        research:
+          $ref: '#/components/schemas/ResearchExplanation'
+        openCriticIssues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriticIssue'
