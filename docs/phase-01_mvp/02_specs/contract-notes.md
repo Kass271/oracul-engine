@@ -108,6 +108,7 @@ error_description 2048, client_id 256) are enforced by the service and lead to `
 | `oracul.openai.model` | configurable, one model for all calls | all ChatGPT calls |
 | `oracul.news.gdelt.base-url` | `https://api.gdeltproject.org` (`/api/v2/doc/doc`) | FR-13 |
 | `oracul.frontend-base-url` | `http://localhost:4200` | post-callback redirect |
+| `oracul.run.executor-threads` / `oracul.run.timeout` / `oracul.run.placeholder-stage-delay` | 4 / PT3M / PT1S | FR-10, FR-24, FR-32 |
 
 ## UI component hierarchy (Angular standalone, signals, lazy routes)
 ```
@@ -154,6 +155,11 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    `factory-engine/bin/stack.mjs` runs plain `docker compose up`. To use the real OpenAI endpoints, run
    `docker compose -f docker-compose.yml up -d` (documented in how-to-run). Until slice 04, `startRun` with a valid body
    and a usable connection answers an interim `501` without a body; no test asserts it.
+10. Slice 04 replaces that interim `501` with `202 GenerationRun`. Stages 2–10 are placeholders until slices 05–09
+   deliver them; each placeholder stays current for `oracul.run.placeholder-stage-delay` (default PT1S, E2E override
+   PT2S, tests PT0S/PT30S) and the placeholder pipeline ends the run COMPLETED without headline (interim terminal
+   state, replaced in slice 09). Until slices 09/11/12 the run view keeps showing the progress view for terminal runs.
+   `getRunResearch` returns the Research Profile from slice 04 on (`searchPlan` absent until slice 05).
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

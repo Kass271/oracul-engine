@@ -16,23 +16,23 @@ import java.util.function.Function;
 import org.springframework.test.context.DynamicPropertyRegistry;
 
 /** In-process stand-in for the OpenAI token endpoint (NFR-7). One instance per JVM, reset before every test. */
-final class StubOpenAi {
+public final class StubOpenAi {
 
-    static final String ALL_SCOPES =
+    public static final String ALL_SCOPES =
         "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 
-    record TokenRequest(Map<String, String> form, String contentType, String accept) {}
+    public record TokenRequest(Map<String, String> form, String contentType, String accept) {}
 
-    record Reply(int status, String body, long delayMs) {}
+    public record Reply(int status, String body, long delayMs) {}
 
-    static final StubOpenAi INSTANCE = new StubOpenAi();
+    public static final StubOpenAi INSTANCE = new StubOpenAi();
 
     private final HttpServer server;
     private final AtomicInteger counter = new AtomicInteger();
-    final List<TokenRequest> requests = new CopyOnWriteArrayList<>();
+    public final List<TokenRequest> requests = new CopyOnWriteArrayList<>();
     /** Every code/token value this stub ever issued (for secret scans). */
-    final List<String> issued = new CopyOnWriteArrayList<>();
-    volatile Function<TokenRequest, Reply> responder = defaultResponder();
+    public final List<String> issued = new CopyOnWriteArrayList<>();
+    public volatile Function<TokenRequest, Reply> responder = defaultResponder();
 
     private StubOpenAi() {
         try {
@@ -61,12 +61,12 @@ final class StubOpenAi {
         r.add("oracul.chatgpt.token-url", INSTANCE::tokenUrl);
     }
 
-    static void registerAll(DynamicPropertyRegistry r) {
+    public static void registerAll(DynamicPropertyRegistry r) {
         registerTokenUrl(r);
         r.add("oracul.chatgpt.authorize-url", INSTANCE::authorizeUrl);
     }
 
-    void reset() {
+    public void reset() {
         requests.clear();
         issued.clear();
         responder = defaultResponder();
@@ -81,7 +81,7 @@ final class StubOpenAi {
     }
 
     /** 200 with STUBSECRET tokens. scope null = property absent. */
-    Reply ok(Integer expiresIn, String scope, boolean refresh) {
+    public Reply ok(Integer expiresIn, String scope, boolean refresh) {
         int n = count();
         StringBuilder sb = new StringBuilder("{\"access_token\":\"at-STUBSECRET-" + n + "\"");
         issued.add("at-STUBSECRET-" + n);
@@ -98,11 +98,11 @@ final class StubOpenAi {
         return new Reply(200, sb.toString(), 0);
     }
 
-    static Reply status(int status, String body) {
+    public static Reply status(int status, String body) {
         return new Reply(status, body, 0);
     }
 
-    List<TokenRequest> grant(String grantType) {
+    public List<TokenRequest> grant(String grantType) {
         return requests.stream().filter(r -> grantType.equals(r.form().get("grant_type"))).toList();
     }
 

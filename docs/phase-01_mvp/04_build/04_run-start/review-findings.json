@@ -1,0 +1,62 @@
+{
+  "slice": "04_run-start",
+  "round": 1,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "frontend/src/app/runs/run.store.ts",
+      "line": 63,
+      "fr": "FR-10",
+      "problem": "open(runId) for a different id calls reset(), which stops polling the run started by start() and replaces run(). If the user opens another /futures/<id> (manual URL now, Recent futures in slice 15) while their own run is still active, active() becomes false and the generate button is enabled again, so the user only learns about the active run from a 409 snackbar. The spec says polling is app-wide 'so active() stays correct for the generate button'.",
+      "fix": "Track the session's active run separately from the run being viewed (or skip reset when the current run is still active), so active() keeps reflecting the started run.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/run.store.ts",
+      "line": 147,
+      "fr": "FR-10",
+      "problem": "showError removes '.mat-mdc-snack-bar-container' elements from the DOM by hand after snack.dismiss(). This bypasses the CDK overlay lifecycle and can leave orphaned overlay panes or a stale MatSnackBarRef. MatSnackBar already replaces any open snackbar when openFromComponent is called.",
+      "fix": "Drop the querySelectorAll/remove block and rely on MatSnackBar's single-snackbar replacement (dismiss() plus openFromComponent).",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/progress-view.ts",
+      "line": 28,
+      "fr": "FR-24",
+      "problem": "The mat-progress-bar has no accessible name (axe rule aria-progressbar-name). The progress-stage text has no aria-live region, so screen-reader users are not told when the stage changes.",
+      "fix": "Add aria-label=\"Generation progress\" to mat-progress-bar and aria-live=\"polite\" to the progress-stage paragraph.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/run-view.ts",
+      "line": 13,
+      "fr": "FR-24",
+      "problem": "On a fresh load of /futures/<id>, the center is empty until the first getRun answers: run() is null and neither notFound nor unavailable is set. There is no loading state.",
+      "fix": "Add an @else branch that shows a mat-progress-spinner while the first getRun is in flight.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/runs/RunService.java",
+      "line": 58,
+      "fr": "FR-10",
+      "problem": "To map a unique violation to 409, the code checks whether the DuplicateKeyException message text contains 'one_active_run_per_session'. This depends on the wording of the driver message. If both unique constraints are violated in the same insert, the message can name uq_generation_run_generation_id instead. The retry then still ends in 409 because hasActiveRun now sees the committed row, so this is fragile but works today.",
+      "fix": "Read the constraint name from the PSQLException ServerErrorMessage (getConstraint()) instead of matching the message text.",
+      "status": "open"
+    }
+  ]
+}

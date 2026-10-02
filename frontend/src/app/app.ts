@@ -1,5 +1,6 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { Router } from '@angular/router';
+import { Component, OnInit, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSidenavModule } from '@angular/material/sidenav';
@@ -19,6 +20,7 @@ import { ScenarioLoader } from './scenario/scenario.loader';
     MatProgressSpinnerModule,
     MatSidenavModule,
     ScenarioPanel,
+    RouterOutlet,
     WelcomeView,
     ChatGptConnectionComponent,
   ],
@@ -31,8 +33,14 @@ export class App implements OnInit {
   private readonly connection = inject(ConnectionStore);
   private readonly router = inject(Router);
 
+  /** Until the first navigation ends, the real browser path decides whether the welcome view shows. */
+  protected readonly path = signal<'/' | 'other'>(window.location.pathname === '/' ? '/' : 'other');
+
   constructor() {
     this.loader.load();
+    this.router.events.pipe(takeUntilDestroyed()).subscribe((e) => {
+      if (e instanceof NavigationEnd) this.path.set(this.router.parseUrl(e.urlAfterRedirects).root.children['primary']?.segments.length ? 'other' : '/');
+    });
   }
 
   ngOnInit(): void {

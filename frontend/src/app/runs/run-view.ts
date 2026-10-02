@@ -1,0 +1,34 @@
+import { Component, OnInit, inject } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
+import { ActivatedRoute } from '@angular/router';
+
+import { ProgressView } from './progress-view';
+import { RunFailure } from './run-failure';
+import { RunStore } from './run.store';
+
+@Component({
+  selector: 'app-run-view',
+  imports: [MatButtonModule, ProgressView, RunFailure],
+  template: `
+    @if (runs.notFound()) {
+      <app-run-failure />
+    } @else if (runs.unavailable()) {
+      <div class="unavailable" data-testid="backend-unavailable">
+        <p>ORACUL is unavailable — try again shortly</p>
+        <button mat-flat-button data-testid="backend-retry" (click)="runs.retry()">Try again</button>
+      </div>
+    } @else if (runs.run()) {
+      <app-progress-view />
+    }
+  `,
+  styles: `.unavailable { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 16px; }`,
+})
+export class RunView implements OnInit {
+  protected readonly runs = inject(RunStore);
+  private readonly route = inject(ActivatedRoute);
+
+  ngOnInit(): void {
+    const id = this.route.snapshot.paramMap.get('runId');
+    if (id) this.runs.open(id);
+  }
+}

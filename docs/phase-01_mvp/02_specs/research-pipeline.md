@@ -224,3 +224,39 @@ untrusted data (prompt contracts in scenario-reasoning.md).
 - Backend layout: `com.oracul.app.research` (`ResearchProfileFactory`, `SearchPlanner`, `QueryTemplates`,
   `NewsProvider` + `GdeltNewsProvider`, `ArticleMetadataFetcher`, `SourceQualityTable`, `EventNormalizer`,
   `EventClassifier`, `EventRanker`, `EvidenceSelector`, `EvidencePackRenderer`, `ResearchController implements ResearchApi`).
+
+## Slice 04_run-start — FR-11 test contract
+
+Delivers `ResearchProfileFactory` (stage UNDERSTANDING, generation-runs.md "Slice 04_run-start") and the profile part
+of `getRunResearch`. Search plan, sources, events and counts other than 0 come in 05–07.
+
+### Unit (`com.oracul.app.research.ResearchProfileFactory`, pure, no Spring context)
+Signature: `ResearchProfile from(ScenarioConfiguration configuration)` (instance method; the catalogue is injected
+through the constructor or read from `ScenarioCatalogueData`). Returns the generated model
+`com.oracul.app.api.model.ResearchProfile`. `darkness/optimism/realism` = `BigDecimal.valueOf(value).movePointLeft(1)
+.doubleValue()` semantics, i.e. exactly `value / 10` with one decimal (assert with `assertEquals(0.9, d)` — no delta).
+
+| Configuration | Expected profile |
+|---|---|
+| realism 8, darkness 9, optimism 2, horizon `5y`, wildcards `[biology-new-pandemic 8, robotics-humanoid-boom 6]` | `{"darkness":0.9,"optimism":0.2,"realism":0.8,"horizon":"5y","topics":[{"key":"biology-new-pandemic","label":"New pandemic","category":"biology","weight":0.8,"custom":false},{"key":"robotics-humanoid-boom","label":"Humanoid robot boom","category":"robotics","weight":0.6,"custom":false}]}` |
+| same wildcards in reverse request order | topics in reverse order (request order is kept) |
+| realism 8, darkness 5, optimism 5, horizon `1y`, no wildcards | `{"darkness":0.5,"optimism":0.5,"realism":0.8,"horizon":"1y","topics":[]}` |
+| all three = 1, horizon `1d` / all three = 10, horizon `20y` | 0.1/0.1/0.1 `1d` / 1.0/1.0/1.0 `20y` |
+| darkness 3, optimism 7 (any other values 1–10) | 0.3 / 0.7 (no floating artefacts such as 0.30000000000000004) |
+| wildcard intensity 1 / 10 | weight 0.1 / 1.0 |
+| custom wildcards `[{"label":"  Mars colony ","intensity":7}]` after `biology-new-pandemic` 8 (slice 18 validates custom input; the factory already maps it) | topics `[…biology-new-pandemic 0.8…, {"key":"custom-1","label":"Mars colony","category":"custom","weight":0.7,"custom":true}]` |
+
+### Integration (`GET /api/runs/{runId}/research`, `getRunResearch`)
+| # | Situation | Status | Body |
+|---|---|---|---|
+| 1 | connected, `startRun` body `A` (generation-runs.md), delay PT30S, polled until `stageIndex` ≥ 2 | 200 | `runId` = run id; `profile` deep-equals the first row of the unit table; `counts` all 0; `searchPlan` absent (slice 05 fills it) |
+| 2 | connected, body `B` | 200 | `profile.topics` = `[]`, `profile.horizon` `1y`, darkness/optimism 0.5, realism 0.8 |
+| 3 | run exists but `research_profile` is still null (a `generation_run` row in status QUEUED with `research_profile` null inserted with `JdbcTemplate` for the caller's session) | 409 | `{"code":"RESEARCH_NOT_READY","message":"Research has not started yet"}` |
+| 4 | random UUID / malformed id `abc` / run of another session | 404 | `{"code":"RUN_NOT_FOUND","message":"Future not found"}` |
+
+Also asserted (DB): `generation_run.research_profile` jsonb of row #1 deep-equals the same profile ("stored with the
+run").
+
+### Test locations and traces (`// @trace FR-11`)
+- `backend/src/test/java/com/oracul/app/research/ResearchProfileFactoryTest.java` (unit table)
+- `backend/src/test/java/com/oracul/app/research/RunResearchIT.java` (integration rows)

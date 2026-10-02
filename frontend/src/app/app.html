@@ -24,7 +24,11 @@
         </div>
       }
       @case ('ready') {
-        <app-welcome-view />
+        @if (path() === '/') {
+          <app-welcome-view />
+        } @else {
+          <router-outlet />
+        }
       }
     }
   </mat-sidenav-content>

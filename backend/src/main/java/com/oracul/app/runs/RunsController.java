@@ -17,7 +17,11 @@ public class RunsController implements RunsApi {
     private final ObjectProvider<ChatGptAuthService> auth;
     private final ObjectProvider<CurrentSession> session;
 
-    RunsController(ObjectProvider<ChatGptAuthService> auth, ObjectProvider<CurrentSession> session) {
+    private final ObjectProvider<RunService> runs;
+
+    RunsController(ObjectProvider<ChatGptAuthService> auth, ObjectProvider<CurrentSession> session,
+                   ObjectProvider<RunService> runs) {
+        this.runs = runs;
         this.auth = auth;
         this.session = session;
     }
@@ -34,8 +38,7 @@ public class RunsController implements RunsApi {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "CHATGPT_NOT_CONNECTED", "Connect ChatGPT to generate");
         }
         service.requireUsableCredentials(current.id());
-        // Interim until slice 04 starts the pipeline.
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(runs.getObject().start(current.id(), scenarioConfiguration));
     }
 
     @Override
@@ -45,6 +48,6 @@ public class RunsController implements RunsApi {
 
     @Override
     public ResponseEntity<GenerationRun> getRun(java.util.UUID runId) {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        return ResponseEntity.ok(runs.getObject().get(runId, session.getObject().id()));
     }
 }

@@ -193,7 +193,10 @@ paths:
               $ref: '#/components/schemas/ScenarioConfiguration'
       responses:
         '202':
-          description: Run accepted and started asynchronously (status QUEUED or RUNNING)
+          description: |
+            Run accepted and started asynchronously. The body is the committed QUEUED row: status QUEUED, kind
+            STANDARD, stageIndex 0, stageCount 10, no stage/stageLabel, configuration equal to the request (unknown
+            properties dropped), counts all 0.
           content:
             application/json:
               schema:
@@ -227,6 +230,9 @@ paths:
       tags: [runs]
       operationId: getRun
       summary: Run status, current stage and counts — polled about every second while the run is active
+      description: |
+        Only runs of the caller's browser session are visible; an unknown, malformed or foreign runId answers
+        404 RUN_NOT_FOUND "Future not found". Every stage transition is committed before the stage's work starts.
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -271,6 +277,10 @@ paths:
       tags: [research]
       operationId: getRunResearch
       summary: Research Profile, search plan (intents, buckets, queries) and research counts of a run
+      description: |
+        200 as soon as the Research Profile is stored (stage UNDERSTANDING); searchPlan is absent until the plan is
+        built. Before the profile exists → 409 RESEARCH_NOT_READY "Research has not started yet". Unknown,
+        malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -443,12 +453,28 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            runNotFound:
+              value: { code: RUN_NOT_FOUND, message: Future not found }
     Conflict:
       description: RUN_ALREADY_ACTIVE, RUN_NOT_COMPLETED, RESEARCH_NOT_READY, EVIDENCE_PACK_NOT_READY, SCENARIO_NOT_READY or RESULT_NOT_READY
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            runAlreadyActive:
+              value: { code: RUN_ALREADY_ACTIVE, message: A generation is already running }
+            runNotCompleted:
+              value: { code: RUN_NOT_COMPLETED, message: Only a completed future can have an alternative }
+            researchNotReady:
+              value: { code: RESEARCH_NOT_READY, message: Research has not started yet }
+            evidencePackNotReady:
+              value: { code: EVIDENCE_PACK_NOT_READY, message: The Evidence Pack is not ready yet }
+            scenarioNotReady:
+              value: { code: SCENARIO_NOT_READY, message: The scenario is not ready yet }
+            resultNotReady:
+              value: { code: RESULT_NOT_READY, message: This future is not ready yet }
     InternalError:
       description: Last-resort INTERNAL_ERROR without internals (no stack trace, no provider body, no token)
       content:
@@ -780,6 +806,10 @@ components:
           $ref: '#/components/schemas/RunStage'
         stageLabel:
           type: string
+          description: |
+            Fixed label of `stage`, absent while QUEUED: Understanding your future… · Building research strategy… ·
+            Searching current events… · Reading relevant sources… · Connecting signals… · Ranking evidence… ·
+            Exploring possible futures… · Challenging assumptions… · Constructing scenario… · Writing from the future…
           example: Searching current events…
         stageIndex:
           type: integer
@@ -790,6 +820,9 @@ components:
         stageCount:
           type: integer
           format: int32
+          minimum: 10
+          maximum: 10
+          description: Always 10
           example: 10
         configuration:
           $ref: '#/components/schemas/ScenarioConfiguration'
@@ -881,6 +914,9 @@ components:
 
     ResearchProfile:
       type: object
+      description: |
+        darkness/optimism/realism = slider value / 10 with exactly one decimal (9 → 0.9); topics = enabled catalogue
+        wildcards in request order (weight = intensity / 10), then custom wildcards (key custom-<n>, category custom).
       required: [darkness, optimism, realism, horizon, topics]
       properties:
         darkness:
