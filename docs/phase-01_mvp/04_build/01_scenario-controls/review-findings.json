@@ -1,0 +1,84 @@
+{
+  "slice": "01_scenario-controls",
+  "round": 6,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/common/ApiExceptionHandler.java",
+      "line": 45,
+      "fr": "FR-2",
+      "problem": "The catch-all @ExceptionHandler(Exception.class) runs before Spring's DefaultHandlerExceptionResolver, so every framework 4xx becomes 500 INTERNAL_ERROR with an ERROR log line. Examples: MethodArgumentTypeMismatchException (GET /api/runs/not-a-uuid, which contract-notes.md:18-19 and :49 say must be 404 RUN_NOT_FOUND), NoResourceFoundException (any unknown /api path or missing static asset), HttpRequestMethodNotSupportedException (405) and MissingServletRequestParameterException. That is a 500 on user input, introduced by this slice's advice.",
+      "fix": "Add explicit handlers before the fallback: MethodArgumentTypeMismatchException on a runId -> 404 RUN_NOT_FOUND 'Future not found'. For other ErrorResponse/ServletException types (NoResourceFound, method not supported, etc.), keep their own status, or delegate to ResponseEntityExceptionHandler and map the result to ApiError. Only truly unexpected exceptions should reach the 500 branch.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/scenario/scenario.store.ts",
+      "line": 10,
+      "fr": "FR-2",
+      "problem": "ScenarioStore does not match the unit-test surface in scenario-panel.md (slice test contract, 'ScenarioStore'). (1) It has no realism()/darkness()/optimism()/horizon() read signals; configuration is a nullable writable signal, not a computed one. (2) load() takes no config and does HTTP, while the spec says load(config) replaces the whole state. (3) It has no setRealism/setDarkness/setOptimism; setIntensity uses Math.round with no range check, so 0, 11 and NaN are stored and 5.5 becomes 6, but the spec says these must leave the state unchanged. (4) setHorizon accepts any truthy string, not only the 7 codes. (5) Before load the store holds null, not the 8/5/5/1y defaults. FR-29 quick controls and later slices are meant to use this surface.",
+      "fix": "Implement the specified store: private state signal initialised to the defaults; computed realism/darkness/optimism/horizon/configuration; load(config); setRealism/setDarkness/setOptimism that guard Number.isInteger(n) && 1<=n<=10; setHorizon guarded by the HorizonCode list. Move the HTTP loading and loading/error state to a separate loader (or the App shell).",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "frontend/src/app/scenario/scenario.store.ts",
+      "line": 43,
+      "fr": "FR-2",
+      "problem": "Round 6: fixed. scenario.store.spec.ts (@trace FR-2/FR-3) covers the 8/5/5/1y defaults, load(config) replacing state, setters changing only their own field, boundaries 1/10, rejection of 0/11/5.5/NaN and an unknown horizon. intensity-slider.spec.ts and horizon-selector.spec.ts cover range attributes, aria-label, value display, valueChange emission, 7 ordered options and the checked class. (Original: store guards, defaults and component behaviour had no unit tests; scenario-panel.md requires these spec files.)",
+      "fix": "Add scenario.store.spec.ts with @trace FR-2/FR-3 covering: defaults before load; load replaces state; each setter changes only its own field; 0/11/5.5/NaN leave state unchanged; an unknown horizon code is ignored. Add the component specs for the slider and horizon selector.",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/app.html",
+      "line": 5,
+      "fr": "FR-1",
+      "problem": "The spec puts the panel inside the mat-sidenav of a mat-sidenav-container (mode side, opened) and splits the UI into IntensitySliderComponent, HorizonSelectorComponent and center/WelcomeViewComponent. The implementation uses a plain flex div with <app-scenario-panel> and inline welcome markup in app.html; it has no sidenav and none of these components, and src/app/center/ does not exist. Slice 19 (mobile drawer) and slice 04 (welcome/generate) build on that structure.",
+      "fix": "Wrap the layout in mat-sidenav-container with mat-sidenav mode='side' [opened]='true' holding the panel and mat-sidenav-content holding the center. Extract WelcomeViewComponent into src/app/center/, and IntensitySliderComponent and HorizonSelectorComponent into src/app/scenario/.",
+      "status": "fixed"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/runs/RunsController.java",
+      "line": 21,
+      "fr": "FR-2",
+      "problem": "The slice contract says operations not built yet keep the generated default (501). getRun and startAlternativeRun instead always throw 404 RUN_NOT_FOUND, so 'not implemented' looks like a real 'Future not found' answer. startAlternativeRun also skips the specified check order (connection before lookup).",
+      "fix": "Remove the getRun/startAlternativeRun overrides so the generated 501 defaults stay until their slice.",
+      "status": "fixed"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/scenario/scenario-panel.html",
+      "line": 6,
+      "fr": "FR-2",
+      "problem": "The <label> for each slider has no 'for' and does not wrap the input, so it is not linked to the control; the accessible name only comes from the separate aria-label. Also, valueChange on matSliderThumb fires only on 'change', so value-<x> does not update while the thumb is dragged (the spec says the component reacts to both input and change).",
+      "fix": "Use a span/div for the label row, or give the input an id and set the label's 'for'. Bind (input) as well, or use dragEnd/valueChange with [(value)], so the displayed value tracks the drag.",
+      "status": "fixed"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/common/ApiExceptionHandler.java",
+      "line": 80,
+      "fr": "FR-2",
+      "problem": "Round 6: fixed. ApiExceptionHandlerTest (@WebMvcTest) checks GET /api/runs/not-a-uuid -> 404 RUN_NOT_FOUND, an unknown /api path -> 404 with an ApiError body, and DELETE /api/scenario/catalogue -> 405 with an ApiError body. (Original: the framework-error handlers had no MockMvc tests.)",
+      "fix": "Add MockMvc tests: GET /api/runs/not-a-uuid -> 404 RUN_NOT_FOUND, an unknown /api path -> 404 and a wrong method -> 405, each returning an ApiError body.",
+      "status": "fixed"
+    }
+  ]
+}

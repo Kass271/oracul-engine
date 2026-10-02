@@ -1,14 +1,4 @@
-.spacer {
-  flex: 1 1 auto;
-}
-
-.status {
-  font-size: 0.85rem;
-  opacity: 0.85;
-}
-
-.content {
-  max-width: 1100px;
-  margin: 24px auto;
-  padding: 0 16px;
-}
+.wordmark { letter-spacing: 0.2em; font-weight: 500; }
+.layout { min-height: calc(100vh - 64px); }
+.content { display: flex; }
+.center { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 16px; }

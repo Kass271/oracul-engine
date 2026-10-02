@@ -33,15 +33,16 @@ specification §48 asks for. Capability specs: `scenario-panel.md` (FR-1–6, FR
 ## Validation → error mapping (`@RestControllerAdvice` in `com.oracul.app.common`)
 | Source | HTTP | code | message |
 |---|---|---|---|
-| Bean Validation on `realism`/`darkness`/`optimism` (`@Min/@Max/@NotNull`) | 400 | VALIDATION_FAILED | "`<field>` must be between 1 and 10" |
-| `horizon` not in enum / missing (HttpMessageNotReadable on HorizonCode, or null) | 400 | VALIDATION_FAILED | "unknown horizon" |
+| Bean Validation on `realism`/`darkness`/`optimism` (`@Min/@Max/@NotNull`), or a non-integer JSON value for them (fraction, string, boolean — no scalar coercion) | 400 | VALIDATION_FAILED | "`<field>` must be between 1 and 10" |
+| `horizon` not in enum (case-sensitive) / missing / null / not a string | 400 | VALIDATION_FAILED | "unknown horizon" |
 | wildcard id not in catalogue / duplicate (service check) | 400 | VALIDATION_FAILED | "unknown wildcard: `<id>`" / "duplicate wildcard: `<id>`" |
 | wildcard or custom intensity (`@Min/@Max/@NotNull`) | 400 | VALIDATION_FAILED | "wildcard intensity must be between 1 and 10" |
 | `customWildcards` `@Size(max=3)` | 400 | VALIDATION_FAILED | "At most 3 custom wildcards" |
 | custom `label` `@Size/@Pattern/@NotNull` or blank after trim | 400 | VALIDATION_FAILED | "Wildcard name must be 1–40 characters" |
 | duplicate custom label (service check) | 400 | VALIDATION_FAILED | "This wildcard already exists" |
 | `output.illustration` true / `output.story` false or missing | 400 | VALIDATION_FAILED | "Illustration is not available yet (MVP+1)" / "Story output is required" |
-| malformed JSON body | 400 | VALIDATION_FAILED | "Request body is not valid JSON" |
+| malformed JSON, empty body, top-level non-object, or `Content-Type` not `application/json` | 400 | VALIDATION_FAILED | "Request body is not valid JSON" |
+| any other field violation not listed here (fallback) | 400 | VALIDATION_FAILED | "`<field path>` is invalid" |
 | not connected | 401 | CHATGPT_NOT_CONNECTED | "Connect ChatGPT to generate" |
 | expired, refresh failed | 401 | CHATGPT_SESSION_EXPIRED | "ChatGPT session expired — please reconnect" |
 | plan lacks `chatgpt.tokens.use.direct` | 403 | CHATGPT_PLAN_NOT_ELIGIBLE | "Your ChatGPT plan is not eligible for ORACUL" |
@@ -51,6 +52,9 @@ specification §48 asks for. Capability specs: `scenario-panel.md` (FR-1–6, FR
 | research / pack / scenario / result requested too early | 409 | RESEARCH_NOT_READY / EVIDENCE_PACK_NOT_READY / SCENARIO_NOT_READY / RESULT_NOT_READY | "Research has not started yet" / "The Evidence Pack is not ready yet" / "The scenario is not ready yet" / "This future is not ready yet" |
 | anything unexpected | 500 | INTERNAL_ERROR | "Something went wrong — try again" (last resort only; every known path above has its own code) |
 
+Error bodies contain exactly `code` and `message` (no Spring `timestamp/path/error/trace`). Unknown request
+properties are ignored. Until slice 02 delivers the ChatGPT connection, a `startRun` body that passes validation
+answers 401 `CHATGPT_NOT_CONNECTED` (FR-10 check order).
 Generated Bean Validation messages are not used verbatim: the advice builds the messages above from the field path
 (e.g. `customWildcards[1].label`). Only the first violation (spec precedence order in scenario-panel.md) is reported.
 Run failures inside the async pipeline are not HTTP errors: they appear as `GenerationRun.status = FAILED` with

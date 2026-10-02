@@ -1,0 +1,13 @@
+<aside class="panel" data-testid="scenario-panel">
+  <h2 class="section">INTENSITY</h2>
+  <app-intensity-slider name="darkness" label="Darkness" [value]="store.darkness()" (valueChange)="store.setDarkness($event)" />
+  <app-intensity-slider name="optimism" label="Optimism" [value]="store.optimism()" (valueChange)="store.setOptimism($event)" />
+  <app-intensity-slider name="realism" label="Realism" [value]="store.realism()" (valueChange)="store.setRealism($event)" />
+
+  <h2 class="section">TIME HORIZON</h2>
+  <app-horizon-selector
+    [options]="loader.catalogue()?.horizons ?? []"
+    [value]="store.horizon()"
+    (valueChange)="store.setHorizon($event)"
+  />
+</aside>

@@ -1,9 +1,29 @@
-<mat-toolbar color="primary">
-  <span data-testid="app-title">{{ title }}</span>
-  <span class="spacer"></span>
-  <span class="status" data-testid="backend-status">backend: {{ backendStatus() }}</span>
+<mat-toolbar data-testid="app-header">
+  <span class="wordmark" data-testid="app-wordmark">ORACUL</span>
 </mat-toolbar>
 
-<main class="content">
-  <router-outlet />
-</main>
+<mat-sidenav-container class="layout">
+  @if (loader.state() === 'ready') {
+    <mat-sidenav mode="side" [opened]="true" [disableClose]="true">
+      <app-scenario-panel />
+    </mat-sidenav>
+  }
+  <mat-sidenav-content class="content">
+    @switch (loader.state()) {
+      @case ('loading') {
+        <div class="center" data-testid="app-loading">
+          <mat-spinner diameter="40" />
+        </div>
+      }
+      @case ('error') {
+        <div class="center" data-testid="backend-unavailable">
+          <p>ORACUL is unavailable — try again shortly</p>
+          <button mat-flat-button data-testid="backend-retry" (click)="loader.load()">Try again</button>
+        </div>
+      }
+      @case ('ready') {
+        <app-welcome-view />
+      }
+    }
+  </mat-sidenav-content>
+</mat-sidenav-container>

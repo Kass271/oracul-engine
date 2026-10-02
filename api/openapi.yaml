@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ORACUL API
-  version: 0.2.0
+  version: 0.2.1
   description: |
     Contract between the Spring Boot backend and the Angular frontend. Both sides are generated from this file.
     Every request is tied to an anonymous browser session (HttpOnly cookie ORACUL_SID, created by the backend on the
@@ -164,6 +164,11 @@ paths:
       tags: [runs]
       operationId: startRun
       summary: GENERATE THE FUTURE — snapshot the configuration into a new Generation Run and start the pipeline
+      description: |
+        Check order: body validation → ChatGPT connection → single active run. The first body violation wins, in the
+        order JSON syntax → realism → darkness → optimism → horizon → wildcards → customWildcards → output
+        (messages in scenario-panel.md). realism/darkness/optimism must be JSON integers (no strings or fractions);
+        horizon codes are case-sensitive. Unknown properties are ignored. Nothing is stored when a check fails.
       requestBody:
         required: true
         content:
@@ -385,12 +390,28 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            darkness:
+              value: { code: VALIDATION_FAILED, message: darkness must be between 1 and 10 }
+            optimism:
+              value: { code: VALIDATION_FAILED, message: optimism must be between 1 and 10 }
+            realism:
+              value: { code: VALIDATION_FAILED, message: realism must be between 1 and 10 }
+            horizon:
+              value: { code: VALIDATION_FAILED, message: unknown horizon }
+            invalidJson:
+              value: { code: VALIDATION_FAILED, message: Request body is not valid JSON }
     ChatGptRequired:
       description: CHATGPT_NOT_CONNECTED or CHATGPT_SESSION_EXPIRED
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+          examples:
+            notConnected:
+              value: { code: CHATGPT_NOT_CONNECTED, message: Connect ChatGPT to generate }
+            expired:
+              value: { code: CHATGPT_SESSION_EXPIRED, message: ChatGPT session expired — please reconnect }
     PlanNotEligible:
       description: CHATGPT_PLAN_NOT_ELIGIBLE
       content:
@@ -426,6 +447,7 @@ components:
 
     ApiError:
       type: object
+      additionalProperties: false
       required: [code, message]
       properties:
         code:
@@ -522,6 +544,7 @@ components:
 
     ScenarioCatalogue:
       type: object
+      description: defaults = realism 8, darkness 5, optimism 5, horizon 1y, wildcards [], customWildcards [], output {story true, illustration false}
       required: [categories, horizons, defaults, limits]
       properties:
         categories:
@@ -530,6 +553,9 @@ components:
             $ref: '#/components/schemas/WildcardCategory'
         horizons:
           type: array
+          description: Always the 7 options in the order 1d, 1w, 1m, 1y, 5y, 10y, 20y with labels Tomorrow, 1 week, 1 month, 1 year, 5 years, 10 years, 20 years
+          minItems: 7
+          maxItems: 7
           items:
             $ref: '#/components/schemas/HorizonOption'
         defaults:

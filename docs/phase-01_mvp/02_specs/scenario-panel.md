@@ -85,17 +85,22 @@ defaults when the session has no run. No separate table — read from `generatio
 - Rules: changing one slider never changes another. Values are integers. The panel state is held in a signal store
   shared by panel, quick controls (FR-29) and the start button; it survives opening/closing the mobile drawer.
 - Errors (backend, applies to `POST /api/runs` body — the run is not created):
-  - `darkness` 0, 11, missing or non-integer → 400 `VALIDATION_FAILED` → "darkness must be between 1 and 10"
-  - `optimism` out of range/missing → 400 `VALIDATION_FAILED` → "optimism must be between 1 and 10"
-  - `realism` out of range/missing → 400 `VALIDATION_FAILED` → "realism must be between 1 and 10"
-  - body not valid JSON → 400 `VALIDATION_FAILED` → "Request body is not valid JSON"
+  - `darkness` 0, 11, -1, missing, `null`, a fraction (`5.5`), a string (`"9"`) or a boolean → 400 `VALIDATION_FAILED`
+    → "darkness must be between 1 and 10" (JSON numbers must be integers; no coercion from strings or fractions)
+  - `optimism` same inputs → 400 `VALIDATION_FAILED` → "optimism must be between 1 and 10"
+  - `realism` same inputs → 400 `VALIDATION_FAILED` → "realism must be between 1 and 10"
+  - body not valid JSON, empty body, or a JSON value that is not an object (`[]`, `"x"`) → 400 `VALIDATION_FAILED` →
+    "Request body is not valid JSON"
+  - `Content-Type` not `application/json` → 400 `VALIDATION_FAILED` → "Request body is not valid JSON"
+  - Unknown extra properties in the body are ignored (no error).
 
 ### FR-3 — Time Horizon
 - Happy path: a `mat-button-toggle-group` (single selection) with the 7 options in the table order, labels as in the
   table; fresh session selects "1 year".
 - Rules: exactly one option selected at any time; clicking the selected option keeps it selected.
 - Errors (backend, `POST /api/runs`):
-  - `horizon` not one of the 7 codes (e.g. `"3y"`) or missing → 400 `VALIDATION_FAILED` → "unknown horizon"
+  - `horizon` not one of the 7 codes (e.g. `"3y"`, `"1Y"` — codes are case-sensitive, `""`), missing, `null` or not a
+    string (e.g. `5`) → 400 `VALIDATION_FAILED` → "unknown horizon"
 
 ### FR-4 — Wildcard catalogue
 - Happy path: the WILDCARDS section shows each category (label as heading, collapsed `mat-expansion-panel` per
@@ -145,6 +150,9 @@ defaults when the session has no run. No separate table — read from `generatio
 The backend reports the first violation in this order: JSON syntax → realism → darkness → optimism → horizon →
 wildcards (in array order: id unknown, duplicate, intensity) → customWildcards (count, then per item label, duplicate,
 intensity) → output. Exactly one message per response.
+Any Bean Validation / deserialization violation on a field not named above (e.g. `wildcards` or `customWildcards`
+missing) → 400 `VALIDATION_FAILED` → "`<field path>` is invalid" (e.g. "wildcards is invalid") — never a 500. Later
+slices replace this fallback with the specific messages of FR-4/5/6.
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |
@@ -164,8 +172,11 @@ its body.
 - `data-testid`s:
   - page: `app-header`, `app-wordmark` (text "ORACUL"), `app-loading`, `backend-unavailable`, `backend-retry`
   - welcome: `welcome-view`, `welcome-question` ("What happens next?"), `generate-button` ("GENERATE THE FUTURE")
-  - panel: `scenario-panel`, `slider-darkness`, `slider-optimism`, `slider-realism`, `value-darkness`,
-    `value-optimism`, `value-realism`
+  - welcome hint: `generate-hint` ("Connect ChatGPT to generate", while generation is not possible)
+  - panel: `scenario-panel`, `slider-darkness`, `slider-optimism`, `slider-realism` (the `mat-slider`),
+    `slider-darkness-input`, `slider-optimism-input`, `slider-realism-input` (the `matSliderThumb` range input),
+    `label-darkness`, `label-optimism`, `label-realism`, `value-darkness`, `value-optimism`, `value-realism`
+    (text = the integer only)
   - horizon: `horizon-group`, `horizon-option-1d`, `horizon-option-1w`, `horizon-option-1m`, `horizon-option-1y`,
     `horizon-option-5y`, `horizon-option-10y`, `horizon-option-20y`
   - wildcards: `wildcard-category-<categoryId>`, `wildcard-toggle-<wildcardId>`, `wildcard-intensity-<wildcardId>`,
@@ -176,3 +187,104 @@ its body.
   - mobile: `scenario-drawer-toggle` ("Scenario"), `scenario-drawer-close`
 - Keyboard: every control reachable by Tab with visible focus, sliders operable with arrow keys, accessible names
   equal to the visible labels (NFR-5).
+
+## Slice 01_scenario-controls — test contract (FR-1, FR-2, FR-3)
+
+What this slice delivers and exactly what its tests assert. Everything else in this spec is delivered by later slices
+(03 wildcards, 18 custom wildcards/output, 19 mobile, 02 ChatGPT control, 04 run creation).
+
+### Backend (`com.oracul.app.scenario`, `com.oracul.app.runs`, `com.oracul.app.common`)
+`ScenarioController implements ScenarioApi`; `RunsController implements RunsApi` (only `startRun` in this slice);
+`ApiExceptionHandler` (`@RestControllerAdvice`) in `com.oracul.app.common`. Operations of other tags/not yet built
+keep the generated default (501) — tests do not touch them.
+
+1. `GET /api/scenario/catalogue` → 200, `Content-Type: application/json`, body:
+   - `horizons` = exactly, in this order:
+     `[{"code":"1d","label":"Tomorrow"},{"code":"1w","label":"1 week"},{"code":"1m","label":"1 month"},`
+     `{"code":"1y","label":"1 year"},{"code":"5y","label":"5 years"},{"code":"10y","label":"10 years"},`
+     `{"code":"20y","label":"20 years"}]`
+   - `defaults` = `{"realism":8,"darkness":5,"optimism":5,"horizon":"1y","wildcards":[],"customWildcards":[],`
+     `"output":{"story":true,"illustration":false}}`
+   - `limits` = `{"intensityMin":1,"intensityMax":10,"customWildcardMax":3,"customWildcardLabelMaxLength":40,`
+     `"defaultWildcardIntensity":5}`
+   - `categories` is an array (its content is asserted by slice 03; this slice may already serve the full table).
+2. `GET /api/scenario/configuration` → 200, body equal to `defaults` above (no sessions/runs exist yet; slice 15 adds
+   "newest run's configuration").
+3. `POST /api/runs` (`startRun`) — validation only in this slice. Base valid body used by every test:
+   `{"realism":8,"darkness":5,"optimism":5,"horizon":"1y","wildcards":[],"customWildcards":[],`
+   `"output":{"story":true,"illustration":false}}`
+   | Test input (base body with …) | Status | `code` | `message` (exact) |
+   |---|---|---|---|
+   | `darkness` 0 / 11 / -1 / `null` / removed / `5.5` / `"9"` / `true` | 400 | VALIDATION_FAILED | `darkness must be between 1 and 10` |
+   | `optimism` 0 / 11 / `null` / removed / `5.5` / `"9"` | 400 | VALIDATION_FAILED | `optimism must be between 1 and 10` |
+   | `realism` 0 / 11 / `null` / removed / `5.5` / `"9"` | 400 | VALIDATION_FAILED | `realism must be between 1 and 10` |
+   | `horizon` `"3y"` / `"1Y"` / `""` / `5` / `null` / removed | 400 | VALIDATION_FAILED | `unknown horizon` |
+   | `realism` 0 and `darkness` 11 and `horizon` `"3y"` | 400 | VALIDATION_FAILED | `realism must be between 1 and 10` (precedence) |
+   | `darkness` 11 and `horizon` `"3y"` | 400 | VALIDATION_FAILED | `darkness must be between 1 and 10` |
+   | body `{"realism":` (truncated) / empty body / `[]` | 400 | VALIDATION_FAILED | `Request body is not valid JSON` |
+   | valid JSON sent with `Content-Type: text/plain` | 400 | VALIDATION_FAILED | `Request body is not valid JSON` |
+   | `wildcards` removed | 400 | VALIDATION_FAILED | `wildcards is invalid` (fallback, replaced in slice 03) |
+   | base body; base body with all three = 1; all three = 10; each of the 7 horizons; `darkness` 9 + `optimism` 9; extra unknown property `"foo":1` | 401 | CHATGPT_NOT_CONNECTED | `Connect ChatGPT to generate` |
+   - The 401 row proves the body passed validation: in this slice no ChatGPT connection can exist, so FR-10's check
+     order (validation → connection) ends there. Nothing is stored for any row (there is no run table yet).
+   - Every error response: `Content-Type: application/json`, body has exactly the keys `code` and `message`; no
+     `trace`, `exception`, `path`, `timestamp`, `error` keys and no Java class names in `message`.
+
+### Frontend
+Files: `src/app/app.ts` (AppComponent shell), `src/app/scenario/` (`ScenarioPanelComponent`,
+`IntensitySliderComponent`, `HorizonSelectorComponent`, `scenario.store.ts`), `src/app/center/`
+(`WelcomeViewComponent`). Route `/` renders the shell; there is no other route in this slice.
+
+- Load: on start the app calls `getScenarioCatalogue` and `getScenarioConfiguration` in parallel (the
+  `getChatGptConnection` call joins in slice 02). While either is pending `app-loading` is shown and `scenario-panel`
+  is absent. When both succeed the store is loaded from the configuration and the panel + welcome view render.
+- Failure: if either call fails (network error/abort or any status ≥ 500, including 502/503/504 from the proxy) the
+  center shows `backend-unavailable` with the exact text "ORACUL is unavailable — try again shortly" and a button
+  `backend-retry` ("Try again"); `scenario-panel` and `welcome-view` are absent; `app-header` with `app-wordmark` is
+  still shown. Clicking `backend-retry` shows `app-loading` and repeats both calls; on success the error is gone and
+  panel + welcome render.
+- Header: `app-header` (`mat-toolbar`) containing `app-wordmark` with text exactly "ORACUL". Document `<title>` is
+  "ORACUL". No visible text, `title`, `aria-label` or `alt` anywhere contains "oracle" (case-insensitive).
+- Welcome: `welcome-view` contains `welcome-question` text "What happens next?" and `generate-button` (a
+  `mat-flat-button`, text "GENERATE THE FUTURE"). In this slice `generate-button` is always `disabled` and
+  `generate-hint` shows "Connect ChatGPT to generate" (FR-10 rule `canGenerate = false`; slice 04 enables it).
+- Panel (`scenario-panel`, in the `mat-sidenav` of a `mat-sidenav-container`, mode `side`, opened), top to bottom:
+  section heading "INTENSITY", then three sliders in the order Darkness, Optimism, Realism, then section heading
+  "TIME HORIZON" and the horizon group.
+  - Each slider `<x>` ∈ {darkness, optimism, realism}: `mat-slider` with `data-testid="slider-<x>"`, `min` 1, `max`
+    10, `step` 1, `discrete`; its `<input matSliderThumb>` has `data-testid="slider-<x>-input"` and
+    `aria-label` "Darkness" / "Optimism" / "Realism". Label row: `label-<x>` with text "Darkness" / "Optimism" /
+    "Realism" followed by `value-<x>` whose text is exactly the current integer (e.g. "9"). Fresh load:
+    `value-realism` "8", `value-darkness` "5", `value-optimism` "5"; `slider-<x>-input` has `value` "8"/"5"/"5".
+  - Tests change a slider either with Playwright `locator('[data-testid=slider-darkness-input]').fill('9')` (range
+    input; the component reacts to `input` and `change` events) or by focusing the input and pressing
+    ArrowRight/ArrowLeft/Home/End. After setting darkness 9 and optimism 9: `value-darkness` "9", `value-optimism`
+    "9", `value-realism` still "8"; setting darkness never changes `value-optimism` and vice versa.
+  - Horizon: `mat-button-toggle-group` `data-testid="horizon-group"` (single selection, `aria-label` "Time Horizon")
+    with 7 `mat-button-toggle`s `data-testid="horizon-option-<code>"` in order `1d 1w 1m 1y 5y 10y 20y`, text from
+    `catalogue.horizons[].label` ("Tomorrow", "1 week", "1 month", "1 year", "5 years", "10 years", "20 years").
+    The selected toggle's host element (the `data-testid` element) has class `mat-button-toggle-checked`; all others
+    do not — tests assert this class (Material's own inner-button ARIA attributes are not asserted). Fresh load: only `horizon-option-1y`
+    selected. Clicking `horizon-option-5y` → only `5y` selected; clicking the already selected option keeps it
+    selected (never zero selected).
+- `ScenarioStore` (`src/app/scenario/scenario.store.ts`, `@Injectable({providedIn: 'root'})`), the unit-test
+  surface:
+  - read signals: `realism()`, `darkness()`, `optimism()`, `horizon()` (HorizonCode), `configuration()` (computed
+    `ScenarioConfiguration`; in this slice `wildcards`/`customWildcards` `[]`, `output` `{story:true,
+    illustration:false}` carried over from the loaded configuration);
+  - `load(config: ScenarioConfiguration)` replaces the whole state;
+  - `setRealism(n)`, `setDarkness(n)`, `setOptimism(n)`: accept integers 1–10; any other value (0, 11, 5.5, NaN)
+    leaves the state unchanged; each setter changes only its own field;
+  - `setHorizon(code)`: accepts one of the 7 codes; anything else leaves the state unchanged.
+  - Before `load` the store holds the defaults 8/5/5/`1y`.
+
+### Test locations and traces
+- Backend: `backend/src/test/java/com/oracul/app/scenario/ScenarioControllerTest.java` (`// @trace FR-1, FR-2, FR-3`
+  for the catalogue/defaults), `backend/src/test/java/com/oracul/app/runs/StartRunValidationTest.java`
+  (`// @trace FR-2` slider rows, `// @trace FR-3` horizon rows).
+- Frontend unit (Vitest): `scenario.store.spec.ts` (FR-2, FR-3), `app.spec.ts` (FR-1: loading, unavailable + retry,
+  wordmark/title), `intensity-slider` / `horizon-selector` component specs (FR-2, FR-3).
+- E2E (Playwright, `e2e/tests/scenario-controls.spec.ts`): FR-1 welcome + spelling; FR-1 unavailable via
+  `page.route('**/api/scenario/**', r => r.fulfill({status: 503, body: ''}))` (or `r.abort()`), then `unroute` and
+  click `backend-retry`; FR-2 defaults and independence; FR-3 default 1 year, 7 options, select 5 years. API-level
+  acceptance (darkness 0/11, horizon "3y") may also be checked with Playwright `request.post('/api/runs', …)`.
