@@ -48,4 +48,32 @@ export class ScenarioStore {
   setHorizon(code: HorizonCode): void {
     if (HORIZON_CODES.includes(code)) this.state.update((s) => ({ ...s, horizon: code }));
   }
+
+  readonly wildcards = computed(() => this.state().wildcards);
+
+  isWildcardEnabled(id: string): boolean {
+    return this.state().wildcards.some((w) => w.wildcardId === id);
+  }
+
+  wildcardIntensity(id: string): number | null {
+    return this.state().wildcards.find((w) => w.wildcardId === id)?.intensity ?? null;
+  }
+
+  enableWildcard(id: string): void {
+    if (this.isWildcardEnabled(id)) return;
+    this.state.update((s) => ({ ...s, wildcards: [...s.wildcards, { wildcardId: id, intensity: 5 }] }));
+  }
+
+  disableWildcard(id: string): void {
+    if (!this.isWildcardEnabled(id)) return;
+    this.state.update((s) => ({ ...s, wildcards: s.wildcards.filter((w) => w.wildcardId !== id) }));
+  }
+
+  setWildcardIntensity(id: string, n: number): void {
+    if (!validIntensity(n) || !this.isWildcardEnabled(id)) return;
+    this.state.update((s) => ({
+      ...s,
+      wildcards: s.wildcards.map((w) => (w.wildcardId === id ? { ...w, intensity: n } : w)),
+    }));
+  }
 }

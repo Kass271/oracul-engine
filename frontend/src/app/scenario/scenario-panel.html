@@ -10,4 +10,7 @@
     [value]="store.horizon()"
     (valueChange)="store.setHorizon($event)"
   />
+
+  <h2 class="section">WILDCARDS</h2>
+  <app-wildcard-catalogue [categories]="loader.catalogue()?.categories ?? []" />
 </aside>

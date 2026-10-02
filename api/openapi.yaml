@@ -181,6 +181,10 @@ paths:
         order JSON syntax → realism → darkness → optimism → horizon → wildcards → customWildcards → output
         (messages in scenario-panel.md). realism/darkness/optimism must be JSON integers (no strings or fractions);
         horizon codes are case-sensitive. Unknown properties are ignored. Nothing is stored when a check fails.
+        Wildcards are checked element by element in array order (id → duplicate → intensity): unknown id →
+        "unknown wildcard: <id>"; id missing/null/non-string → "wildcards[<i>].wildcardId is invalid"; repeated id →
+        "duplicate wildcard: <id>"; intensity not an integer 1–10 → "wildcard intensity must be between 1 and 10";
+        wildcards missing/null/not an array of objects → "wildcards is invalid". All 400 VALIDATION_FAILED.
       requestBody:
         required: true
         content:
@@ -505,7 +509,7 @@ components:
           $ref: '#/components/schemas/HorizonCode'
         wildcards:
           type: array
-          description: Enabled catalogue wildcards only (a disabled wildcard is absent). Ids unique.
+          description: Enabled catalogue wildcards only (a disabled wildcard is absent). Ids unique and from the catalogue (30 ids, so at most 30 entries).
           maxItems: 30
           items:
             $ref: '#/components/schemas/WildcardSetting'
@@ -526,12 +530,15 @@ components:
           minLength: 1
           maxLength: 60
           pattern: '^[a-z0-9-]+$'
+          description: Id of a WildcardDefinition from getScenarioCatalogue (case-sensitive)
           example: biology-new-pandemic
         intensity:
           type: integer
           format: int32
           minimum: 1
           maximum: 10
+          description: JSON integer 1–10 (no strings or fractions); UI default 5 when enabled
+          example: 8
 
     CustomWildcard:
       type: object
@@ -567,6 +574,9 @@ components:
       properties:
         categories:
           type: array
+          description: The 9 categories ai, robotics, biology, political, economy, energy, environment, space, extreme in this order, 30 wildcards in total (scenario-panel.md)
+          minItems: 9
+          maxItems: 9
           items:
             $ref: '#/components/schemas/WildcardCategory'
         horizons:

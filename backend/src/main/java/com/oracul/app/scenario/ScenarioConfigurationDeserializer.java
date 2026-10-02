@@ -33,7 +33,7 @@ public class ScenarioConfigurationDeserializer extends ValueDeserializer<Scenari
             integer(root.get("darkness")),
             integer(root.get("optimism")),
             horizon(root.get("horizon")),
-            list(ctxt, root.get("wildcards"), WildcardSetting.class),
+            wildcards(root.get("wildcards")),
             list(ctxt, root.get("customWildcards"), CustomWildcard.class),
             value(ctxt, root.get("output"), OutputSettings.class));
     }
@@ -57,6 +57,18 @@ public class ScenarioConfigurationDeserializer extends ValueDeserializer<Scenari
         } catch (JacksonException e) {
             return null;
         }
+    }
+
+    private static List<WildcardSetting> wildcards(JsonNode n) {
+        if (n == null || !n.isArray()) return null;
+        List<WildcardSetting> out = new ArrayList<>();
+        for (JsonNode item : n) {
+            if (item == null || !item.isObject()) return null;
+            JsonNode id = item.get("wildcardId");
+            out.add(new WildcardSetting(id != null && id.isString() ? id.stringValue() : null,
+                integer(item.get("intensity"))));
+        }
+        return out;
     }
 
     private static <T> List<T> list(DeserializationContext ctxt, JsonNode n, Class<T> type) {

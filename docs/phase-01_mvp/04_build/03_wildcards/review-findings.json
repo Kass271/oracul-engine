@@ -1,0 +1,40 @@
+{
+  "slice": "03_wildcards",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/runs/RunsController.java",
+      "line": 27,
+      "fr": "FR-4",
+      "problem": "Semantic wildcard checks (unknown id that matches the bean pattern, duplicate id) run only in the controller, i.e. after bean validation succeeds. If the body also has a bean error in a later field, that later error wins, which breaks the documented order 'wildcards -> customWildcards -> output' (openapi startRun description, contract-notes). Example: wildcards=[{\"wildcardId\":\"biology-zombies\",\"intensity\":5}] with 4 customWildcards returns 'At most 3 custom wildcards' instead of 'unknown wildcard: biology-zombies'. output=null gives 'output is invalid' in the same way. ApiExceptionHandler applies WildcardRules only when the top-ranked bean error is itself under 'wildcards'.",
+      "fix": "In ApiExceptionHandler.handleInvalid, when the target is a ScenarioConfiguration and the top-ranked bean error ranks after 'wildcards' (customWildcards/output), check WildcardRules.firstViolation(cfg.getWildcards()) first and return its message if present. Add a test row for an unknown wildcard together with 4 customWildcards, and one together with output null.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/scenario/wildcard-catalogue.ts",
+      "line": 36,
+      "fr": "FR-4",
+      "problem": "The spec (scenario-panel.md, Slice 03_wildcards, Row) says the mat-slide-toggle has aria-label = the wildcard label and 'no projected text'. The implementation puts the wildcard-label span inside the toggle as projected content, so the visible label becomes the toggle's <label>, and the aria-label ('New pandemic') differs from the visible text ('New pandemic 8/10'). Tests pass, but the DOM structure is not what the spec describes.",
+      "fix": "Move the <span data-testid=\"wildcard-label-...\"> out of <mat-slide-toggle> and make it a sibling in the row, or change the spec to allow the projected label.",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/StartRunWildcardValidationTest.java",
+      "line": 203,
+      "fr": "FR-4",
+      "problem": "The R1 fix (ApiExceptionHandler.handleInvalid now applies WildcardRules when the top bean error is under wildcards/customWildcards/output) has no regression test. No test covers an unknown wildcard together with an invalid customWildcards or output, so the documented order 'wildcards -> customWildcards -> output' is untested.",
+      "fix": "Add rows: wildcards=[{biology-zombies,5}] with 4 customWildcards, and with output null, both expecting 400 VALIDATION_FAILED 'unknown wildcard: biology-zombies'.",
+      "status": "open"
+    }
+  ]
+}

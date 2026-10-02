@@ -35,7 +35,9 @@ specification §48 asks for. Capability specs: `scenario-panel.md` (FR-1–6, FR
 |---|---|---|---|
 | Bean Validation on `realism`/`darkness`/`optimism` (`@Min/@Max/@NotNull`), or a non-integer JSON value for them (fraction, string, boolean — no scalar coercion) | 400 | VALIDATION_FAILED | "`<field>` must be between 1 and 10" |
 | `horizon` not in enum (case-sensitive) / missing / null / not a string | 400 | VALIDATION_FAILED | "unknown horizon" |
-| wildcard id not in catalogue / duplicate (service check) | 400 | VALIDATION_FAILED | "unknown wildcard: `<id>`" / "duplicate wildcard: `<id>`" |
+| wildcard id (a string) not in catalogue / duplicate (service check; elements in array order, per element id → duplicate → intensity) | 400 | VALIDATION_FAILED | "unknown wildcard: `<id>`" / "duplicate wildcard: `<id>`" |
+| wildcard id missing / null / not a string | 400 | VALIDATION_FAILED | "wildcards[`<i>`].wildcardId is invalid" |
+| `wildcards` missing / null / not an array / element not an object; > 30 entries is never reported alone (implies an unknown or duplicate id) | 400 | VALIDATION_FAILED | "wildcards is invalid" |
 | wildcard or custom intensity (`@Min/@Max/@NotNull`) | 400 | VALIDATION_FAILED | "wildcard intensity must be between 1 and 10" |
 | `customWildcards` `@Size(max=3)` | 400 | VALIDATION_FAILED | "At most 3 custom wildcards" |
 | custom `label` `@Size/@Pattern/@NotNull` or blank after trim | 400 | VALIDATION_FAILED | "Wildcard name must be 1–40 characters" |

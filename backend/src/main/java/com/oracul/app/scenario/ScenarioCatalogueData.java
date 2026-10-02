@@ -49,6 +49,14 @@ public final class ScenarioCatalogueData {
             "Unexplained global phenomenon"},
     };
 
+    public static java.util.Set<String> wildcardIds() {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (String[] c : CATEGORIES) {
+            for (int i = 2; i < c.length; i += 2) ids.add(c[i]);
+        }
+        return ids;
+    }
+
     public static ScenarioCatalogue catalogue() {
         List<WildcardCategory> categories = new ArrayList<>();
         for (String[] c : CATEGORIES) {
