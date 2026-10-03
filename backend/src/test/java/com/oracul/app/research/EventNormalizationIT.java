@@ -74,8 +74,8 @@ class EventNormalizationIT extends AbstractEventIT {
             assertThat(source(r, s).get("entities")).as(s).isEqualTo(List.of("WHO", "Pandemic vaccine"));
         }
         assertThat(source(r, "S004").get("entities")).isEqualTo(List.of("Dock workers"));
-        // slice 09: the story writing request follows the scenario generation request
-        assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, "SCENARIO_GENERATION", "STORY_WRITING");
+        // slice 10: the critic request sits between the scenario generation and the story writing request
+        assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
     }
 
     // #1 persistence

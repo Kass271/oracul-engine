@@ -1,8 +1,12 @@
 package com.oracul.app.reasoning;
 
+import com.oracul.app.api.model.CriticIssue;
+import com.oracul.app.api.model.CriticReport;
+import com.oracul.app.api.model.CriticVerdict;
 import com.oracul.app.api.model.EvidencePack;
 import com.oracul.app.api.model.GuardOutcome;
 import com.oracul.app.api.model.GuardReport;
+import com.oracul.app.api.model.GuardViolation;
 import com.oracul.app.api.model.ResearchCounts;
 import com.oracul.app.api.model.RunStage;
 import com.oracul.app.api.model.ScenarioAttemptReason;
@@ -50,13 +54,15 @@ public class ReasoningPipeline {
     private final ScenarioAttemptRepository attempts;
     private final ModelCallRepository modelCalls;
     private final HttpResponsesClient responses;
+    private final ScenarioCritic critic;
     private final RunGuard guard;
     private final TransactionTemplate tx;
     private final Clock clock;
     private final Duration minStageDuration;
 
     ReasoningPipeline(GenerationRunRepository runs, EvidencePackRepository packs, ScenarioAttemptRepository attempts,
-                      ModelCallRepository modelCalls, HttpResponsesClient responses, RunGuard guard,
+                      ModelCallRepository modelCalls, HttpResponsesClient responses, ScenarioCritic critic,
+                      RunGuard guard,
                       TransactionTemplate tx, Clock clock,
                       @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration) {
         this.runs = runs;
@@ -64,6 +70,7 @@ public class ReasoningPipeline {
         this.attempts = attempts;
         this.modelCalls = modelCalls;
         this.responses = responses;
+        this.critic = critic;
         this.guard = guard;
         this.tx = tx;
         this.clock = clock;
@@ -71,7 +78,7 @@ public class ReasoningPipeline {
     }
 
     /** An attempt that was called and stored. */
-    private record Called(int attempt, StructuredScenarioParser.ParseResult parse) {
+    private record Called(int attempt, ScenarioAttemptReason reason, StructuredScenarioParser.ParseResult parse) {
         boolean valid() {
             return parse.scenario().isPresent();
         }
@@ -104,13 +111,13 @@ public class ReasoningPipeline {
         if (pack.getCore().isEmpty() && pack.getSupporting().isEmpty() && pack.getCounterSignals().isEmpty()) {
             return Result.EMPTY_PACK;
         }
-        boolean schemaUsed = false;
-        Called current = call(runId, sessionId, pack,
-            new GenerationRequest(1, ScenarioAttemptReason.INITIAL, List.of(), List.of()));
+        State st = new State();
+        Called current = call(runId, sessionId, pack, new GenerationRequest(++st.attempt,
+            ScenarioAttemptReason.INITIAL, List.of(), List.of(), List.of()));
         if (!current.valid()) {
-            current = call(runId, sessionId, pack, new GenerationRequest(2, ScenarioAttemptReason.SCHEMA_CORRECTION,
-                current.parse().errors(), List.of()));
-            schemaUsed = true;
+            st.schemaUsed = true;
+            current = call(runId, sessionId, pack, new GenerationRequest(++st.attempt,
+                ScenarioAttemptReason.SCHEMA_CORRECTION, current.parse().errors(), List.of(), List.of()));
             if (!current.valid()) {
                 fail(runId, "INVALID_SCENARIO", INVALID_MESSAGE);
                 return Result.STOPPED;
@@ -122,37 +129,110 @@ public class ReasoningPipeline {
         EvidenceGuard.GuardResult checked = EvidenceGuard.check(current.parse().scenario().get(), pack,
             current.attempt(), false);
         storeGuard(runId, current.attempt(), checked, null);
+        CriticReport report = null;
+        if (passed(checked)) {
+            report = critique(runId, sessionId, pack, current, checked);
+        }
         remainder(started);
 
         started = begin(runId, RunStage.CONSTRUCTING_SCENARIO);
-        if (checked.report().getOutcome() == GuardOutcome.FAIL) {
-            List<com.oracul.app.api.model.GuardViolation> violations = checked.report().getViolations();
-            int next = current.attempt() + 1;
-            current = call(runId, sessionId, pack,
-                new GenerationRequest(next, ScenarioAttemptReason.GUARD_REGENERATION, List.of(), violations));
-            if (!current.valid()) {
-                if (schemaUsed) {
-                    fail(runId, "INVALID_SCENARIO", INVALID_MESSAGE);
+        while (true) {
+            if (!passed(checked)) {
+                st.guardUsed = true;
+                current = regenerate(runId, sessionId, pack, st, ScenarioAttemptReason.GUARD_REGENERATION,
+                    checked.report().getViolations(), List.of());
+                if (current == null) {
                     return Result.STOPPED;
                 }
-                current = call(runId, sessionId, pack, new GenerationRequest(next + 1,
-                    ScenarioAttemptReason.SCHEMA_CORRECTION, current.parse().errors(), violations));
-                if (!current.valid()) {
-                    fail(runId, "INVALID_SCENARIO", INVALID_MESSAGE);
+                checked = checkNew(runId, pack, current, true);
+                if (checked == null) {
                     return Result.STOPPED;
                 }
+                report = null;
+                continue;
             }
-            checked = EvidenceGuard.check(current.parse().scenario().get(), pack, current.attempt(), true);
-            if (checked.report().getOutcome() == GuardOutcome.FAIL) {
-                storeGuard(runId, current.attempt(), checked,
-                    new Failure("SCENARIO_REJECTED", REJECTED_MESSAGE));
+            if (report == null) {
+                report = critique(runId, sessionId, pack, current, checked);
+            }
+            if (report.getVerdict() == CriticVerdict.PASS || st.criticUsed) {
+                break;
+            }
+            st.criticUsed = true;
+            current = regenerate(runId, sessionId, pack, st, ScenarioAttemptReason.CRITIC_REGENERATION, List.of(),
+                report.getIssues());
+            if (current == null) {
                 return Result.STOPPED;
             }
-            storeGuard(runId, current.attempt(), checked, null);
+            checked = checkNew(runId, pack, current, st.guardUsed);
+            if (checked == null) {
+                return Result.STOPPED;
+            }
+            report = null;
         }
         accept(runId, sessionId, current.attempt(), checked.cleaned());
         remainder(started);
         return Result.ACCEPTED;
+    }
+
+    /** Mutable bookkeeping of one run: call counter and the one-shot budgets. */
+    private static final class State {
+        int attempt;
+        boolean schemaUsed;
+        boolean guardUsed;
+        boolean criticUsed;
+    }
+
+    private static boolean passed(EvidenceGuard.GuardResult r) {
+        return r.report().getOutcome() != GuardOutcome.FAIL;
+    }
+
+    /** A regeneration call with at most one schema correction; null when the run was failed INVALID_SCENARIO. */
+    private Called regenerate(UUID runId, UUID sessionId, EvidencePack pack, State st, ScenarioAttemptReason reason,
+                              List<GuardViolation> violations, List<CriticIssue> issues) {
+        Called c = call(runId, sessionId, pack, new GenerationRequest(++st.attempt, reason, List.of(), violations,
+            issues));
+        if (c.valid()) {
+            return c;
+        }
+        if (!st.schemaUsed) {
+            st.schemaUsed = true;
+            c = call(runId, sessionId, pack, new GenerationRequest(++st.attempt,
+                ScenarioAttemptReason.SCHEMA_CORRECTION, c.parse().errors(), violations, issues));
+            if (c.valid()) {
+                return c;
+            }
+        }
+        fail(runId, "INVALID_SCENARIO", INVALID_MESSAGE);
+        return null;
+    }
+
+    /** Guards a regenerated attempt; a FAIL of a final guard ends the run SCENARIO_REJECTED (returns null). */
+    private EvidenceGuard.GuardResult checkNew(UUID runId, EvidencePack pack, Called c, boolean finalAttempt) {
+        EvidenceGuard.GuardResult checked = EvidenceGuard.check(c.parse().scenario().get(), pack, c.attempt(),
+            finalAttempt);
+        if (finalAttempt && !passed(checked)) {
+            storeGuard(runId, c.attempt(), checked, new Failure("SCENARIO_REJECTED", REJECTED_MESSAGE));
+            return null;
+        }
+        storeGuard(runId, c.attempt(), checked, null);
+        return checked;
+    }
+
+    private CriticReport critique(UUID runId, UUID sessionId, EvidencePack pack, Called c,
+                                  EvidenceGuard.GuardResult checked) {
+        CriticReport report = critic.critique(runId, sessionId, pack, c.attempt(), c.reason(), checked.cleaned());
+        Boolean stored = tx.execute(s -> {
+            if (!guard.lockAndCheck(runId)) {
+                s.setRollbackOnly();
+                return false;
+            }
+            attempts.storeCritic(runId, c.attempt(), report);
+            return true;
+        });
+        if (!Boolean.TRUE.equals(stored)) {
+            throw new Stop();
+        }
+        return report;
     }
 
     // ---- calls ------------------------------------------------------------------------------------------------------
@@ -185,7 +265,7 @@ public class ReasoningPipeline {
         if (!Boolean.TRUE.equals(stored)) {
             throw new Stop();
         }
-        return new Called(req.attempt(), parsed);
+        return new Called(req.attempt(), req.reason(), parsed);
     }
 
     private record Failure(String code, String message) {

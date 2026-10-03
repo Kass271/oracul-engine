@@ -30,7 +30,7 @@ search plan:
 | sources | every Evidence Pack item in E-order: evidenceId, section, title / publisher / publishedAt / url of its first (highest-quality) source; `usedInScenario` = evidenceId cited by a fact in `factsUsed`; `counterSignal` = section COUNTER_SIGNAL |
 | research.intents | search plan intents with `drivenBy` |
 | research.counts | run counts (`sourcesUsed` = number of items with usedInScenario) |
-| openCriticIssues | issues of the last critic report when the run completed with a failing critic, else [] |
+| openCriticIssues | issues of the accepted attempt's critic report when its verdict is FAIL (critic failed twice, guard passed), else [] (scenario-reasoning.md "Slice 10_critic") |
 
 ## Behaviour
 
@@ -110,7 +110,7 @@ search plan:
 - `data-testid`s: `result-view`, `result-loading`, `story-labels`, `label-ai-generated`, `label-not-current-news`,
   `story-headline`, `story-dateline`, `story-body`, `story-paragraph`, `scenario-metadata`, `meta-realism`,
   `meta-darkness`, `meta-optimism`, `meta-horizon`, `meta-wildcards`, `meta-wildcard-<index>`, `meta-articles-considered`, `meta-unique-events`, `meta-evidence-used`,
-  `critic-issues`, `open-why`, `why-panel`, `why-step-<order>`, `why-step-class-<order>`,
+  `critic-issues`, `critic-issues-title`, `critic-issue-<index>` (slice 10, scenario-reasoning.md "Slice 10_critic"), `open-why`, `why-panel`, `why-step-<order>`, `why-step-class-<order>`,
   `why-evidence-<order>-<evidenceId>`, `open-sources`, `sources-panel`, `source-item-<evidenceId>`,
   `source-link-<evidenceId>`, `source-used-<evidenceId>`, `source-counter-<evidenceId>`, `open-why-news`,
   `why-news-panel`, `why-news-intent-<intentId>`, `research-summary`, `summary-searches`, `summary-articles`,

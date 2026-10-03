@@ -65,6 +65,12 @@ public final class ScenarioGenerationPrompt {
         boolean guarded = !req.guardViolations().isEmpty()
             || req.reason() == com.oracul.app.api.model.ScenarioAttemptReason.GUARD_REGENERATION;
         boolean corrected = req.reason() == com.oracul.app.api.model.ScenarioAttemptReason.SCHEMA_CORRECTION;
+        boolean critiqued = !req.criticIssues().isEmpty()
+            || req.reason() == com.oracul.app.api.model.ScenarioAttemptReason.CRITIC_REGENERATION;
+        if (critiqued) {
+            lines.add("Your previous scenario failed ORACUL's critic. Return a new complete scenario that resolves "
+                + "the issues listed in critique.");
+        }
         if (guarded) {
             lines.add("Your previous scenario failed the Evidence Guard. Return a new complete scenario without the "
                 + "problems listed in guard-violations.");
@@ -75,6 +81,13 @@ public final class ScenarioGenerationPrompt {
         }
         UntrustedText.block(lines, "evidence-pack", List.of(pack.getPromptText()));
         UntrustedText.block(lines, "custom-wildcards", custom.isEmpty() ? List.of("none") : custom);
+        if (critiqued) {
+            List<String> c = new ArrayList<>();
+            for (var issue : req.criticIssues()) {
+                c.add(issue.getType().getValue() + " | " + UntrustedText.sanitize(issue.getDescription()));
+            }
+            UntrustedText.block(lines, "critique", c);
+        }
         if (guarded) {
             List<String> v = new ArrayList<>();
             for (GuardViolation g : req.guardViolations()) {

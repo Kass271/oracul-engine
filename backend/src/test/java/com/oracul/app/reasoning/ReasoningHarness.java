@@ -1,5 +1,6 @@
 package com.oracul.app.reasoning;
 
+import com.oracul.app.api.model.CriticIssue;
 import com.oracul.app.api.model.CustomWildcard;
 import com.oracul.app.api.model.EvidenceItem;
 import com.oracul.app.api.model.EvidencePack;
@@ -119,22 +120,33 @@ public final class ReasoningHarness {
         return (String) constant("ScenarioGenerationPrompt", "INSTRUCTIONS");
     }
 
-    /** GenerationRequest(attempt, reason, schemaErrors, guardViolations) built reflectively. */
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    /** GenerationRequest(attempt, reason, schemaErrors, guardViolations[, criticIssues]) built reflectively. */
     public static Object generationRequest(int attempt, String reason, List<String> schemaErrors, List<GuardViolation> violations) {
+        return generationRequest(attempt, reason, schemaErrors, violations, null);
+    }
+
+    /** With {@code criticIssues} non-null the record must have the 5th component of slice 10; null builds 4 or 5 components. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static Object generationRequest(int attempt, String reason, List<String> schemaErrors, List<GuardViolation> violations,
+                                           List<CriticIssue> criticIssues) {
         Class<?> type = type("GenerationRequest");
         if (!type.isRecord()) throw new AssertionError("GenerationRequest must be a record");
         RecordComponent[] comps = type.getRecordComponents();
-        if (comps.length != 4) throw new AssertionError("GenerationRequest must have 4 components, has " + comps.length);
-        Object[] values = new Object[4];
-        Class<?>[] types = new Class<?>[4];
-        for (int i = 0; i < 4; i++) types[i] = comps[i].getType();
+        int expected = criticIssues != null ? 5 : comps.length;
+        if (comps.length != expected || (comps.length != 4 && comps.length != 5)) {
+            throw new AssertionError("GenerationRequest must have " + (criticIssues != null ? 5 : "4 or 5")
+                + " components (the 5th is criticIssues), has " + comps.length);
+        }
+        Object[] values = new Object[comps.length];
+        Class<?>[] types = new Class<?>[comps.length];
+        for (int i = 0; i < comps.length; i++) types[i] = comps[i].getType();
         values[0] = attempt;
         Class<?> reasonType = types[1];
         if (reasonType.isEnum()) values[1] = Enum.valueOf((Class<? extends Enum>) reasonType, reason);
         else throw new AssertionError("GenerationRequest.reason must be an enum, is " + reasonType);
         values[2] = new ArrayList<>(schemaErrors);
         values[3] = new ArrayList<>(violations);
+        if (comps.length == 5) values[4] = new ArrayList<>(criticIssues == null ? List.of() : criticIssues);
         try {
             Constructor<?> ctor = type.getDeclaredConstructor(types);
             ctor.setAccessible(true);
@@ -157,6 +169,42 @@ public final class ReasoningHarness {
     @SuppressWarnings("unchecked")
     public static Map<String, Object> body(String model, EvidencePack pack, Object request) {
         return (Map<String, Object>) call("ScenarioGenerationPrompt", "body", model, pack, request);
+    }
+
+    // ---- critic (slice 10) ----------------------------------------------------------------------------------------
+
+    public static String criticInstructions() {
+        return (String) constant("ScenarioCriticPrompt", "INSTRUCTIONS");
+    }
+
+    public static String criticInputText(EvidencePack pack, StructuredScenario scenario, int attempt, String reason) {
+        return (String) call("ScenarioCriticPrompt", "inputText", pack, scenario, attempt,
+            com.oracul.app.api.model.ScenarioAttemptReason.valueOf(reason));
+    }
+
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> criticBody(String model, EvidencePack pack, StructuredScenario scenario, int attempt, String reason) {
+        return (Map<String, Object>) call("ScenarioCriticPrompt", "body", model, pack, scenario, attempt,
+            com.oracul.app.api.model.ScenarioAttemptReason.valueOf(reason));
+    }
+
+    /** Verdict name and issues "TYPE | description" of a parsed critique. */
+    record Critiqued(Optional<String> verdict, List<String> issues, List<String> errors) {}
+
+    @SuppressWarnings("unchecked")
+    public static Critiqued parseCritic(Optional<String> outputText) {
+        Object result = call("CriticParser", "parse", outputText);
+        Optional<Object> critique = (Optional<Object>) accessor(result, "critique");
+        List<String> errors = (List<String>) accessor(result, "errors");
+        if (critique.isEmpty()) return new Critiqued(Optional.empty(), List.of(), errors);
+        Object c = critique.get();
+        List<CriticIssue> issues = (List<CriticIssue>) accessor(c, "issues");
+        return new Critiqued(Optional.of(String.valueOf(accessor(c, "verdict"))),
+            issues.stream().map(i -> i.getType().name() + " | " + i.getDescription()).toList(), errors);
+    }
+
+    public static Critiqued parseCritic(String text) {
+        return parseCritic(Optional.of(text));
     }
 
     // ---- parser -------------------------------------------------------------------------------------------------

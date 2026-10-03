@@ -33,7 +33,8 @@ class StructuredScenarioIT extends AbstractReasoningIT {
         String d = StubResponses.futureDate(requests(GEN).get(0).inputText());
         assertThat(scenarioOf(raw)).isEqualTo(ReasoningHarness.comparable(ScenarioFixtures.scV4(d)));
         assertThat(rec.get("guardReports")).isEqualTo(jsonOf("[{\"outcome\":\"PASS\",\"violations\":[],\"attempt\":1}]"));
-        assertThat(rec.get("criticReports")).isEqualTo(List.of());
+        assertThat(rec.get("criticReports")).as("slice 10: the critic report of the accepted attempt")
+            .isEqualTo(jsonOf("[{\"verdict\":\"PASS\",\"issues\":[],\"attempt\":1}]"));
         assertThat(rec.get("generationAttempts")).isEqualTo(1);
         assertThat(rec.get("attempts")).isEqualTo(jsonOf("[{\"attempt\":1,\"reason\":\"INITIAL\",\"parsed\":true,\"schemaErrors\":[]}]"));
         assertThat(counts(r.run()).get("sourcesUsed")).isEqualTo(2);

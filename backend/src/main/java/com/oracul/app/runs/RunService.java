@@ -115,6 +115,7 @@ public class RunService {
         }
         run.setSuggestedRealism(r.suggestedRealism());
         run.setHeadline(r.headline());
+        run.setHasOpenCriticIssues(r.hasOpenCriticIssues());
         run.setCreatedAt(r.createdAt());
         run.setUpdatedAt(r.updatedAt());
         run.setCompletedAt(r.completedAt());

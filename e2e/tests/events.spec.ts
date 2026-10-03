@@ -110,6 +110,10 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(3);
     // slice 08: the pack is not empty, so exactly one SCENARIO_GENERATION request follows
     expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(1);
+    // slice 10: the critic request sits between the scenario and the story
+    expect(purposes.filter((p) => p === 'SCENARIO_CRITIC')).toHaveLength(1);
+    expect(purposes.indexOf('SCENARIO_CRITIC')).toBeGreaterThan(purposes.indexOf('SCENARIO_GENERATION'));
+    expect(purposes.indexOf('SCENARIO_CRITIC')).toBeLessThan(purposes.indexOf('STORY_WRITING'));
     // slice 09: the accepted scenario is followed by exactly one STORY_WRITING request, last
     expect(purposes.filter((p) => p === 'STORY_WRITING')).toHaveLength(1);
     expect(purposes[purposes.length - 1]).toBe('STORY_WRITING');
@@ -133,6 +137,7 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(6);
     // the pack is empty (every event excluded): no scenario generation
     expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(0);
+    expect(purposes.filter((p) => p === 'SCENARIO_CRITIC')).toHaveLength(0);
   });
 
   test('FR-14 a rate-limited normalisation fails the run with the plan-limit message and writes no events', async ({ page }) => {

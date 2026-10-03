@@ -54,8 +54,12 @@ public class FutureResultService {
             throw notReady();
         }
         int finalAttempt = attempts.finalAttempt(runId).orElseThrow(FutureResultService::notReady);
-        StructuredScenario scenario = attempts.list(runId).stream().filter(a -> a.attempt() == finalAttempt)
-            .findFirst().flatMap(ScenarioAttemptRepository.Attempt::cleaned).orElseThrow(FutureResultService::notReady);
+        var accepted = attempts.list(runId).stream().filter(a -> a.attempt() == finalAttempt).findFirst()
+            .orElseThrow(FutureResultService::notReady);
+        StructuredScenario scenario = accepted.cleaned().orElseThrow(FutureResultService::notReady);
+        List<com.oracul.app.api.model.CriticIssue> openIssues = accepted.criticReport()
+            .filter(r -> r.getVerdict() == com.oracul.app.api.model.CriticVerdict.FAIL)
+            .map(r -> new ArrayList<>(r.getIssues())).orElseGet(ArrayList::new);
         EvidencePack pack = packs.find(runId, run.evidencePackId()).orElseThrow(FutureResultService::notReady);
 
         Set<String> used = new HashSet<>();
@@ -85,7 +89,7 @@ public class FutureResultService {
         return new FutureResult(run.id(), run.generationId(), new ArrayList<>(LABELS), story,
             ScenarioMetadataMapper.map(run.configuration(), run.counts()),
             new ArrayList<>(scenario.getCausalChain()), sources, new ResearchExplanation(intents, run.counts()),
-            new ArrayList<>());
+            openIssues);
     }
 
     private static int number(String evidenceId) {

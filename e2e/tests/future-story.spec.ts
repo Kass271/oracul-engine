@@ -170,6 +170,9 @@ test.describe('FR-23 / FR-25 Future story and metadata', () => {
     }
     expect(purposes.filter((p) => p === 'STORY_WRITING')).toHaveLength(1);
     expect(purposes[purposes.length - 1]).toBe('STORY_WRITING');
+    // slice 10: the SCENARIO_CRITIC request precedes the story request
+    expect(purposes.filter((p) => p === 'SCENARIO_CRITIC')).toHaveLength(1);
+    expect(purposes.indexOf('SCENARIO_CRITIC')).toBeLessThan(purposes.indexOf('STORY_WRITING'));
 
     // NFR-2: the E2E stack paces every stage to >= 2 s, so 10 s + 10 x 2 s
     const elapsed = Date.parse(run.completedAt) - Date.parse(run.createdAt);

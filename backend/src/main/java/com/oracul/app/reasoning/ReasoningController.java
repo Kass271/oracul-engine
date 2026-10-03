@@ -56,15 +56,17 @@ public class ReasoningController implements ReasoningApi {
         StructuredScenario shown = passed && latest.cleaned().isPresent() ? latest.cleaned().get()
             : latest.scenario().get();
         List<GuardReport> reports = new ArrayList<>();
+        List<com.oracul.app.api.model.CriticReport> critics = new ArrayList<>();
         List<ScenarioAttemptSummary> summaries = new ArrayList<>();
         for (var a : rows) {
             a.guardReport().ifPresent(reports::add);
+            a.criticReport().ifPresent(critics::add);
             summaries.add(new ScenarioAttemptSummary(a.attempt(), a.reason(), a.scenario().isPresent(),
                 new ArrayList<>(a.schemaErrors())));
         }
         boolean accepted = attempts.finalAttempt(runId).filter(f -> f == latestAttempt(rows)).isPresent();
         return ResponseEntity.ok(new StructuredScenarioRecord(runId, run.get().evidencePackId(), latest.attempt(),
-            accepted, shown, reports, new ArrayList<>(), rows.size(), summaries));
+            accepted, shown, reports, critics, rows.size(), summaries));
     }
 
     private static int latestAttempt(List<ScenarioAttemptRepository.Attempt> rows) {

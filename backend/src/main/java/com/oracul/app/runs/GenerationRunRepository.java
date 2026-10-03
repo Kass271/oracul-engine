@@ -24,7 +24,7 @@ public class GenerationRunRepository {
                       RunStage stage, ScenarioConfiguration configuration, ResearchProfile researchProfile,
                       ResearchCounts counts, String failureCode, String failureMessage, Integer suggestedRealism,
                       String headline, OffsetDateTime createdAt, OffsetDateTime updatedAt,
-                      OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId) {
+                      OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId, boolean hasOpenCriticIssues) {
     }
 
     private static final String COLUMNS = "id, generation_id, session_id, kind, parent_run_id, status, stage, "
@@ -127,7 +127,9 @@ public class GenerationRunRepository {
     }
 
     public Optional<Row> find(UUID id, UUID sessionId) {
-        List<Row> rows = jdbc.query("select " + COLUMNS + " from generation_run where id = ? and session_id = ?",
+        List<Row> rows = jdbc.query("select " + COLUMNS + ", exists (select 1 from scenario_attempt a where a.run_id = generation_run.id "
+                + "and a.attempt = generation_run.final_attempt and a.critic_report ->> 'verdict' = 'FAIL') "
+                + "as open_critic from generation_run where id = ? and session_id = ?",
             (rs, i) -> new Row(
                 rs.getObject("id", UUID.class), rs.getString("generation_id"), rs.getObject("session_id", UUID.class),
                 RunKind.fromValue(rs.getString("kind")), rs.getObject("parent_run_id", UUID.class),
@@ -143,7 +145,7 @@ public class GenerationRunRepository {
                 utc(rs.getObject("updated_at", OffsetDateTime.class)),
                 utc(rs.getObject("completed_at", OffsetDateTime.class)),
                 rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
-                rs.getObject("evidence_pack_id", UUID.class)),
+                rs.getObject("evidence_pack_id", UUID.class), rs.getBoolean("open_critic")),
             id, sessionId);
         return rows.stream().findFirst();
     }

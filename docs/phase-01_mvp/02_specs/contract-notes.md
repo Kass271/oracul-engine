@@ -196,6 +196,19 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    Metadata wildcards follow configuration order (catalogue, then custom). NFR-2 budget: the E2E stack paces stages
    to ≥ 2 s for the FR-24 progress E2E, so "< 10 s with stubs" is asserted by a backend IT with pacing PT0S; the E2E
    asserts `completedAt − createdAt` < 10 s + 10 × 2 s. To confirm at approval.
+15. Slice 10 (scenario-reasoning.md "Slice 10_critic"): a tool-less SCENARIO_CRITIC call (Closed Evidence Mode,
+   data blocks `evidence-pack`, `custom-wildcards`, `structured-scenario`, strict `scenario_critique` schema) runs on
+   every attempt whose Evidence Guard passed (stage 8 for the first, stage 9 for regenerations). FAIL → one
+   CRITIC_REGENERATION with block `critique`; the regenerated attempt passes through the guard (its own single
+   GUARD_REGENERATION if still unused) and the critic again. A second critic FAIL with a passing guard is accepted
+   and the story is written; `GenerationRun.hasOpenCriticIssues` true and `FutureResult.openCriticIssues` = that
+   report's issues, shown as `critic-issues` in the metadata panel. A guard FAIL after the critic regeneration ends
+   SCENARIO_REJECTED, an unparseable regeneration INVALID_SCENARIO (the latest attempt decides; no fallback to an
+   earlier attempt). A malformed critic answer is re-asked once with the identical body; still malformed → verdict
+   PASS, no issues (the guard stays the hard gate). Contract: no new operation; `CriticIssue.description` 1–301 chars,
+   `CriticReport.issues` ≤ 10, `attempt` ≤ 5, descriptions on `hasOpenCriticIssues`, `criticReports`,
+   `openCriticIssues`. No Flyway migration (`scenario_attempt.critic_report` exists since V7); `hasOpenCriticIssues`
+   is derived from the accepted attempt's critic report. To confirm at approval.
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

@@ -211,4 +211,26 @@ describe('slice 09_future-story: future result view', () => {
     expect(byId('failure-view')).not.toBeNull();
     expect(text('failure-message')).toBe('Something went wrong — try again');
   });
+
+  // @trace FR-22
+  it('shows the open critic issue of the result inside the metadata panel', async () => {
+    await openCompleted();
+    await flushResult({
+      ...futureResult(),
+      openCriticIssues: [{ type: 'IGNORED_COUNTER_SIGNALS', description: 'The scenario ignores the counter-signals of the Evidence Pack.' }],
+    } as unknown as FutureResult);
+    const issue = byId('critic-issue-0');
+    expect(issue).not.toBeNull();
+    expect(text('critic-issue-0')).toBe('The scenario ignores the counter-signals of the Evidence Pack.');
+    expect(byId('scenario-metadata')!.contains(issue)).toBe(true);
+    expect(text('critic-issues-title')).toBe("Open questions from ORACUL's critic");
+  });
+
+  // @trace FR-22
+  it('shows no critic-issues block when the result has no open critic issues', async () => {
+    await openCompleted();
+    await flushResult(futureResult());
+    expect(byId('result-view')).not.toBeNull();
+    expect(byId('critic-issues')).toBeNull();
+  });
 });

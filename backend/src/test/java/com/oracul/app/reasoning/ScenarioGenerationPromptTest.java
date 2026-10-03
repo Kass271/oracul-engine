@@ -7,6 +7,8 @@ import static com.oracul.app.reasoning.ReasoningHarness.initial;
 import static com.oracul.app.reasoning.ReasoningHarness.inputText;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.oracul.app.api.model.CriticIssue;
+import com.oracul.app.api.model.CriticIssueType;
 import com.oracul.app.api.model.EvidencePack;
 import com.oracul.app.api.model.GuardAction;
 import com.oracul.app.api.model.GuardViolation;
@@ -205,6 +207,78 @@ class ScenarioGenerationPromptTest {
         EvidencePack pack = ReasoningHarness.pack(ReasoningHarness.configA(HorizonCode._5Y),
             ReasoningHarness.profile(HorizonCode._5Y), ReasoningHarness.v4PromptText("Dock workers strike over humanoid robots."));
         assertThat(inputText(pack, initial())).contains("\nWildcards: none\nCutoff date: 2026-10-02\n");
+    }
+
+    // ---- slice 10_critic additions ------------------------------------------------------------------------------------
+
+    private static final String CRITIQUE_TASK =
+        "Your previous scenario failed ORACUL's critic. Return a new complete scenario that resolves the issues listed in critique.";
+
+    private static CriticIssue issue(CriticIssueType type, String description) {
+        return new CriticIssue(type, description);
+    }
+
+    private static final List<CriticIssue> CERT = List.of(
+        issue(CriticIssueType.INAPPROPRIATE_CERTAINTY, "P1 is stated as a certain fact."),
+        issue(CriticIssueType.UNREALISTIC_TIMELINE, "The future event comes too early for the causal chain."));
+
+    // @trace FR-22
+    @Test
+    void aCriticRegenerationAddsTheCritiqueTaskLineAndTheCritiqueBlockAfterCustomWildcards() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        String text = inputText(pack, generationRequest(2, "CRITIC_REGENERATION", List.of(), List.of(), CERT));
+        String expected = expected(pack, "Attempt: 2 | Reason: CRITIC_REGENERATION", "5 years", "2031-10-02",
+            "New pandemic 8 | Humanoid robot boom 6", List.of(CRITIQUE_TASK), "none",
+            block("critique", "INAPPROPRIATE_CERTAINTY | P1 is stated as a certain fact.",
+                "UNREALISTIC_TIMELINE | The future event comes too early for the causal chain."));
+        assertThat(text).isEqualTo(expected);
+        assertThat(ReasoningHarness.body("m", pack, generationRequest(2, "CRITIC_REGENERATION", List.of(), List.of(), CERT))
+            .get("instructions")).isEqualTo(ReasoningHarness.instructions());
+    }
+
+    // @trace FR-22
+    @Test
+    void aSchemaCorrectionOfACriticRegenerationKeepsTheCritiqueAndAddsItsOwnLineAndBlock() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        String text = inputText(pack, generationRequest(3, "SCHEMA_CORRECTION", List.of("output is not valid JSON"), List.of(), CERT));
+        String expected = expected(pack, "Attempt: 3 | Reason: SCHEMA_CORRECTION", "5 years", "2031-10-02",
+            "New pandemic 8 | Humanoid robot boom 6",
+            List.of(CRITIQUE_TASK,
+                "Your previous answer was invalid. Fix the errors listed in schema-errors and return the complete scenario again."),
+            "none",
+            concat(block("critique", "INAPPROPRIATE_CERTAINTY | P1 is stated as a certain fact.",
+                    "UNREALISTIC_TIMELINE | The future event comes too early for the causal chain."),
+                block("schema-errors", "output is not valid JSON")));
+        assertThat(text).isEqualTo(expected);
+        assertThat(text.lastIndexOf(START)).isEqualTo(text.indexOf(START + "schema-errors\">>>"));
+    }
+
+    // @trace FR-22
+    @Test
+    void aCritiqueDescriptionIsSanitizedWithTheDataLineRule() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        String text = inputText(pack, generationRequest(2, "CRITIC_REGENERATION", List.of(), List.of(),
+            List.of(issue(CriticIssueType.CONTRADICTION, "a <<<x>>> | b"))));
+        assertThat(text).contains(START + "critique\">>>\nCONTRADICTION | a ‹‹‹x››› / b\n" + END);
+        assertThat(text.split("<<<END_ORACUL_UNTRUSTED_DATA>>>", -1)).as("one end marker per block").hasSize(4);
+        assertThat(text.split("<<<ORACUL_UNTRUSTED_DATA name=", -1)).as("one start marker per block").hasSize(4);
+    }
+
+    // @trace FR-22
+    @Test
+    void aGuardRegenerationWithoutCriticIssuesCarriesNoCritique() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        GuardViolation v = violation(GuardViolationType.CAUSAL_CHAIN_INVALID, null, null, "causal chain: no FACT step remains",
+            GuardAction.REGENERATION_REQUESTED);
+        String text = inputText(pack, generationRequest(3, "GUARD_REGENERATION", List.of(), List.of(v), List.of()));
+        assertThat(text).doesNotContain("critique").doesNotContain("critic");
+        assertThat(text).contains(START + "guard-violations\">>>");
+    }
+
+    private static List<String> concat(List<String> a, List<String> b) {
+        List<String> out = new ArrayList<>(a);
+        out.addAll(b);
+        return out;
     }
 
     private static GuardViolation violation(GuardViolationType type, String claimId, String evidenceId, String detail, GuardAction action) {

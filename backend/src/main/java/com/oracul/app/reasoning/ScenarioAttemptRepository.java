@@ -1,5 +1,6 @@
 package com.oracul.app.reasoning;
 
+import com.oracul.app.api.model.CriticReport;
 import com.oracul.app.api.model.GuardReport;
 import com.oracul.app.api.model.ScenarioAttemptReason;
 import com.oracul.app.api.model.StructuredScenario;
@@ -19,7 +20,7 @@ public class ScenarioAttemptRepository {
     /** A stored attempt; scenario is the model output as parsed, cleaned the guard's cleaned scenario. */
     public record Attempt(int attempt, ScenarioAttemptReason reason, Optional<StructuredScenario> scenario,
                           List<String> schemaErrors, Optional<GuardReport> guardReport,
-                          Optional<StructuredScenario> cleaned) {
+                          Optional<StructuredScenario> cleaned, Optional<CriticReport> criticReport) {
     }
 
     private final JdbcTemplate jdbc;
@@ -44,16 +45,22 @@ public class ScenarioAttemptRepository {
             json.writeValueAsString(report), json.writeValueAsString(cleaned), runId, attempt);
     }
 
+    void storeCritic(UUID runId, int attempt, CriticReport report) {
+        jdbc.update("update scenario_attempt set critic_report = cast(? as jsonb) where run_id = ? and attempt = ?",
+            json.writeValueAsString(report), runId, attempt);
+    }
+
     public List<Attempt> list(UUID runId) {
-        return jdbc.query("select attempt, reason, structured_scenario, schema_errors, guard_report, cleaned_scenario "
-                + "from scenario_attempt where run_id = ? order by attempt",
+        return jdbc.query("select attempt, reason, structured_scenario, schema_errors, guard_report, cleaned_scenario, "
+                + "critic_report from scenario_attempt where run_id = ? order by attempt",
             (rs, i) -> new Attempt(rs.getInt("attempt"), ScenarioAttemptReason.fromValue(rs.getString("reason")),
                 Optional.ofNullable(rs.getString("structured_scenario"))
                     .map(v -> json.readValue(v, StructuredScenario.class)),
                 json.readValue(rs.getString("schema_errors"), new TypeReference<List<String>>() { }),
                 Optional.ofNullable(rs.getString("guard_report")).map(v -> json.readValue(v, GuardReport.class)),
                 Optional.ofNullable(rs.getString("cleaned_scenario"))
-                    .map(v -> json.readValue(v, StructuredScenario.class))),
+                    .map(v -> json.readValue(v, StructuredScenario.class)),
+                Optional.ofNullable(rs.getString("critic_report")).map(v -> json.readValue(v, CriticReport.class))),
             runId);
     }
 

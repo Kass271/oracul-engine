@@ -1,0 +1,62 @@
+{
+  "slice": "10_critic",
+  "round": 1,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/ScenarioCritic.java",
+      "line": 55,
+      "fr": "FR-22",
+      "problem": "A critic answer that is malformed twice is stored as {verdict: PASS, issues: [], attempt} and cannot be told apart from a real PASS in criticReports or model_call. That includes an explicit {\"verdict\":\"FAIL\",\"issues\":[]}. The spec allows this (scenario-reasoning.md FR-22 Rules and the slice 10 critic(a) section, contract-notes #15 'to confirm at approval'), and the Evidence Guard is still the hard gate, so it is not a safety hole: a prompt injection in the pack could just as easily make the critic return a well-formed PASS. The cost is audit only: a skipped critic leaves just the WARN log line.",
+      "fix": "Confirm at approval. If an audit trail is wanted later, add a marker (for example a `degraded` flag or a dedicated reason) to the stored report. No code change for this slice.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/CriticParser.java",
+      "line": 151,
+      "fr": "FR-22",
+      "problem": "normalize() removes \\p{Cc}, \\p{Zl}, \\p{Zp} and ASCII \\s. Java's \\s and String.trim() do not cover U+00A0 / U+2007 / U+202F or format characters (\\p{Cf}, such as bidi overrides U+202E and zero-width spaces). So a description made only of NBSP or zero-width characters passes the 'must not be blank' rule, and bidi controls reach the UI text. Angular interpolation keeps this safe from XSS, but the result can be an empty-looking or visually reordered critic note.",
+      "fix": "Also map \\p{Z} and \\p{Cf} to a space (or use strip() plus the UNICODE_CHARACTER_CLASS flag) before the blank check.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/result/scenario-metadata.ts",
+      "line": 48,
+      "fr": "FR-22",
+      "problem": "The spec (UI section of slice 10) names the component input `openCriticIssues`. The implementation keeps the older input name `issues`. Behaviour and data-testids match the spec.",
+      "fix": "Rename the input to openCriticIssues (and update the binding in future-result.ts), or align the spec wording.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "api/openapi.yaml",
+      "line": 817,
+      "fr": "FR-22",
+      "problem": "The description says GenerationRun.hasOpenCriticIssues is 'always sent by the backend from slice 10 on', but the field is not in the schema's `required` list. As a result the generated frontend type stays optional.",
+      "fix": "Add hasOpenCriticIssues to GenerationRun.required (the backend already always sets it).",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/ReasoningPipeline.java",
+      "line": 139,
+      "fr": "FR-22",
+      "problem": "The critic adds up to 4 calls per run (2 critiqued attempts, each with a malformed retry). With oracul.openai.timeout PT30S and one transport retry per call, the worst case of the whole pipeline is far beyond the 180 s deadline. The RunGuard check in beforeSend and lockAndCheck on every commit end such runs cleanly (failTimedOut), and nothing is left half-written. The critic is never skipped based on the time left, so a slow but healthy ChatGPT may time out a run that would otherwise have completed.",
+      "fix": "No change required by the spec. Optionally skip a second critic, or its malformed retry, when the time left before deadline_at is less than one call timeout.",
+      "status": "open"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { Component, input } from '@angular/core';
 import { MatCardModule } from '@angular/material/card';
+import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
 
 import type { CriticIssue } from '../api/models/critic-issue';
@@ -7,7 +8,7 @@ import type { ScenarioMetadata } from '../api/models/scenario-metadata';
 
 @Component({
   selector: 'app-scenario-metadata',
-  imports: [MatCardModule, MatChipsModule],
+  imports: [MatCardModule, MatChipsModule, MatIconModule],
   template: `
     <mat-card class="meta" appearance="outlined" data-testid="scenario-metadata">
       <mat-card-content>
@@ -45,11 +46,14 @@ import type { ScenarioMetadata } from '../api/models/scenario-metadata';
           </li>
         </ul>
         @if (issues().length > 0) {
-          <div class="issues" data-testid="critic-issues">
-            <p>Open critic notes</p>
+          <div class="issues" role="note" data-testid="critic-issues">
+            <p class="issues-title">
+              <mat-icon aria-hidden="true">help_outline</mat-icon>
+              <span data-testid="critic-issues-title">Open questions from ORACUL's critic</span>
+            </p>
             <ul>
               @for (i of issues(); track $index) {
-                <li>{{ i.description }}</li>
+                <li [attr.data-testid]="'critic-issue-' + $index">{{ i.description }}</li>
               }
             </ul>
           </div>
@@ -69,6 +73,15 @@ import type { ScenarioMetadata } from '../api/models/scenario-metadata';
     }
     mat-chip-set {
       margin-bottom: 8px;
+    }
+    .issues {
+      margin-top: 16px;
+    }
+    .issues-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
     }
     .counts {
       list-style: none;

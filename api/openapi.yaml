@@ -382,7 +382,9 @@ paths:
         attempt is the run's final scenario. Run QUEUED / RUNNING before the first parsed attempt, FAILED before
         stage EXPLORING_FUTURES, FAILED INVALID_SCENARIO, or COMPLETED without a scenario (empty Evidence Pack) →
         409 SCENARIO_NOT_READY "The scenario is not ready yet". Unknown, malformed or foreign runId → 404
-        RUN_NOT_FOUND "Future not found".
+        RUN_NOT_FOUND "Future not found". `criticReports` lists one report per critiqued attempt (the critic runs
+        only on attempts whose Evidence Guard outcome is PASS / PASS_WITH_REMOVALS), attempt ascending; a critic
+        output that stays malformed after one retry is stored as verdict PASS with no issues.
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -873,6 +875,11 @@ components:
           description: Headline of the future story; set only when COMPLETED with a story (absent while active, for FAILED / INSUFFICIENT_EVIDENCE and for interim COMPLETED runs without a story)
         hasOpenCriticIssues:
           type: boolean
+          description: |
+            Always sent by the backend from slice 10 on. True iff the run has an accepted scenario (stage
+            CONSTRUCTING_SCENARIO done) and the critic report of that accepted attempt has verdict FAIL (the critic
+            failed twice and the guard passed); false otherwise (also while no scenario is accepted, and for FAILED /
+            INSUFFICIENT_EVIDENCE runs that never accepted one).
         createdAt:
           type: string
           format: date-time
@@ -1679,21 +1686,29 @@ components:
           $ref: '#/components/schemas/CriticIssueType'
         description:
           type: string
+          minLength: 1
+          maxLength: 301
+          description: Model-written, normalized by ORACUL (control characters → space, whitespace collapsed, trimmed, longer than 300 code points → first 300 + "…"); display as text only
 
     CriticReport:
       type: object
+      description: Result of the SCENARIO_CRITIC check of one scenario attempt. FAIL ⇔ at least one issue.
       required: [verdict, issues, attempt]
       properties:
         verdict:
           $ref: '#/components/schemas/CriticVerdict'
         issues:
           type: array
+          maxItems: 10
+          description: Empty for PASS; 1–10 issues in model order for FAIL
           items:
             $ref: '#/components/schemas/CriticIssue'
         attempt:
           type: integer
           format: int32
           minimum: 1
+          maximum: 5
+          description: Scenario attempt number that was critiqued
 
     ScenarioAttemptReason:
       type: string
@@ -1891,6 +1906,7 @@ components:
           $ref: '#/components/schemas/ResearchExplanation'
         openCriticIssues:
           type: array
-          description: Issues of the last failing critic report when the run completed despite it; [] otherwise (always [] before slice 10)
+          maxItems: 10
+          description: Issues of the accepted attempt's critic report when its verdict is FAIL (the critic failed twice and the Evidence Guard passed, so the story was written anyway); [] otherwise. Non-empty ⇔ getRun.hasOpenCriticIssues
           items:
             $ref: '#/components/schemas/CriticIssue'

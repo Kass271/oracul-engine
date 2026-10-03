@@ -19,7 +19,7 @@ const GENERIC_ERROR = 'Something went wrong — try again';
     } @else if (result(); as r) {
       <div class="result" data-testid="result-view">
         <app-future-story [story]="r.story" [labels]="r.labels" />
-        <app-scenario-metadata [metadata]="r.metadata" [issues]="r.openCriticIssues" />
+        <app-scenario-metadata [metadata]="r.metadata" [issues]="r.openCriticIssues ?? []" />
       </div>
     } @else {
       <div class="loading" data-testid="result-loading">

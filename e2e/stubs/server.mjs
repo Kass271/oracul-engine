@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', scenario: 'ok', scenarioCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [] } };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', scenario: 'ok', scenarioCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [] } };
 
 function reset() {
   state.mode = 'ok';
@@ -18,6 +18,8 @@ function reset() {
   state.events = 'ok';
   state.scenario = 'ok';
   state.scenarioCalls = 0;
+  state.critic = 'ok';
+  state.criticCalls = 0;
   state.story = 'ok';
   state.storyCalls = 0;
   state.requests.responses.length = 0;
@@ -59,7 +61,12 @@ const storyDefault = (d) =>
     body: [1, 2, 3].map((k) => `Stub paragraph ${k}` + ' lorem'.repeat(57)).join('\n\n'),
   });
 
-const SCENARIO_MODES = ['ok', 'invalid-once', 'invalid', 'e099', 'guard-fail-once', 'guard-fail'];
+const SCENARIO_MODES = ['ok', 'invalid-once', 'invalid', 'e099', 'guard-fail-once', 'guard-fail', 'bad-after-first'];
+const CRITIC_MODES = ['ok', 'fail-once', 'fail', 'malformed', 'rate-limited'];
+// critic-validation fixtures (scenario-reasoning.md FR-22)
+const CR_PASS = '{"verdict":"PASS","issues":[]}';
+const CR_ICS = '{"verdict":"FAIL","issues":[{"type":"IGNORED_COUNTER_SIGNALS","description":"The scenario ignores the counter-signals of the Evidence Pack."}]}';
+const CR_CERT = '{"verdict":"FAIL","issues":[{"type":"INAPPROPRIATE_CERTAINTY","description":"P1 is stated as a certain fact."},{"type":"UNREALISTIC_TIMELINE","description":"The future event comes too early for the causal chain."}]}';
 const q = (v) => JSON.stringify(v);
 
 // SC-DEFAULT (scenario-reasoning.md): every cited Evidence ID is parsed from the request's evidence-pack block, D is the
@@ -171,6 +178,17 @@ export const routes = {
     state.scenario = mode;
     empty(res, 204);
   },
+  'POST /__control/critic': async (req, res, url, body) => {
+    let mode;
+    try {
+      mode = JSON.parse(body || '{}').mode;
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!CRITIC_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    state.critic = mode;
+    empty(res, 204);
+  },
   'POST /__control/story': async (req, res, url, body) => {
     let mode;
     try {
@@ -249,8 +267,16 @@ export const routes = {
       const m = state.scenario;
       if (m === 'invalid' || (m === 'invalid-once' && call === 1)) output = 'not json';
       else if (m === 'e099') output = scenarioDefault(text, 'e099');
-      else if (m === 'guard-fail' || (m === 'guard-fail-once' && call === 1)) output = scenarioDefault(text, 'bad');
+      else if (m === 'guard-fail' || (m === 'bad-after-first' && call > 1) || (m === 'guard-fail-once' && call === 1)) output = scenarioDefault(text, 'bad');
       else output = scenarioDefault(text, 'ok');
+    } else if (purpose === 'SCENARIO_CRITIC') {
+      const call = ++state.criticCalls;
+      const m = state.critic;
+      if (m === 'rate-limited') return json(res, 429, { error: 'rate_limited' });
+      if (m === 'malformed') output = 'not json';
+      else if (m === 'fail-once') output = call === 1 ? CR_ICS : CR_PASS;
+      else if (m === 'fail') output = call === 1 ? CR_ICS : CR_CERT;
+      else output = CR_PASS;
     } else if (purpose === 'STORY_WRITING') {
       const call = ++state.storyCalls;
       const m = state.story;

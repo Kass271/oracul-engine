@@ -162,4 +162,58 @@ describe('slice 09_future-story: scenario metadata panel', () => {
     expect(block?.textContent).toContain('Too certain about the outcome');
     expect(block?.textContent).toContain('Second note');
   });
+  describe('slice 10_critic: open critic issues', () => {
+    const CERT = [
+      { type: 'INAPPROPRIATE_CERTAINTY', description: 'P1 is stated as a certain fact.' },
+      { type: 'UNREALISTIC_TIMELINE', description: 'The future event comes too early for the causal chain.' },
+    ];
+
+    function withIssues(issues: unknown[] | undefined): FutureResult {
+      const result = acceptance(TWO);
+      if (issues === undefined) delete (result as unknown as { openCriticIssues?: unknown }).openCriticIssues;
+      else (result as unknown as { openCriticIssues: unknown[] }).openCriticIssues = issues;
+      return result;
+    }
+
+    // @trace FR-22
+    it('shows no critic-issues block for an empty openCriticIssues', async () => {
+      await show(withIssues([]));
+      expect(byId('scenario-metadata')).not.toBeNull();
+      expect(byId('critic-issues')).toBeNull();
+    });
+
+    // @trace FR-22
+    it('shows no critic-issues block when openCriticIssues is absent', async () => {
+      await show(withIssues(undefined));
+      expect(byId('scenario-metadata')).not.toBeNull();
+      expect(byId('critic-issues')).toBeNull();
+    });
+
+    // @trace FR-22
+    it('shows the titled note with one entry per issue in array order after the evidence line', async () => {
+      await show(withIssues(CERT));
+      const note = byId('critic-issues');
+      expect(note).not.toBeNull();
+      expect(note?.getAttribute('role')).toBe('note');
+      expect(note?.tagName.toLowerCase()).toBe('div');
+      expect(note?.querySelector('mat-icon')?.textContent?.trim()).toBe('help_outline');
+      expect(text('critic-issues-title')).toBe("Open questions from ORACUL's critic");
+      expect(text('critic-issue-0')).toBe('P1 is stated as a certain fact.');
+      expect(text('critic-issue-1')).toBe('The future event comes too early for the causal chain.');
+      expect(byId('critic-issue-2')).toBeNull();
+      expect(note?.textContent).not.toContain('INAPPROPRIATE_CERTAINTY');
+      expect(note?.textContent).not.toContain('UNREALISTIC_TIMELINE');
+      const evidence = byId('meta-evidence-used') as HTMLElement;
+      expect(evidence.compareDocumentPosition(note as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(byId('scenario-metadata')?.contains(note)).toBe(true);
+    });
+
+    // @trace FR-22
+    it('renders a description as literal text, never as markup', async () => {
+      await show(withIssues([{ type: 'CONTRADICTION', description: '<img src=x onerror=alert(1)>' }]));
+      expect(text('critic-issues-title')).toBe("Open questions from ORACUL's critic");
+      expect(text('critic-issue-0')).toBe('<img src=x onerror=alert(1)>');
+      expect(byId('critic-issues')?.querySelector('img')).toBeNull();
+    });
+  });
 });
