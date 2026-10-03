@@ -21,10 +21,12 @@ public class ResearchController implements ResearchApi {
     private final ObjectProvider<CurrentSession> session;
     private final ObjectProvider<SourceRepository> sources;
     private final ObjectProvider<EventRepository> events;
+    private final ObjectProvider<EvidencePackRepository> packs;
 
     ResearchController(ObjectProvider<GenerationRunRepository> runs, ObjectProvider<CurrentSession> session,
                        ObjectProvider<SourceRepository> sources,
-                       ObjectProvider<EventRepository> events) {
+                       ObjectProvider<EventRepository> events, ObjectProvider<EvidencePackRepository> packs) {
+        this.packs = packs;
         this.events = events;
         this.sources = sources;
         this.runs = runs;
@@ -43,7 +45,14 @@ public class ResearchController implements ResearchApi {
 
     @Override
     public ResponseEntity<EvidencePack> getEvidencePack(UUID runId) {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        var run = runs.getObject().find(runId, session.getObject().id())
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found"));
+        if (run.evidencePackId() == null) {
+            throw new ApiException(HttpStatus.CONFLICT, "EVIDENCE_PACK_NOT_READY", "The Evidence Pack is not ready yet");
+        }
+        return ResponseEntity.ok(packs.getObject().find(run.id(), run.evidencePackId())
+            .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "EVIDENCE_PACK_NOT_READY",
+                "The Evidence Pack is not ready yet")));
     }
 
     @Override

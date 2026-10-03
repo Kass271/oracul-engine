@@ -39,6 +39,7 @@ public final class StubGdelt {
     private final AtomicInteger counter = new AtomicInteger();
     public final List<Request> requests = new CopyOnWriteArrayList<>();
     public final Map<String, Page> pages = new ConcurrentHashMap<>();
+    public final Map<String, String> sites = new ConcurrentHashMap<>();
     public volatile Function<Request, Reply> responder = defaultResponder();
 
     private StubGdelt() {
@@ -69,8 +70,14 @@ public final class StubGdelt {
     public void reset() {
         requests.clear();
         pages.clear();
+        sites.clear();
         counter.set(0);
         responder = defaultResponder();
+    }
+
+    /** Registers the og:site_name of /articles/<name>; unregistered pages keep "Stub Site". */
+    public void site(String name, String siteName) {
+        sites.put(name, siteName);
     }
 
     public static Reply json(String body) {
@@ -112,7 +119,11 @@ public final class StubGdelt {
     }
 
     public static String html(String name) {
-        return "<html><head><meta property=\"og:site_name\" content=\"Stub Site\"><meta property=\"og:description\" content=\"Summary of "
+        return html(name, "Stub Site");
+    }
+
+    public static String html(String name, String siteName) {
+        return "<html><head><meta property=\"og:site_name\" content=\"" + siteName + "\"><meta property=\"og:description\" content=\"Summary of "
             + name + "\"></head><body>x</body></html>";
     }
 
@@ -163,7 +174,7 @@ public final class StubGdelt {
             send(ex, 200, "application/pdf", "%PDF-1.4 stub".getBytes(StandardCharsets.UTF_8));
             return;
         }
-        send(ex, 200, "text/html; charset=utf-8", html(name).getBytes(StandardCharsets.UTF_8));
+        send(ex, 200, "text/html; charset=utf-8", html(name, sites.getOrDefault(name, "Stub Site")).getBytes(StandardCharsets.UTF_8));
     }
 
     /** /redirect/N answers 302 to /redirect/N-1; /redirect/0 is an article page "redirected". */

@@ -109,6 +109,7 @@ public class RunService {
         run.setStageCount(RunStages.COUNT);
         run.setConfiguration(r.configuration());
         run.setCounts(r.counts());
+        run.setEvidencePackId(r.evidencePackId());
         if (r.failureCode() != null) {
             run.setFailure(new RunFailure(RunFailureCode.fromValue(r.failureCode()), r.failureMessage()));
         }

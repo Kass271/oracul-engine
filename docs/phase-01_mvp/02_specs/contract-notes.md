@@ -111,6 +111,7 @@ error_description 2048, client_id 256) are enforced by the service and lead to `
 | `oracul.run.executor-threads` / `oracul.run.timeout` / `oracul.run.placeholder-stage-delay` | 4 / PT3M / PT1S | FR-10, FR-24, FR-32 |
 | `oracul.openai.retry-delay` / `oracul.events.normalization-batch-size` / `oracul.events.classification-batch-size` | PT1S / 40 / 20 | FR-14, FR-15 (research-pipeline.md "Slice 06_events") |
 | `oracul.events.normalization-concurrency` / `oracul.events.classification-concurrency` / `oracul.events.max-sources` | 4 / 4 / 120 | FR-14, FR-15, NFR-2 (research-pipeline.md "Slice 06_events": parallel batches, source cap) |
+| `oracul.ranking.weights.*` / `oracul.ranking.min-source-quality` / `oracul.evidence.*` (max-items, core, supporting, counter-signals, max-per-entity, max-per-publisher, max-per-geography, max-category-share) | see spec / 0.30 / 25, 10, 10, 5, 2, 3, 6, 0.4 | FR-16, FR-17 (research-pipeline.md "Slice 07_evidence-pack") |
 
 ## UI component hierarchy (Angular standalone, signals, lazy routes)
 ```

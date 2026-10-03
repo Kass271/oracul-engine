@@ -1,0 +1,40 @@
+{
+  "slice": "07_evidence-pack",
+  "round": 6,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "dimension": "tests",
+      "file": "e2e/stubs/server.mjs",
+      "line": 101,
+      "fr": "FR-17",
+      "problem": "The E2E stub changes required by research-pipeline.md 'Slice 07_evidence-pack' > E2E were never made (server.mjs is unchanged against HEAD). (a) POST /__control/events still accepts only ['ok','malformed-classification','rate-limited'], so evidence-pack.spec.ts line 74-75 (mode 'evidence' -> expect 204) gets 400 unknown_mode. (b) GET /articles/* (line 192) still hard-codes og:site_name 'Stub Site' rather than 'Stub Site <key>'. Every source therefore has the same publisher, and max-per-publisher=3 caps the whole pack at 3 items. That breaks the second test, which expects counterSignals 5 and eventsSelected 5 in mode 'ok'. Both FR-16/17/18 E2E tests fail. The traceability claim that e2e/tests/evidence-pack.spec.ts proves these FRs is not backed by a passing run.",
+      "fix": "In server.mjs: add 'evidence' to the accepted modes. In EVENT_CLASSIFICATION, when state.events === 'evidence', answer per event EV<n>: n%3==1 -> risk 1.0/opportunity 0.0, n%3==2 -> risk 0.5/opportunity 0.4, n%3==0 -> risk 0.1/opportunity 0.8 (other fields as default). In GET /articles/*, set og:site_name to 'Stub Site ' + the part of the name before the last '-' ('shared' -> 'Stub Site'). Then run the e2e suite, including events/search-sources/run-start specs.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/EvidencePackRenderer.java",
+      "line": 64,
+      "fr": "FR-18",
+      "problem": "summary.substring(0, 600) cuts by UTF-16 code unit. A summary with a non-BMP character (emoji, some CJK) at position 599/600 leaves a lone high surrogate in promptText, which is invalid in the JSON sent to the model later.",
+      "fix": "Cut at a code-point boundary, e.g. summary.substring(0, summary.offsetByCodePoints(0, Math.min(600, summary.codePointCount(0, summary.length())))) or step back one char when Character.isHighSurrogate(summary.charAt(599)).",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/EvidencePackRendererTest.java",
+      "line": 154,
+      "fr": "FR-18",
+      "problem": "The R2 fix (EvidencePackRenderer.java:64-67 steps back one char when charAt(599) is a high surrogate) has no test. summaryIsCutTo600Characters uses only BMP text, so a regression to a plain substring(0, 600) would still pass.",
+      "fix": "Add a renderer row whose sanitized summary has a non-BMP character (e.g. \"\\uD83D\\uDE00\") at index 599-600. Assert that the rendered summary ends at 599 chars and contains no lone surrogate.",
+      "status": "open"
+    }
+  ]
+}

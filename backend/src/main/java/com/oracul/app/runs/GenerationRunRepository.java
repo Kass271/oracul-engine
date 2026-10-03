@@ -24,12 +24,12 @@ public class GenerationRunRepository {
                       RunStage stage, ScenarioConfiguration configuration, ResearchProfile researchProfile,
                       ResearchCounts counts, String failureCode, String failureMessage, Integer suggestedRealism,
                       String headline, OffsetDateTime createdAt, OffsetDateTime updatedAt,
-                      OffsetDateTime completedAt, SearchPlan searchPlan) {
+                      OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId) {
     }
 
     private static final String COLUMNS = "id, generation_id, session_id, kind, parent_run_id, status, stage, "
         + "configuration, research_profile, counts, failure_code, failure_message, suggested_realism, headline, "
-        + "created_at, updated_at, completed_at, search_plan";
+        + "created_at, updated_at, completed_at, search_plan, evidence_pack_id";
 
     private final JdbcTemplate jdbc;
     private final JsonMapper json;
@@ -84,6 +84,12 @@ public class GenerationRunRepository {
             write(counts), now, id);
     }
 
+    /** Points the run at its (already inserted) Evidence Pack and stores the counts. */
+    public void storePack(UUID id, UUID packId, ResearchCounts counts, OffsetDateTime now) {
+        jdbc.update("update generation_run set evidence_pack_id = ?, counts = cast(? as jsonb), updated_at = ? "
+            + "where id = ?", packId, write(counts), now, id);
+    }
+
     /** Stage transition that only applies while the run is RUNNING; false when the run was ended meanwhile. */
     boolean markStageIfRunning(UUID id, RunStage stage, OffsetDateTime now) {
         return jdbc.update("update generation_run set stage = ?, updated_at = ? where id = ? and status = 'RUNNING'",
@@ -124,7 +130,8 @@ public class GenerationRunRepository {
                 utc(rs.getObject("created_at", OffsetDateTime.class)),
                 utc(rs.getObject("updated_at", OffsetDateTime.class)),
                 utc(rs.getObject("completed_at", OffsetDateTime.class)),
-                rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class)),
+                rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
+                rs.getObject("evidence_pack_id", UUID.class)),
             id, sessionId);
         return rows.stream().findFirst();
     }

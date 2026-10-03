@@ -98,7 +98,7 @@ export const routes = {
     } catch {
       return json(res, 400, { error: 'invalid_json' });
     }
-    if (!['ok', 'malformed-classification', 'rate-limited'].includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    if (!['ok', 'malformed-classification', 'rate-limited', 'evidence'].includes(mode)) return json(res, 400, { error: 'unknown_mode' });
     state.events = mode;
     empty(res, 204);
   },
@@ -149,9 +149,16 @@ export const routes = {
         // exactly the backend StubResponses default: wildcardMatches is empty, so the backend's 0.0 fill per profile topic
         // is exercised end to end
         const ids = [...dataBlock(text, 'events').matchAll(/^(EV\d+) \| /gm)].map((m) => m[1]);
+        // mode evidence: EV<n>, n mod 3 = 1 -> risk 1.0 / opp 0.0; 2 -> 0.5 / 0.4; 0 -> 0.1 / 0.8
+        const evidence = state.events === 'evidence';
+        const scores = (eventId) => {
+          if (!evidence) return { risk: 0.4, opportunity: 0.6 };
+          const m = Number(eventId.slice(2)) % 3;
+          return m === 1 ? { risk: 1.0, opportunity: 0.0 } : m === 2 ? { risk: 0.5, opportunity: 0.4 } : { risk: 0.1, opportunity: 0.8 };
+        };
         output = JSON.stringify({
           classifications: ids.map((eventId) => ({
-            eventId, topic: 'general', subtopics: [], sentiment: 0.1, risk: 0.4, opportunity: 0.6, impact: 0.5, novelty: 0.5,
+            eventId, topic: 'general', subtopics: [], sentiment: 0.1, ...scores(eventId), impact: 0.5, novelty: 0.5,
             trend: 'ESTABLISHED', geography: 'global', wildcardMatches: [],
           })),
         });
@@ -189,7 +196,9 @@ export const routes = {
   'GET /articles/*': async (req, res, url) => {
     const name = url.pathname.slice('/articles/'.length);
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(`<html><head><meta property="og:site_name" content="Stub Site"><meta property="og:description" content="Summary of ${name.replace(/[^\w-]/g, '')}"></head><body>x</body></html>`);
+    const cut = name.lastIndexOf('-');
+    const site = cut > 0 ? `Stub Site ${name.slice(0, cut).replace(/[^\w-]/g, '')}` : 'Stub Site';
+    res.end(`<html><head><meta property="og:site_name" content="${site}"><meta property="og:description" content="Summary of ${name.replace(/[^\w-]/g, '')}"></head><body>x</body></html>`);
   },
 
   'GET /oauth/authorize': async (req, res, url) => {

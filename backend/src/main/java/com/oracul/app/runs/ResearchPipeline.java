@@ -10,7 +10,12 @@ import com.oracul.app.api.model.Source;
 import com.oracul.app.chatgpt.CallAbandonedException;
 import com.oracul.app.chatgpt.ChatGptCallException;
 import com.oracul.app.common.ApiException;
+import com.oracul.app.api.model.EvidencePack;
 import com.oracul.app.research.EventClassifier;
+import com.oracul.app.research.EventRanker;
+import com.oracul.app.research.EvidencePackRepository;
+import com.oracul.app.research.EvidencePackService;
+import com.oracul.app.research.EvidenceSelector;
 import com.oracul.app.research.EventNormalizer;
 import com.oracul.app.research.EventRepository;
 import com.oracul.app.research.QueryExpander;
@@ -19,6 +24,8 @@ import com.oracul.app.research.SourceRepository;
 import com.oracul.app.research.SourceRetrieval;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
@@ -45,6 +52,10 @@ public class ResearchPipeline {
     private final EventNormalizer normalizer;
     private final EventClassifier classifier;
     private final EventRepository events;
+    private final EventRanker ranker;
+    private final EvidenceSelector selector;
+    private final EvidencePackService packService;
+    private final EvidencePackRepository packs;
     private final RunGuard guard;
     private final TransactionTemplate tx;
     private final Clock clock;
@@ -53,7 +64,8 @@ public class ResearchPipeline {
 
     ResearchPipeline(GenerationRunRepository runs, SourceRepository sources, SearchPlanner planner,
                      QueryExpander expander, SourceRetrieval retrieval, EventNormalizer normalizer,
-                     EventClassifier classifier, EventRepository events, RunGuard guard, TransactionTemplate tx,
+                     EventClassifier classifier, EventRepository events, EventRanker ranker, EvidenceSelector selector,
+                     EvidencePackService packService, EvidencePackRepository packs, RunGuard guard, TransactionTemplate tx,
                      Clock clock,
                      @Value("${oracul.research.query-budget:20}") int queryBudget,
                      @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration) {
@@ -68,6 +80,10 @@ public class ResearchPipeline {
         this.normalizer = normalizer;
         this.classifier = classifier;
         this.events = events;
+        this.ranker = ranker;
+        this.selector = selector;
+        this.packService = packService;
+        this.packs = packs;
         this.guard = guard;
         this.tx = tx;
         this.clock = clock;
@@ -152,6 +168,48 @@ public class ResearchPipeline {
             return true;
         });
         if (!Boolean.TRUE.equals(stored)) {
+            abandon(runId);
+            return false;
+        }
+        remainder(started);
+
+        // ---- stage 6: RANKING ----
+        started = begin(runId, RunStage.RANKING);
+        Instant cutoff = clock.instant().truncatedTo(ChronoUnit.MINUTES);
+        Map<String, Source> byId = new LinkedHashMap<>();
+        for (SourceRepository.Stored st : found) {
+            byId.put(st.source().getId(), st.source());
+        }
+        List<NormalizedEvent> ranked = ranker.rank(normalized, byId, profile, cutoff);
+        EvidenceSelector.Result selection = selector.select(ranked, byId, profile);
+        Map<String, NormalizedEvent> selected = new LinkedHashMap<>();
+        for (List<NormalizedEvent> section : List.of(selection.core(), selection.supporting(),
+            selection.counterSignals())) {
+            for (NormalizedEvent e : section) {
+                selected.put(e.getId(), e);
+            }
+        }
+        List<NormalizedEvent> finalEvents = new ArrayList<>();
+        for (NormalizedEvent e : ranked) {
+            finalEvents.add(selected.getOrDefault(e.getId(), e));
+        }
+        String generationId = runs.find(runId, sessionId).orElseThrow().generationId();
+        UUID packId = UUID.randomUUID();
+        EvidencePack pack = packService.build(packId, generationId, cutoff, cfg, profile, selection, byId);
+        ResearchCounts withPack = new ResearchCounts(withEvents.getSearches(), withEvents.getArticlesRetrieved(),
+            withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), selected.size(),
+            selection.counterSignals().size(), 0);
+        Boolean packed = tx.execute(s -> {
+            if (!guard.lockAndCheck(runId)) {
+                s.setRollbackOnly();
+                return false;
+            }
+            events.updateRanking(runId, finalEvents);
+            packs.insert(runId, pack, now());
+            runs.storePack(runId, packId, withPack, now());
+            return true;
+        });
+        if (!Boolean.TRUE.equals(packed)) {
             abandon(runId);
             return false;
         }

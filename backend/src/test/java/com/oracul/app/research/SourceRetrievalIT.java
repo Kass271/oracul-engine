@@ -126,7 +126,10 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS
             .replace("\"searches\":0", "\"searches\":20").replace("\"articlesRetrieved\":0", "\"articlesRetrieved\":20")
             .replace("\"articlesConsidered\":0", "\"articlesConsidered\":20")
-            .replace("\"uniqueEvents\":0", "\"uniqueEvents\":20")));
+            .replace("\"uniqueEvents\":0", "\"uniqueEvents\":20")
+            // slice 07: 20 default-classified events (risk 0.4 / opportunity 0.6 = BRIGHT, profile A d > 0.1 -> all are
+            // counter candidates, core/supporting empty); every source is "Stub Site" -> max-per-publisher 3 caps the pack
+            .replace("\"eventsSelected\":0", "\"eventsSelected\":3").replace("\"counterSignals\":0", "\"counterSignals\":3")));
     }
 
     // #11

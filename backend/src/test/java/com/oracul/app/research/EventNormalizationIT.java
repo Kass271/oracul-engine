@@ -59,11 +59,16 @@ class EventNormalizationIT extends AbstractEventIT {
         // R7: the keys are omitted from the JSON (an explicit null would be a contract violation)
         assertThat(ev2).as("EV002 has no disagreement").doesNotContainKey("disagreement");
         for (Map<String, Object> e : events) {
-            assertThat(e).as(e.get("id") + " ranking").doesNotContainKey("ranking");
-            assertThat(e).as(e.get("id") + " selection").doesNotContainKey("selection");
+            // slice 07: every classified event is ranked and (default pack limits) selected
+            assertThat(e).as(e.get("id") + " ranking").containsKey("ranking");
+            assertThat(e).as(e.get("id") + " selection").containsKey("selection");
             assertThat(e).as(e.get("id") + " excludedReason").doesNotContainKey("excludedReason");
             assertThat(e).as(e.get("id") + " is classified").containsKey("classification");
         }
+
+        // slice 07 (spec acceptance #1, body A): EV001 is the counter-signal, EV002 the core item
+        assertThat(ev1.get("selection")).isEqualTo(Map.of("evidenceId", "E002", "section", "COUNTER_SIGNAL"));
+        assertThat(ev2.get("selection")).isEqualTo(Map.of("evidenceId", "E001", "section", "CORE"));
 
         for (String s : List.of("S001", "S002", "S003")) {
             assertThat(source(r, s).get("entities")).as(s).isEqualTo(List.of("WHO", "Pandemic vaccine"));
@@ -206,8 +211,13 @@ class EventNormalizationIT extends AbstractEventIT {
         assertThat(num(ev1.get("confidence"))).isEqualTo(0.5);
         assertThat(ev1.get("date")).isEqualTo(utcDate(source(r, "S001").get("publishedAt")));
         assertThat(omitted(ev1, "disagreement")).isTrue();
-        assertThat(events.get(1).get("sourceIds")).isEqualTo(List.of("S003"));
-        assertThat(events.get(2).get("sourceIds")).isEqualTo(List.of("S004"));
+        // slice 07: after ranking, listRunEvents is in rank order (score desc), not id order; ids and
+        // id <-> source mapping are unchanged (EV002 = S003, EV003 = S004); S004 (quality 0.85) outranks S003 (0.6)
+        assertThat(events.stream().map(e -> e.get("id")).toList()).isEqualTo(List.of("EV001", "EV003", "EV002"));
+        assertThat(events.get(1).get("sourceIds")).isEqualTo(List.of("S004"));
+        assertThat(events.get(2).get("sourceIds")).isEqualTo(List.of("S003"));
+        assertThat(event(events, "EV002").get("sourceIds")).isEqualTo(List.of("S003"));
+        assertThat(event(events, "EV003").get("sourceIds")).isEqualTo(List.of("S004"));
         assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(3);
     }
 
