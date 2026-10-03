@@ -1,6 +1,7 @@
 package com.oracul.app.research;
 
 import com.jayway.jsonpath.JsonPath;
+import com.oracul.app.reasoning.ScenarioFixtures;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -296,6 +297,21 @@ public final class StubResponses {
         return "{\"classifications\":[" + String.join(",", entries) + "]}";
     }
 
+    /** D of a SCENARIO_GENERATION request: the day after the start of its future event date window. */
+    public static String futureDate(String inputText) {
+        return ScenarioFixtures.futureDate(inputText);
+    }
+
+    /** SC-V4 / SC-E099 / SC-NOEV / SC-BAD with D taken from the request text. */
+    public static String scenarioFixture(String name, String inputText) {
+        return ScenarioFixtures.fixture(name, futureDate(inputText));
+    }
+
+    /** R of the "Attempt: n | Reason: R" line of a SCENARIO_GENERATION request. */
+    public static String attemptReason(String inputText) {
+        return ScenarioFixtures.attemptReason(inputText);
+    }
+
     public static Reply status(int status, String body) {
         return new Reply(status, body, 0);
     }
@@ -311,6 +327,7 @@ public final class StubResponses {
             if ("QUERY_EXPANSION".equals(purpose)) return completed(queriesJson(defaultQueries(text)));
             if ("EVENT_NORMALIZATION".equals(purpose)) return completed(defaultNormalization(text));
             if ("EVENT_CLASSIFICATION".equals(purpose)) return completed(defaultClassification(text));
+            if ("SCENARIO_GENERATION".equals(purpose)) return completed(ScenarioFixtures.scenarioDefault(text));
             return status(400, "{\"error\":\"unexpected request\"}");
         };
     }

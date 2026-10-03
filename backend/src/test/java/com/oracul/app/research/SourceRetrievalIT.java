@@ -129,7 +129,9 @@ class SourceRetrievalIT extends AbstractRunIT {
             .replace("\"uniqueEvents\":0", "\"uniqueEvents\":20")
             // slice 07: 20 default-classified events (risk 0.4 / opportunity 0.6 = BRIGHT, profile A d > 0.1 -> all are
             // counter candidates, core/supporting empty); every source is "Stub Site" -> max-per-publisher 3 caps the pack
-            .replace("\"eventsSelected\":0", "\"eventsSelected\":3").replace("\"counterSignals\":0", "\"counterSignals\":3")));
+            .replace("\"eventsSelected\":0", "\"eventsSelected\":3").replace("\"counterSignals\":0", "\"counterSignals\":3")
+            // slice 08: the non-empty pack gets a SC-DEFAULT scenario whose single fact cites one Evidence ID
+            .replace("\"sourcesUsed\":0", "\"sourcesUsed\":1")));
     }
 
     // #11

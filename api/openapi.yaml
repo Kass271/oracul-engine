@@ -375,6 +375,14 @@ paths:
       tags: [reasoning]
       operationId: getStructuredScenario
       summary: Final structured scenario of the run with its Evidence Guard and critic reports
+      description: |
+        200 as soon as one generation attempt with a parsed scenario is committed (any run status, also FAILED
+        SCENARIO_REJECTED). `structuredScenario` is the latest parsed attempt's scenario — the cleaned version when
+        its Evidence Guard outcome was PASS / PASS_WITH_REMOVALS, otherwise as parsed; `accepted` tells whether that
+        attempt is the run's final scenario. Run QUEUED / RUNNING before the first parsed attempt, FAILED before
+        stage EXPLORING_FUTURES, FAILED INVALID_SCENARIO, or COMPLETED without a scenario (empty Evidence Pack) →
+        409 SCENARIO_NOT_READY "The scenario is not ready yet". Unknown, malformed or foreign runId → 404
+        RUN_NOT_FOUND "Future not found".
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -1464,6 +1472,7 @@ components:
       properties:
         id:
           type: string
+          pattern: '^F[1-9][0-9]*$'
           example: F1
         statement:
           type: string
@@ -1478,6 +1487,7 @@ components:
       properties:
         id:
           type: string
+          pattern: '^I[1-9][0-9]*$'
           example: I1
         statement:
           type: string
@@ -1497,6 +1507,7 @@ components:
       properties:
         id:
           type: string
+          pattern: '^P[1-9][0-9]*$'
           example: P1
         statement:
           type: string
@@ -1677,9 +1688,34 @@ components:
           format: int32
           minimum: 1
 
+    ScenarioAttemptReason:
+      type: string
+      enum: [INITIAL, SCHEMA_CORRECTION, GUARD_REGENERATION, CRITIC_REGENERATION, ALTERNATIVE_DISTINCT]
+
+    ScenarioAttemptSummary:
+      type: object
+      description: One SCENARIO_GENERATION call of the run (a transport retry is not a new attempt)
+      required: [attempt, reason, parsed, schemaErrors]
+      properties:
+        attempt:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 5
+        reason:
+          $ref: '#/components/schemas/ScenarioAttemptReason'
+        parsed:
+          type: boolean
+          description: The output was a valid StructuredScenario
+        schemaErrors:
+          type: array
+          description: Parser errors (scenario-reasoning.md FR-20), empty when parsed
+          items:
+            type: string
+
     StructuredScenarioRecord:
       type: object
-      required: [runId, evidencePackId, structuredScenario, guardReports, criticReports, generationAttempts]
+      required: [runId, evidencePackId, attempt, accepted, structuredScenario, guardReports, criticReports, generationAttempts, attempts]
       properties:
         runId:
           type: string
@@ -1687,6 +1723,15 @@ components:
         evidencePackId:
           type: string
           format: uuid
+        attempt:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 5
+          description: Attempt number of `structuredScenario` (latest attempt with a parsed scenario)
+        accepted:
+          type: boolean
+          description: True when `attempt` is the run's accepted (final) scenario
         structuredScenario:
           $ref: '#/components/schemas/StructuredScenario'
         guardReports:
@@ -1705,6 +1750,11 @@ components:
           minimum: 1
           maximum: 5
           description: Generation calls made for this run (each attempt reason at most once)
+        attempts:
+          type: array
+          description: Every generation attempt, attempt ascending
+          items:
+            $ref: '#/components/schemas/ScenarioAttemptSummary'
 
     # ---------- result ----------
     FutureStory:

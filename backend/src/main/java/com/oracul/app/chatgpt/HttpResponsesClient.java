@@ -20,6 +20,7 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 public class HttpResponsesClient {
 
+    private static final String TOOLS_MESSAGE = "Responses requests must not carry tools";
     private static final Logger log = LoggerFactory.getLogger(HttpResponsesClient.class);
 
     private final ChatGptAuthService auth;
@@ -62,7 +63,7 @@ public class HttpResponsesClient {
      * unusable.
      */
     public Optional<String> createText(UUID sessionId, Map<String, Object> body) {
-        String payload = json.writeValueAsString(body);
+        String payload = serializeToolless(body);
         SessionCredentials creds = auth.requireUsableCredentials(sessionId);
         Result result = send(creds, payload);
         if (result.status() == 401 || result.status() == 403) {
@@ -86,15 +87,28 @@ public class HttpResponsesClient {
      * refresh retry, transport retry) and may throw to stop the call, e.g. {@link CallAbandonedException}.
      */
     public Optional<String> createTextOrThrow(UUID sessionId, Map<String, Object> body, Runnable beforeSend) {
-        String payload = json.writeValueAsString(body);
+        return createTextOrThrow(sessionId, body, beforeSend, status -> { });
+    }
+
+    /**
+     * As {@link #createTextOrThrow(UUID, Map, Runnable)}; {@code finalStatus} receives the HTTP status of the last
+     * request made (null when no HTTP response arrived or no request was sent) when the call ends, normally or not.
+     */
+    public Optional<String> createTextOrThrow(UUID sessionId, Map<String, Object> body, Runnable beforeSend,
+                                              java.util.function.Consumer<Integer> finalStatus) {
+        String payload = serializeToolless(body);
+        Integer[] last = new Integer[1];
+        Throwable failure = null;
         try {
             beforeSend.run();
             SessionCredentials creds = auth.requireUsableCredentials(sessionId);
             Result result = send(creds, payload);
+            last[0] = status(result);
             if (rejected(result)) {
                 beforeSend.run();
                 creds = auth.refreshAfterRejection(sessionId);
                 result = send(creds, payload);
+                last[0] = status(result);
                 if (rejected(result)) {
                     throw ChatGptCallException.sessionExpired();
                 }
@@ -111,6 +125,7 @@ public class HttpResponsesClient {
                 }
                 beforeSend.run();
                 result = send(creds, payload);
+                last[0] = status(result);
                 if (rejected(result)) {
                     throw ChatGptCallException.sessionExpired();
                 }
@@ -123,7 +138,48 @@ public class HttpResponsesClient {
             }
             return result.text();
         } catch (com.oracul.app.common.ApiException e) {
-            throw ChatGptCallException.sessionExpired();
+            ChatGptCallException mapped = ChatGptCallException.sessionExpired();
+            failure = mapped;
+            throw mapped;
+        } catch (RuntimeException | Error t) {
+            failure = t;
+            throw t;
+        } finally {
+            try {
+                finalStatus.accept(last[0]);
+            } catch (RuntimeException | Error statusError) {
+                if (failure == null) {
+                    throw statusError;
+                }
+                failure.addSuppressed(statusError);
+            }
+        }
+    }
+
+    private static Integer status(Result r) {
+        return r.status() > 0 ? r.status() : null;
+    }
+
+    /** NFR-3: serializes once; the checked payload is exactly the sent payload. */
+    private String serializeToolless(Map<String, Object> body) {
+        String payload = json.writeValueAsString(body);
+        JsonNode root = json.readTree(payload);
+        rejectWebSearch(root);
+        return payload;
+    }
+
+    private static void rejectWebSearch(JsonNode node) {
+        if (node.isObject()) {
+            for (Map.Entry<String, JsonNode> e : node.properties()) {
+                if (e.getKey().startsWith("web_search") || e.getKey().equals("tools") || e.getKey().equals("tool_choice")) {
+                    throw new IllegalStateException(TOOLS_MESSAGE);
+                }
+                rejectWebSearch(e.getValue());
+            }
+        } else if (node.isArray()) {
+            for (JsonNode child : node) {
+                rejectWebSearch(child);
+            }
         }
     }
 

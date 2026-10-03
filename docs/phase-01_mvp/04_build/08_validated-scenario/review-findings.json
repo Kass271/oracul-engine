@@ -1,0 +1,62 @@
+{
+  "slice": "08_validated-scenario",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/HttpResponsesClient.java",
+      "line": 164,
+      "fr": "FR-19",
+      "problem": "The tool guard walks only the Java object graph through Map and Iterable. Keys inside a JsonNode/ObjectNode value (Iterable over values only), Object[] arrays and POJO/record values are never inspected, but they are still serialized into the payload. For example, body.put(\"text\", someObjectNodeWithWebSearchOptions) would pass the guard. The spec (Behaviour FR-19) says this guard 'cannot be bypassed by callers'. All current callers build plain Maps, so this cannot be reached today. It is a defense-in-depth gap only.",
+      "fix": "Run the check on the serialized form: walk json.readTree(payload) after writeValueAsString (top-level tools/tool_choice, any field name starting with web_search at any depth) before beforeSend/send.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "api/openapi.yaml",
+      "line": 383,
+      "fr": "FR-20",
+      "problem": "The new getStructuredScenario description lists 'FAILED INVALID_SCENARIO' as a 409 SCENARIO_NOT_READY case without qualification. Take the path of IT #13: SCHEMA_CORRECTION parses SC-BAD, the guard FAILs, and GUARD_REGENERATION returns invalid output. The run ends FAILED INVALID_SCENARIO, yet an earlier parsed attempt exists, so ReasoningController returns 200 with that scenario (accepted false). The code follows the spec table row '>= 1 parsed attempt (any run status) -> 200', so the contract text is the inaccurate side.",
+      "fix": "Change the description (and the matching spec row) to 'FAILED INVALID_SCENARIO without any parsed attempt'. Optionally assert the #13 record status in StructuredScenarioIT.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/reasoning/ScenarioGenerationIT.java",
+      "line": 101,
+      "fr": "FR-19",
+      "problem": "These ReasoningPipeline paths have no tests: (a) the run deadline passing during or before a SCENARIO_GENERATION call. Expected: CallAbandonedException/Stop, RUN_TIMEOUT, stage kept, no scenario_attempt row, no further calls. (b) model_call.response_status for failed calls (429 should store 429, 500 twice should store 500, a timeout should store null). The code looks right, but the abandon semantics and the status recording rely only on review.",
+      "fix": "Add an IT that sets a short run deadline with a slow stub answer and asserts RUN_TIMEOUT, stageIndex 7 and 0 attempt rows. Extend #15 to assert model_call.response_status (429 / 500 / 401).",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/runs/PipelineExecutor.java",
+      "line": 74,
+      "fr": "FR-19",
+      "problem": "For EMPTY_PACK the loop starts at index 6 (EXPLORING_FUTURES). Stage 7 is committed a second time and gets a placeholder-stage-delay pause, and ReasoningPipeline returns before waiting the min-stage-duration remainder of stage 7. The spec (pipeline step 2) says only stages 8-10 are placeholders. This only affects timing.",
+      "fix": "Wait remainder(started) before returning EMPTY_PACK and start the executor loop at index 7 for EMPTY_PACK.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/HttpResponsesClient.java",
+      "line": 147,
+      "fr": "FR-19",
+      "problem": "finalStatus.accept runs in a finally block. If the consumer throws (the model_call status UPDATE fails), that exception replaces an in-flight ChatGptCallException or CallAbandonedException. The run then ends INTERNAL_ERROR instead of CHATGPT_RATE_LIMITED, CHATGPT_UNAVAILABLE, SESSION_EXPIRED or RUN_TIMEOUT.",
+      "fix": "Wrap finalStatus.accept in try/catch(RuntimeException) and log it (no body), or record the status in ReasoningPipeline after the call returns or throws.",
+      "status": "fixed"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ public class ChatGptCallException extends RuntimeException {
     private final String code;
 
     public ChatGptCallException(String code, String message) {
-        super(message, null, false, false);
+        super(message, null, true, false);
         this.code = code;
     }
 

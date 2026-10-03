@@ -108,6 +108,8 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(purposes.filter((p) => p === 'QUERY_EXPANSION')).toHaveLength(1);
     expect(purposes.filter((p) => p === 'EVENT_NORMALIZATION')).toHaveLength(3);
     expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(3);
+    // slice 08: the pack is not empty, so exactly one SCENARIO_GENERATION request follows
+    expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(1);
     expect(requests.some((r) => JSON.stringify(r).includes('"tools"'))).toBe(false);
   });
 
@@ -126,6 +128,8 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     }
     const purposes = (await recorded(page)).map(purposeOf);
     expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(6);
+    // the pack is empty (every event excluded): no scenario generation
+    expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(0);
   });
 
   test('FR-14 a rate-limited normalisation fails the run with the plan-limit message and writes no events', async ({ page }) => {

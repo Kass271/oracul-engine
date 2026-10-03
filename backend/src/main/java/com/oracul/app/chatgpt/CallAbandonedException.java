@@ -4,6 +4,6 @@ package com.oracul.app.chatgpt;
 public class CallAbandonedException extends RuntimeException {
 
     public CallAbandonedException() {
-        super("run abandoned", null, false, false);
+        super("run abandoned", null, true, false);
     }
 }

@@ -1,6 +1,7 @@
 package com.oracul.app.runs;
 
 import com.oracul.app.api.model.RunStage;
+import com.oracul.app.reasoning.ReasoningPipeline;
 import com.oracul.app.research.ResearchProfileFactory;
 import jakarta.annotation.PreDestroy;
 import java.time.Clock;
@@ -28,16 +29,19 @@ public class PipelineExecutor {
     private final GenerationRunRepository runs;
     private final ResearchProfileFactory profiles;
     private final ResearchPipeline research;
+    private final ReasoningPipeline reasoning;
     private final Clock clock;
     private final Duration stageDelay;
     private final ThreadPoolExecutor pool;
 
-    PipelineExecutor(GenerationRunRepository runs, ResearchProfileFactory profiles, ResearchPipeline research, Clock clock,
+    PipelineExecutor(GenerationRunRepository runs, ResearchProfileFactory profiles, ResearchPipeline research,
+                     ReasoningPipeline reasoning, Clock clock,
                      @Value("${oracul.run.placeholder-stage-delay:PT1S}") Duration stageDelay,
                      @Value("${oracul.run.executor-threads:4}") int threads) {
         this.runs = runs;
         this.profiles = profiles;
         this.research = research;
+        this.reasoning = reasoning;
         this.clock = clock;
         this.stageDelay = stageDelay;
         AtomicInteger n = new AtomicInteger();
@@ -62,8 +66,13 @@ public class PipelineExecutor {
             if (!research.run(runId, sessionId, run.configuration(), profile)) {
                 return;
             }
+            ReasoningPipeline.Result result = reasoning.run(runId, sessionId);
+            if (result == ReasoningPipeline.Result.STOPPED) {
+                return;
+            }
             RunStage[] stages = RunStage.values();
-            for (int i = 6; i < stages.length; i++) {
+            int from = result == ReasoningPipeline.Result.ACCEPTED ? 9 : 6;
+            for (int i = from; i < stages.length; i++) {
                 if (!runs.markStageIfRunning(runId, stages[i], now())) {
                     return; // ended by another writer: the task ends silently
                 }

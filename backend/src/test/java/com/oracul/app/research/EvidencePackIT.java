@@ -163,7 +163,9 @@ class EvidencePackIT extends AbstractEvidenceIT {
     void rankingMakesNoChatGptCallAndLeaksNoToken() throws Exception {
         Ran r = runV4(A);
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
-        assertThat(purposes()).containsExactlyInAnyOrder(EXPANSION, NORMALIZATION, CLASSIFICATION);
+        // slice 08: ranking itself makes no call; the only later request is the single SCENARIO_GENERATION one
+        assertThat(purposes()).containsExactlyInAnyOrder(EXPANSION, NORMALIZATION, CLASSIFICATION, "SCENARIO_GENERATION");
+        assertThat(purposes().get(purposes().size() - 1)).isEqualTo("SCENARIO_GENERATION");
         String all = packRaw(r.sid(), r.id()) + eventsRaw(r.sid(), r.id())
             + getRun(r.sid(), r.id()).andReturn().getResponse().getContentAsString()
             + jdbc.queryForObject("select coalesce(string_agg(cast(p as text), ' '), '') from evidence_pack p", String.class)

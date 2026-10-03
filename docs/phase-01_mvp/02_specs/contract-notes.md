@@ -177,6 +177,15 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    `[]` and never become evidence. `RunGuard` (status RUNNING and before deadline) is checked before every EVENT_*
    request and before persisting; a run past its deadline stops calling ChatGPT, writes nothing and ends RUN_TIMEOUT
    (the slice-11 scheduler uses the same code). No contract change (`api/openapi.yaml` unchanged).
+13. Slice 08 (scenario-reasoning.md "Slice 08_validated-scenario"): stages 7–9 become real without the critic
+   (slice 10); stage 10 stays a placeholder, so an accepted scenario still ends COMPLETED without headline. A run
+   whose Evidence Pack has 0 items makes no SCENARIO_GENERATION call and completes as before (interim until slice 12
+   makes it INSUFFICIENT_EVIDENCE). `StructuredScenarioRecord` gains `attempt`, `accepted` and `attempts`
+   (`ScenarioAttemptSummary`, `ScenarioAttemptReason`); `getStructuredScenario` answers 200 as soon as a parsed
+   attempt exists (also for SCENARIO_REJECTED runs, `accepted` false). `model_call` records SCENARIO_GENERATION bodies
+   only in this slice. `HttpResponsesClient` refuses any body carrying `tools` / `tool_choice` / `web_search*`
+   (IllegalStateException, no request sent). `counts.sourcesUsed` = distinct Evidence IDs cited by `factsUsed` of the
+   accepted cleaned scenario.
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32
