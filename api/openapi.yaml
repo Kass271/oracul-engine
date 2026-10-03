@@ -1580,6 +1580,7 @@ components:
           type: string
         evidenceIds:
           type: array
+          description: Evidence IDs of the step; the WHY panel shows them as chips on FACT and INFERENCE steps (FR-26)
           items:
             type: string
         year:
@@ -1863,26 +1864,34 @@ components:
 
     ResultSource:
       type: object
+      description: One Evidence Pack item as shown in the SOURCES panel (FR-27); title, publisher, publishedAt and url are those of the item's first (highest-quality) source
       required: [evidenceId, section, title, publisher, url, usedInScenario, counterSignal]
       properties:
         evidenceId:
           type: string
+          example: E001
         section:
           $ref: '#/components/schemas/EvidenceSection'
         title:
           type: string
+          description: Empty when unknown (UI shows "Untitled source")
         publisher:
           type: string
+          description: Empty when unknown (UI shows "Unknown publisher")
         publishedAt:
           type: string
           format: date-time
+          description: Absent when unknown (UI shows "date unknown")
         url:
           type: string
           format: uri
+          description: Link to the real source; the UI renders it as a new-tab link only for http/https
         usedInScenario:
           type: boolean
+          description: True iff the evidenceId is cited by a fact of the accepted scenario's factsUsed (UI badge "used in scenario")
         counterSignal:
           type: boolean
+          description: True iff section is COUNTER_SIGNAL (UI badge "counter-signal")
 
     ResearchExplanation:
       type: object

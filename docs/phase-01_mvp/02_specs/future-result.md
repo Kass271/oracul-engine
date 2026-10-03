@@ -73,6 +73,8 @@ search plan:
   model reasoning is shown.
 - Errors: an Evidence ID without a matching source item (should not happen after the guard) → chip rendered
   disabled, no navigation.
+- Changes earlier behaviour: none — the backend (`getFutureResult` already returns `causalChain` and `sources`, slice 09) and every existing assertion stay as they are; the result view only gains the `result-actions` row and the WHY panel below `scenario-metadata` (checked: `future-result.spec.ts`, `scenario-metadata.spec.ts`, `run-view.spec.ts`, `future-story.spec.ts`, `critic.spec.ts` assert no button count, child count or last element of `result-view`)
+- Ranges & invariants: `causalChain` has ≥ 2 steps, rendered in array order (= ascending `order`), one `why-step-<order>` per step and exactly n − 1 `why-arrow` elements; `informationClass` is one of 4 values with label FACT / INFERENCE / SPECULATION / `ORACUL FUTURE — <year>` (year = step `year`, absent → year of `story.futureDate`), every one of the 4 classes is tested; Evidence ID chips exist only on FACT and INFERENCE steps, one per entry of `evidenceIds` in array order (0, 1 and 2 ids tested), never on SPECULATION / FUTURE_EVENT steps even if `evidenceIds` is non-empty; a chip is enabled ⇔ its id is the `evidenceId` of some `sources` entry; highlight lasts exactly 3000 ms (present at 2999 ms, absent at 3000 ms) and at most one item is highlighted at a time; statements are rendered as text (never `innerHTML`).
 
 ### FR-27 — SOURCES view
 - Happy path: button "SOURCES" (`open-sources`) toggles the SOURCES panel (`sources-panel`) listing every evidence item
@@ -81,6 +83,8 @@ search plan:
 - Rules: badges "used in scenario" (`source-used-<evidenceId>`) for usedInScenario and "counter-signal"
   (`source-counter-<evidenceId>`) for counter-signals; both may apply. Only `http`/`https` URLs are rendered as links.
 - Errors: as FR-23 (result endpoint).
+- Changes earlier behaviour: none — backend `sources` assembly (slice 09, `FutureResultService`) is unchanged; the result view only gains the `open-sources` button and the SOURCES panel; no existing test asserts their absence (checked the same files as FR-26)
+- Ranges & invariants: one `source-item-<evidenceId>` per `sources` entry in API order (0, 1 and 4 entries tested; 0 → `sources-empty` "No sources"); `usedInScenario` × `counterSignal` = 4 classes (neither / used only / counter only / both) each tested, badge present ⇔ flag true; `publishedAt` present → `d MMM yyyy` in UTC with English 3-letter month (`2026-09-30T23:30:00Z` → `30 Sep 2026`, `2026-01-05T08:00:00Z` → `5 Jan 2026`), absent → `date unknown`; `url` classes: `https://…` and `http://…` → link (`href` = url, `target="_blank"`, `rel="noopener noreferrer"`), `javascript:…`, `ftp://…`, `""` → no link, `source-no-link-<evidenceId>` "Link unavailable"; empty `title` → "Untitled source", empty `publisher` → "Unknown publisher"; title / publisher rendered as text (never `innerHTML`).
 
 ### FR-28 — WHY THESE NEWS? and research summary
 - Happy path: button "WHY THESE NEWS?" (`open-why-news`) toggles the panel (`why-news-panel`) listing each research
@@ -111,8 +115,10 @@ search plan:
   `story-headline`, `story-dateline`, `story-body`, `story-paragraph`, `scenario-metadata`, `meta-realism`,
   `meta-darkness`, `meta-optimism`, `meta-horizon`, `meta-wildcards`, `meta-wildcard-<index>`, `meta-articles-considered`, `meta-unique-events`, `meta-evidence-used`,
   `critic-issues`, `critic-issues-title`, `critic-issue-<index>` (slice 10, scenario-reasoning.md "Slice 10_critic"), `open-why`, `why-panel`, `why-step-<order>`, `why-step-class-<order>`,
-  `why-evidence-<order>-<evidenceId>`, `open-sources`, `sources-panel`, `source-item-<evidenceId>`,
-  `source-link-<evidenceId>`, `source-used-<evidenceId>`, `source-counter-<evidenceId>`, `open-why-news`,
+  `why-evidence-<order>-<evidenceId>`, `why-step-statement-<order>`, `why-arrow`, `result-actions`, `open-sources`,
+  `sources-panel`, `sources-empty`, `source-item-<evidenceId>`, `source-id-<evidenceId>`, `source-title-<evidenceId>`,
+  `source-publisher-<evidenceId>`, `source-date-<evidenceId>`, `source-link-<evidenceId>`,
+  `source-no-link-<evidenceId>`, `source-used-<evidenceId>`, `source-counter-<evidenceId>` (slice 13 section below), `open-why-news`,
   `why-news-panel`, `why-news-intent-<intentId>`, `research-summary`, `summary-searches`, `summary-articles`,
   `summary-events`, `summary-selected`, `summary-counter-signals`, `summary-sources-used`.
 
@@ -406,3 +412,123 @@ test, stub reset.
   `result-view` (replaces "all 10 steps `done`, `aria-valuenow` 100" and "reload shows the finished progress view");
   request lists in `events.spec.ts`, `evidence-pack.spec.ts`, `validated-scenario.spec.ts` gain 1 STORY_WRITING for
   runs that accept a scenario (`invalid` / `guard-fail` runs and empty packs make none).
+
+## Slice 13_why-and-sources — FR-26, FR-27 test contract
+
+Delivers the WHY COULD THIS HAPPEN? panel and the SOURCES panel of the result view. Frontend + E2E only: the data
+comes unchanged from `getFutureResult` (`causalChain`, `sources`, `story.futureDate`) — **no backend code, no
+contract shape change, no new backend tests** (`FutureResultIT` #3 already pins `causalChain` and `sources`). Not in
+this slice: WHY THESE NEWS? (14), quick actions (16). Where this section is more precise than "Behaviour" or "UI"
+above, this section wins.
+
+### Frontend files (`src/app/result/`)
+| File | Selector | Inputs / outputs |
+|---|---|---|
+| `why-panel.ts` | `app-why-panel` | inputs `chain: CausalStep[]`, `sourceIds: string[]` (evidenceIds of `sources`), `futureDate: string`; output `evidenceSelected: string` (the clicked chip's evidenceId) |
+| `sources-panel.ts` | `app-sources-panel` | inputs `sources: ResultSource[]`, `highlightedId: string \| null` |
+`FutureResultComponent` keeps the signals `whyOpen` (false), `sourcesOpen` (false), `highlightedId` (null) and adds
+below `app-scenario-metadata`, inside `result-view`, in this DOM order: the row `result-actions` with the buttons
+`open-why` then `open-sources`; then `app-why-panel` (only while `whyOpen`); then `app-sources-panel` (only while
+`sourcesOpen`). No new HTTP call: `getFutureResult` is still called exactly once per runId.
+
+### Buttons (both `mat-stroked-button`, `type="button"`)
+- `open-why`: text exactly `WHY COULD THIS HAPPEN?`; `aria-expanded` `"false"` / `"true"`; click toggles `why-panel`
+  (present ⇔ open). `open-sources`: text exactly `SOURCES`; same `aria-expanded` rule; click toggles `sources-panel`.
+- Both panels start closed and are independent (opening one never closes the other).
+
+### WHY panel (`why-panel`, a `mat-card`)
+- Title `why-title` text exactly `WHY COULD THIS HAPPEN?`.
+- For each step of `causalChain` in array order: card `why-step-<order>` containing `why-step-class-<order>` and
+  `why-step-statement-<order>` (text exactly `statement`, interpolated). Between two consecutive cards one element
+  `why-arrow` with text exactly `↓` (none before the first or after the last; count = steps − 1).
+  Counting steps in tests: elements whose `data-testid` matches `^why-step-\d+$` (the prefix `why-step-` also matches
+  `why-step-class-…` / `why-step-statement-…`).
+- `why-step-class-<order>` text exactly: FACT → `FACT`, INFERENCE → `INFERENCE`, SPECULATION → `SPECULATION`,
+  FUTURE_EVENT → `ORACUL FUTURE — <year>` (U+2014, one space each side; `<year>` = step `year`, absent/null → year
+  of `story.futureDate`).
+- FACT and INFERENCE steps: one chip per `evidenceIds` entry in array order, `button` element
+  `why-evidence-<order>-<evidenceId>`, text exactly the evidenceId, inside a `why-evidence-list-<order>` container
+  (container absent when `evidenceIds` is empty). SPECULATION and FUTURE_EVENT steps never render chips or the
+  container.
+- Chip enabled ⇔ `sourceIds` contains its id. Disabled chip: `disabled` attribute set, click emits nothing (SOURCES
+  stays as it was, nothing highlighted).
+- Enabled chip click → `evidenceSelected(id)` → `FutureResultComponent`: `sourcesOpen` = true (stays open if already
+  open; the WHY panel stays open), `highlightedId` = id, after render `scrollIntoView({ behavior: 'smooth', block:
+  'center' })` on `source-item-<id>` (call guarded — `scrollIntoView` may be undefined in jsdom), and a 3000 ms
+  timer that resets `highlightedId` to null. A new click (same or other chip) cancels the previous timer and starts
+  a new one; the timer is cleared on destroy.
+
+### SOURCES panel (`sources-panel`, a `mat-card`)
+- Title `sources-title` text exactly `SOURCES`. `sources` empty → only `sources-empty` text exactly `No sources`.
+- One `source-item-<evidenceId>` per `sources` entry, in API order (already Evidence-ID order), containing:
+  `source-id-<id>` (text exactly evidenceId), `source-title-<id>` (title, empty → `Untitled source`),
+  `source-publisher-<id>` (publisher, empty → `Unknown publisher`), `source-date-<id>` (`publishedAt` as `d MMM yyyy`
+  in UTC, English month abbreviation `Jan`…`Dec`; absent → `date unknown`).
+- Link: url starting (case-insensitive) with `http://` or `https://` → `a` `source-link-<id>`, `href` = url,
+  `target="_blank"`, `rel="noopener noreferrer"`, text exactly `Open source`. Any other url (`""`, `javascript:…`,
+  `ftp://…`) → no `a` element in the item; `source-no-link-<id>` text exactly `Link unavailable`.
+- Badges (`mat-chip` or span): `source-used-<id>` text exactly `used in scenario` ⇔ `usedInScenario`;
+  `source-counter-<id>` text exactly `counter-signal` ⇔ `counterSignal`; both may be present.
+- Highlight: the item whose evidenceId = `highlightedId` has the CSS class `highlighted` and
+  `data-highlighted="true"`; every other item has neither (attribute absent).
+- All texts interpolated (never `innerHTML`).
+
+### Frontend fixture R13 (unit tests; result = `futureResult()` of `future-result.spec.ts` with these fields)
+`story.futureDate` `2027-03-01`.
+`causalChain`:
+| order | informationClass | claimId | statement | evidenceIds | year |
+|---|---|---|---|---|---|
+| 1 | FACT | F1 | `Ports adopt robots.` | `["E001","E004"]` | — |
+| 2 | INFERENCE | I1 | `Labour demand shifts.` | `["E002","E009"]` | — |
+| 3 | SPECULATION | P1 | `Unions push back <b>hard</b>.` | `["E003"]` | — |
+| 4 | FUTURE_EVENT | — | `Robots run the ports.` | `[]` | 2031 |
+`sources`:
+| evidenceId | section | title | publisher | publishedAt | url | usedInScenario | counterSignal |
+|---|---|---|---|---|---|---|---|
+| E001 | CORE | `Ports adopt robots` | `Reuters` | `2026-09-30T23:30:00Z` | `https://example.com/a` | true | false |
+| E002 | SUPPORTING | `Robot sales rise` | `AP` | — | `http://example.com/b` | false | false |
+| E003 | COUNTER_SIGNAL | `Unions win` | `BBC` | `2026-01-05T08:00:00Z` | `https://example.com/c` | false | true |
+| E004 | COUNTER_SIGNAL | `""` | `""` | — | `javascript:alert(1)` | true | true |
+
+### Frontend unit tests (Vitest, `// @trace FR-26` / `// @trace FR-27`, through the `/futures/:runId` route as in `future-result.spec.ts`)
+`frontend/src/app/result/why-panel.spec.ts` (`describe('slice 13_why-and-sources: WHY panel')`):
+| # | Setup | Expected |
+|---|---|---|
+| W1 | R13 | `open-why` text `WHY COULD THIS HAPPEN?`, `aria-expanded` `false`; no `why-panel`, no `sources-panel` |
+| W2 | R13, click `open-why` | `why-panel` present, `aria-expanded` `true`; 4 steps (`^why-step-\d+$`) in DOM order 1…4; classes `FACT`, `INFERENCE`, `SPECULATION`, `ORACUL FUTURE — 2031`; statements exact (step 3 shows `<b>hard</b>` literally, no `b` element); 3 `why-arrow` with text `↓` |
+| W3 | R13, open | chips `why-evidence-1-E001`, `why-evidence-1-E004`, `why-evidence-2-E002`, `why-evidence-2-E009` in that DOM order, texts = ids; no `why-evidence-3-E003`, no `why-evidence-list-3` / `-4`; `why-evidence-2-E009` disabled, the others enabled |
+| W4 | R13, open, click `why-evidence-1-E001` | `sources-panel` present, `open-sources` `aria-expanded` `true`, `why-panel` still present; `source-item-E001` has class `highlighted` and `data-highlighted="true"`, no other item has them; `getFutureResult` called once |
+| W5 | W4 with fake timers | still highlighted at 2999 ms; at 3000 ms no item highlighted; panels stay open |
+| W6 | W4, then at 2000 ms click `why-evidence-2-E002` | only `source-item-E002` highlighted; at +2999 ms still; at +3000 ms none |
+| W7 | open, click disabled `why-evidence-2-E009` | no `sources-panel`, nothing highlighted |
+| W8 | `open-sources` open first, then click `why-evidence-1-E004` | `sources-panel` still present (not toggled closed), `source-item-E004` highlighted |
+| W9 | R13 with step 4 `year` absent | class `ORACUL FUTURE — 2027` |
+| W10 | click `open-why` twice | no `why-panel`, `aria-expanded` `false` |
+
+`frontend/src/app/result/sources-panel.spec.ts` (`describe('slice 13_why-and-sources: SOURCES panel')`):
+| # | Setup | Expected |
+|---|---|---|
+| S1 | R13 | `open-sources` text `SOURCES`, `aria-expanded` `false`, no `sources-panel` |
+| S2 | R13, click `open-sources` | `sources-panel` present, title `SOURCES`; exactly 4 items (`^source-item-E\d+$`) in DOM order E001, E002, E003, E004; no `why-panel` |
+| S3 | open | E001: id `E001`, title `Ports adopt robots`, publisher `Reuters`, date `30 Sep 2026`; E002 date `date unknown`; E003 date `5 Jan 2026`; E004 title `Untitled source`, publisher `Unknown publisher` |
+| S4 | open | `source-link-E001` is an `a`, `href` `https://example.com/a`, `target` `_blank`, `rel` `noopener noreferrer`, text `Open source`; `source-link-E002` `href` `http://example.com/b`; E004: no `source-link-E004`, no `a` inside `source-item-E004`, `source-no-link-E004` text `Link unavailable` |
+| S5 | open | badges: E001 `source-used` only; E002 none; E003 `source-counter` only; E004 both; texts `used in scenario` / `counter-signal` |
+| S6 | `sources: []`, open | `sources-empty` text `No sources`, no `source-item-*` |
+| S7 | title `<img src=x onerror=alert(1)>` on E001 | shown literally, no `img` element |
+| S8 | open both panels, click `open-sources` again | `sources-panel` gone, `why-panel` still present |
+
+### E2E (`e2e/tests/why-and-sources.spec.ts`; `// @trace FR-26, FR-27`)
+Same setup as `future-story.spec.ts` (connect through the stub, acceptance configuration, `generate-button`, fresh
+context, `POST /__control/reset`); stub modes `ok` (no stub change in this slice). `R` = `GET
+/api/runs/<id>/result` of the run, `e1` = `R.causalChain[0].evidenceIds[0]` (the stub's F1 Evidence ID).
+- FR-26: `result-view` visible (timeout 60 s); no `why-panel`; click `open-why` → `why-panel` visible; steps
+  (`^why-step-\d+$`) count = `R.causalChain.length` (4); `why-step-class-1..4` = `FACT`, `INFERENCE`, `SPECULATION`,
+  `ORACUL FUTURE — <R.causalChain[3].year>`; `why-step-statement-1` = `R.causalChain[0].statement`;
+  `why-evidence-1-<e1>` visible and enabled; click it → `sources-panel` visible, `source-item-<e1>` in viewport with
+  class `highlighted`; after 3.5 s no element has `data-highlighted="true"`.
+- FR-27: click `open-sources` → items (`^source-item-E\d+$`) count = `R.sources.length` (> 0) in the order of
+  `R.sources`; for every entry: `source-id-<id>` = id, `source-title-<id>` = title, `source-publisher-<id>` =
+  publisher, `source-link-<id>` `href` = url, `target` `_blank`, `rel` `noopener noreferrer` (the stub URLs are
+  `http://stub:4010/…` — links are not followed); `source-used-<id>` present ⇔ `usedInScenario` (`source-used-<e1>`
+  present; count = `GET /api/runs/<id>` `counts.sourcesUsed`); `source-counter-<id>` present ⇔ `section` =
+  `COUNTER_SIGNAL` (count = `counts.counterSignals`).

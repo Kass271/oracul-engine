@@ -7,12 +7,13 @@ import { ResultService } from '../api/services/result.service';
 import { RunFailure } from '../runs/run-failure';
 import { FutureStoryComponent } from './future-story';
 import { ScenarioMetadataComponent } from './scenario-metadata';
+import { WhySourcesComponent } from './why-sources';
 
 const GENERIC_ERROR = 'Something went wrong — try again';
 
 @Component({
   selector: 'app-future-result',
-  imports: [MatProgressBarModule, RunFailure, FutureStoryComponent, ScenarioMetadataComponent],
+  imports: [MatProgressBarModule, RunFailure, FutureStoryComponent, ScenarioMetadataComponent, WhySourcesComponent],
   template: `
     @if (error(); as message) {
       <app-run-failure [message]="message" />
@@ -20,6 +21,7 @@ const GENERIC_ERROR = 'Something went wrong — try again';
       <div class="result" data-testid="result-view">
         <app-future-story [story]="r.story" [labels]="r.labels" />
         <app-scenario-metadata [metadata]="r.metadata" [issues]="r.openCriticIssues ?? []" />
+        <app-why-sources [causalChain]="r.causalChain ?? []" [sources]="r.sources ?? []" [futureDate]="r.story.futureDate" />
       </div>
     } @else {
       <div class="loading" data-testid="result-loading">

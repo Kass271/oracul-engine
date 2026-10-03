@@ -1,0 +1,62 @@
+{
+  "slice": "13_why-and-sources",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/result/why-sources.ts",
+      "line": 34,
+      "fr": "FR-26",
+      "problem": "The `why-evidence-list-<order>` container is rendered for every FACT/INFERENCE step, including steps whose `evidenceIds` is empty. The slice test contract (future-result.md, 'WHY panel') requires 'container absent when `evidenceIds` is empty'. The R2 test case with 0 ids (why-panel.spec.ts:304-316) only counts the chips and does not check that the container is absent, so the deviation goes undetected.",
+      "fix": "Change the condition to `@if ((s.informationClass === 'FACT' || s.informationClass === 'INFERENCE') && (s.evidenceIds?.length ?? 0) > 0)`. In R2, add `expect(!!byId('why-evidence-list-1')).toBe(evidenceIds.length > 0)`.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/result/why-sources.ts",
+      "line": 19,
+      "fr": "FR-26",
+      "problem": "The spec's file table names two components, `why-panel.ts` (`app-why-panel`, output `evidenceSelected`) and `sources-panel.ts` (`app-sources-panel`, input `highlightedId`), with `whyOpen`/`sourcesOpen`/`highlightedId` held in `FutureResultComponent`. The build ships one combined `app-why-sources` component that holds all the state. Observable behaviour and test ids match, but the structure differs from the spec.",
+      "fix": "Split into the two specified components, or update the spec's file table to describe the combined component.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/result/why-sources.ts",
+      "line": 28,
+      "fr": "FR-26",
+      "problem": "The spec says `why-panel` and `sources-panel` are each a `mat-card`. Both are rendered as plain `<section>` elements without Material card styling, so they look inconsistent with the other Material surfaces of the result view.",
+      "fix": "Import MatCardModule and render each panel as `<mat-card data-testid=...>` with `mat-card-content`.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "e2e/tests/why-and-sources.spec.ts",
+      "line": 51,
+      "fr": "FR-26",
+      "problem": "Orphaned doc comment `/** \"ORACUL FUTURE — March 1, 2027\" -> \"2027-03-01\" */` describes a helper that no longer exists. It is attached to nothing and misleads readers.",
+      "fix": "Remove the stale comment.",
+      "status": "fixed"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "frontend/src/app/result/sources-panel.spec.ts",
+      "line": 235,
+      "fr": "FR-27",
+      "problem": "The R1 rows pass a constant 'E001' as an unused first parameter (`_id`). The title template 'R1 %s: %i sources render %i items in API order' has three placeholders but only two values, so the test names come out as e.g. 'R1 E001: 0 sources render %i items', which is misleading.",
+      "fix": "Drop the unused column and use the title '%i sources render that many items in API order'.",
+      "status": "fixed"
+    }
+  ]
+}
