@@ -105,12 +105,27 @@ test.describe('FR-10 Generate the Future', () => {
     await connect(page);
     await page.getByTestId('generate-button').click();
     await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
+    const id = page.url().split('/').pop()!;
+    await expect(page.getByTestId('progress-view')).toBeVisible();
+
+    // A second start request from the same browser session is rejected while the run is active.
     const r = await page.request.post('/api/runs', {
       data: { realism: 8, darkness: 5, optimism: 5, horizon: '1y', wildcards: [], customWildcards: [], output: { story: true, illustration: false } },
     });
     expect(r.status()).toBe(409);
-    await page.goto('/');
+    expect(await r.json()).toEqual({ code: 'RUN_ALREADY_ACTIVE', message: 'A generation is already running' });
+
+    // Client-side (SPA) navigation back to the welcome view, no reload: the button is disabled.
+    await page.evaluate(() => {
+      history.pushState({}, '', '/');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByTestId('welcome-view')).toBeVisible();
     await expect(page.getByTestId('generate-button')).toBeDisabled();
+
+    // Reloading /futures/<id> resumes the progress view (generation-runs.md, run view).
+    await page.goto(`/futures/${id}`);
+    await expect(page.getByTestId('progress-view')).toBeVisible();
   });
 
   test('API error paths: invalid body and unconnected session', async ({ request }) => {

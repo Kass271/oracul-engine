@@ -6,6 +6,7 @@ import com.oracul.app.api.model.RunKind;
 import com.oracul.app.api.model.RunStage;
 import com.oracul.app.api.model.RunStatus;
 import com.oracul.app.api.model.ScenarioConfiguration;
+import com.oracul.app.api.model.SearchPlan;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -23,12 +24,12 @@ public class GenerationRunRepository {
                       RunStage stage, ScenarioConfiguration configuration, ResearchProfile researchProfile,
                       ResearchCounts counts, String failureCode, String failureMessage, Integer suggestedRealism,
                       String headline, OffsetDateTime createdAt, OffsetDateTime updatedAt,
-                      OffsetDateTime completedAt) {
+                      OffsetDateTime completedAt, SearchPlan searchPlan) {
     }
 
     private static final String COLUMNS = "id, generation_id, session_id, kind, parent_run_id, status, stage, "
         + "configuration, research_profile, counts, failure_code, failure_message, suggested_realism, headline, "
-        + "created_at, updated_at, completed_at";
+        + "created_at, updated_at, completed_at, search_plan";
 
     private final JdbcTemplate jdbc;
     private final JsonMapper json;
@@ -68,6 +69,21 @@ public class GenerationRunRepository {
             write(profile), now, id);
     }
 
+    void storeSearchPlan(UUID id, SearchPlan plan, OffsetDateTime now) {
+        jdbc.update("update generation_run set search_plan = cast(? as jsonb), updated_at = ? where id = ?",
+            write(plan), now, id);
+    }
+
+    void storeSearchResults(UUID id, SearchPlan plan, ResearchCounts counts, OffsetDateTime now) {
+        jdbc.update("update generation_run set search_plan = cast(? as jsonb), counts = cast(? as jsonb), "
+            + "updated_at = ? where id = ?", write(plan), write(counts), now, id);
+    }
+
+    void storeCounts(UUID id, ResearchCounts counts, OffsetDateTime now) {
+        jdbc.update("update generation_run set counts = cast(? as jsonb), updated_at = ? where id = ?",
+            write(counts), now, id);
+    }
+
     void markCompleted(UUID id, RunStage stage, OffsetDateTime now) {
         jdbc.update("update generation_run set status = 'COMPLETED', stage = ?, updated_at = ?, completed_at = ? "
             + "where id = ? and status in ('QUEUED','RUNNING')", stage.getValue(), now, now, id);
@@ -94,7 +110,8 @@ public class GenerationRunRepository {
                 (Integer) rs.getObject("suggested_realism"), rs.getString("headline"),
                 utc(rs.getObject("created_at", OffsetDateTime.class)),
                 utc(rs.getObject("updated_at", OffsetDateTime.class)),
-                utc(rs.getObject("completed_at", OffsetDateTime.class))),
+                utc(rs.getObject("completed_at", OffsetDateTime.class)),
+                rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class)),
             id, sessionId);
         return rows.stream().findFirst();
     }

@@ -1,0 +1,179 @@
+{
+  "slice": "05_search-sources",
+  "round": 10,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryTemplates.java",
+      "line": 22,
+      "fr": "FR-12",
+      "problem": "Every template list has exactly 26 entries (subject + 25 suffixes), but ResearchPipeline accepts oracul.research.query-budget up to 100 (ResearchPipeline.java:45). With no topics MAJOR gets 0.5*B queries (> 26 from B = 53), and generic ADJACENT gets 0.333*B. With one topic WILDCARD gets 0.4*B (> 26 from B = 66). In these cases SearchPlanner.plan (line 175 loop) silently produces fewer queries than buckets[].queries says. The sum of queries is then less than queryBudget, which breaks the spec invariant and the 'a plan is always complete without ChatGPT' rule. QueryExpander.merge cannot fill the gap either, and the expansion prompt asks for the reduced count. SearchPlannerTest only checks budgets 4..40, so the gap is not caught.",
+      "fix": "Make the template lists long enough for the largest per-intent share at budget 100 (e.g. >= 50 distinct entries by adding suffix combinations), or lower the accepted maximum budget to the value the templates can fill. Extend the SearchPlannerTest invariant loop to 4..100.",
+      "status": "fixed",
+      "note": "Round 7: forIntent now yields 1 + 25 suffixes + 28*27 qualifier pairs = 782 entries per intent, above the largest per-intent share at budget 100 (MAJOR 50). SearchPlannerTest invariant loop covers budgets 4..100 with 0/1/3/10 topics, so sum = queryBudget is asserted. Queries are subject (<= 4 words) + 1-2 plain keywords, <= 6 words, no quotes/operators from the fixed lists. Reversed-pair near-duplicates (a b / b a) are never reached within budget 100. Round 9 re-check: still holds for catalogue/category/MAJOR/UNEXPECTED intents (subjects capped at 4 words, giving 803 entries) and for custom labels of <= 6 or >= 8 words. Custom labels of exactly 7 words fall short at high budgets, see R12. Round 10 re-check: still holds after LONG_LABEL_WORDS 7->6."
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleMetadataFetcher.java",
+      "line": 85,
+      "fr": "FR-13",
+      "problem": "Article URLs come from a third-party index, and the fetcher follows up to 3 redirects to any host, including loopback, RFC1918, link-local (169.254.169.254) and Docker service names (db, stub). This is a blind GET SSRF from the backend container into the user's machine and LAN. The leak path is narrow: only og:description / og:site_name of text/html answers are stored and returned via listRunSources. Together with NFR-6 (local-only deployment), that keeps this low. The spec does not ask for host filtering, and the test fixtures depend on 127.0.0.1 article URLs, so fixing it needs a spec/config addition.",
+      "fix": "Before each hop (initial URL and every Location), resolve the host and reject loopback / site-local / link-local / any-local / multicast addresses. Gate this behind a property such as oracul.news.allow-private-article-hosts (default false; true in AbstractRunIT and the E2E override). Record the rule in research-pipeline.md.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleMetadataFetcher.java",
+      "line": 138,
+      "fr": "FR-13",
+      "problem": "og:site_name is only trimmed (SourceRetrieval) and has no length cap or whitespace collapse. A hostile page can put up to ~512 KB into source.publisher, which is returned on every listRunSources call and will later reach prompts. unescape() only decodes 6 entities, so common entities such as &#8217;, &rsquo; and &nbsp; stay as literal text in summaries and publishers.",
+      "fix": "Collapse whitespace in the publisher and cap it (e.g. 200 chars, falling back to domain when it is too long). Decode numeric (&#NNN; / &#xHH;) and common named entities in unescape().",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/HttpResponsesClient.java",
+      "line": 79,
+      "fr": "FR-12",
+      "problem": "The oracul.openai.timeout is enforced only through HttpRequest.timeout. The JDK HttpClient stops that timer once response headers arrive, so a server that sends headers and then stalls the body blocks http.send(...ofString()) indefinitely. The run never reaches template fallback. GdeltNewsProvider and ArticleMetadataFetcher already bound the whole exchange with future.get(timeout); this client does not. ResearchPlanTimeoutIT only covers a delay before headers.",
+      "fix": "Use http.sendAsync(...).get(timeout) (cancelling on timeout), as GdeltNewsProvider does, so the whole exchange including the body is bounded.",
+      "status": "fixed",
+      "note": "Round 7: send() uses sendAsync(...).get(timeout) and future.cancel(true) on TimeoutException, returning status -1 so no refresh/retry happens on timeout and QueryExpander falls back to templates. The 401/403 refresh path does one retry, also bounded. HttpResponsesClientBodyStallTest proves a headers-then-stalled-body server is given up in < 3 s with timeout 500 ms."
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryExpansionPrompt.java",
+      "line": 96,
+      "fr": "FR-12",
+      "problem": "The spec says control characters are 'removed' from custom labels in the untrusted block, but sanitize() replaces them with a space. No test exercises sanitize() at all: neither a label containing '<<<END_ORACUL_UNTRUSTED_DATA>>>' nor one with control characters. The marker-escaping part of NFR-4 for this prompt is therefore unproven.",
+      "fix": "Replace \\p{Cntrl} with \"\" and add an IT/unit case with a custom label containing '<<<END_ORACUL_UNTRUSTED_DATA>>>' and a control character. Assert that the data block contains '‹‹‹END_ORACUL_UNTRUSTED_DATA›››' and that exactly one real end marker exists.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research",
+      "line": 1,
+      "fr": "FR-13",
+      "problem": "The slice test contract lists the unit classes QueryExpanderTest, GdeltNewsProviderTest, SourceFilterTest, UrlNormalizerTest, ArticleMetadataFetcherTest and SourceQualityTableTest. None of them exist. Their behaviour is covered at IT level instead (ResearchPlanIT #4, SourceFilteringIT, SourceMetadataIT, SourceQualityIT, SourceRetrievalIT), and the assertions there are concrete rather than tautological, so this is a structural deviation only. The exact UrlNormalizer spec example (HTTP://Example.COM:80/a?utm_source=x&b=1#f) is only covered through a 127.0.0.1 variant.",
+      "fix": "Either add the pure unit tests (cheap: UrlNormalizer, SourceQualityTable and ArticleMetadataFetcher.parse are static or pure), or amend the test contract to name the IT classes that cover them.",
+      "status": "open"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/research/UrlNormalizer.java",
+      "line": 35,
+      "fr": "FR-13",
+      "problem": "Normalization keeps the URL userinfo (user:password@host). Credentials embedded in a provider URL are stored in source.url, returned by listRunSources, and sent in the metadata fetch.",
+      "fix": "Drop userinfo during normalization (or drop such articles in filtering).",
+      "status": "open"
+    },
+    {
+      "id": "R8",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SourceRetrieval.java",
+      "line": 111,
+      "fr": "FR-13",
+      "problem": "Default settings allow 20 queries x 25 records = 500 candidates. At article-fetch-concurrency 8 with a 3 s timeout, the worst case is about 63 rounds x 3 s = 188 s in READING_SOURCES alone. That exceeds the NFR-2 run budget of 180 s, and there is no stage-level deadline on the fetch phase.",
+      "fix": "Bound the whole READING_SOURCES fetch phase with a deadline (e.g. 30 s). Sources whose fetch has not finished keep provider metadata (metadataFetched=false), the same as other fetch failures.",
+      "status": "open"
+    },
+    {
+      "id": "R9",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryTemplates.java",
+      "line": 98,
+      "fr": "FR-12",
+      "problem": "New in round 7: cut() caps every subject to MAX_WORDS = 4, and that includes custom topics (subject(), line 79). The spec says 'custom topics use the trimmed label' (research-pipeline.md QueryTemplates), and labels may be up to 40 characters. A label such as 'Collapse of the global internet' becomes 'Collapse of the global', which drops the only meaningful noun. Every template query for that intent (the subject, plus 25 suffixes and the pairs) then searches for 'Collapse of the global ...'. In TEMPLATE_FALLBACK, and for any gap-filled queries in MODEL mode, the user's own topic is not searched. customLabel() also cuts a label that itself contains ' — ' at the dash. QueryTemplatesTest only uses the 2-word 'Solar sails', so this is not caught. Catalogue labels are all <= 4 words, so they are unaffected.",
+      "fix": "Do not word-cap custom labels: use the full trimmed label, which is at most 40 chars, so it is safe under the 120-char limit. Keep the cap, if wanted, only for catalogue/category subjects. Better still, pass the raw custom label through the intent instead of parsing it back out of the description. Add a QueryTemplatesTest case with a 5+ word custom label (and one containing ' — ') asserting that list.get(0) equals the trimmed label.",
+      "status": "fixed",
+      "note": "Round 8: custom labels are no longer word-capped. sanitiseCustom caps them at 40 chars, and customLabel strips only the known planner suffixes (BOTH/DARK/OPT) instead of cutting at a dash. QueryTemplatesTest covers a 5-word label, an em-dash label and a 40-char label, with and without the suffix, and asserts the full label is in every query. The remaining long-label underfill is tracked separately as R11. Round 9 re-check: still holds. Labels <= 7 words are kept whole. Labels > 7 words keep every content word in order in the first query (up to 8). Round 10 re-check: still holds after LONG_LABEL_WORDS 7->6."
+    },
+    {
+      "id": "R10",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryTemplates.java",
+      "line": 73,
+      "fr": "FR-12",
+      "problem": "Subjects come straight from catalogue labels, and some of them are poor GDELT keyword queries. The 'ai' category gives the bare 2-character query 'ai' plus 'ai <suffix>'. GDELT DOC rejects keywords that are too short with a 200 text/plain error, the same 'too short' response the spec already lists in row #12, so those queries come back FAILED. 'political / institutional' sends a literal '/'. Custom labels are passed through unsanitized, so a label with a '\"', a leading '-' or 'OR' becomes GDELT operator syntax. None of this breaks a template rule in the spec, but in TEMPLATE_FALLBACK the AI adjacent category may retrieve nothing. Please confirm the AI case against live GDELT.",
+      "fix": "Map category subjects to keyword-friendly forms (e.g. ai -> 'artificial intelligence', 'political / institutional' -> 'political institutions'). Strip quotes, parentheses and leading '-' from custom-label words, and drop tokens shorter than 3 chars when building GDELT keyword queries.",
+      "status": "fixed",
+      "note": "Round 8: ai maps to 'artificial intelligence'. sanitise() removes quotes, parentheses and '/', strips leading '-', and drops standalone or/and/not and tokens with no letters or digits. A one-word subject gets ' research' added. everyCatalogueIntentYieldsSafePlainKeywordQueries and hostileCustomLabelsNeverProduceOperatorSyntax assert 2-8 keywords and no operator syntax for every catalogue intent and 8 hostile labels. Not checked against live GDELT. Round 9 re-check: still holds. sanitise() is unchanged and the long-label path only removes stopwords from the sanitised words. Round 10 re-check: still holds after LONG_LABEL_WORDS 7->6."
+    },
+    {
+      "id": "R11",
+      "severity": "medium",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryTemplates.java",
+      "line": 74,
+      "fr": "FR-12",
+      "problem": "add() rejects any query with more than MAX_KEYWORDS = 8 words, and custom subjects are no longer word-capped (sanitiseCustom only caps at 40 chars). CustomWildcard.label allows 40 chars (openapi maxLength 40), which easily fits 8-10 words, e.g. 'Fall of the big US tech firms in the EU' (39 chars, 10 words). For a sanitised label of 9+ words even the bare subject is rejected, so forIntent returns an EMPTY list. For exactly 8 words it returns 1 entry, because every suffix/qualifier pushes it past 8. With 7 words it returns about 35, which is fine. This breaks the spec rule '>= 20 distinct strings for every possible intent ... a custom topic' (research-pipeline.md QueryTemplates). SearchPlanner.plan (line 175 loop) then takes 0 or 1 queries for that intent, so sum(queries) < queryBudget, and the R1 invariant fails again for valid input. Example: one custom wildcard at budget 20 gives WILDCARD 8, so the plan has 12 queries; at budget 100 it is 40 short. QueryExpander.merge (line 113) cannot gap-fill from the same empty list, so even in MODEL mode a short model answer for that intent stays short. In TEMPLATE_FALLBACK the user's own custom topic is never searched. No test covers a custom label of more than 7 words: the 40-char test label 'Rise of quantum battery startups in Asia' has 7 words, and SearchPlannerTest's invariant loop uses only short labels.",
+      "fix": "Keep the full sanitised label as list.get(0) when it is <= 8 words. For the suffix/qualifier variants use a reduced subject: drop stopwords (of, the, in, by, a, an, to, for, on, at), then cap at 6 words, so subject + 2 qualifiers stays <= 8. If the full label is > 8 words, use the reduced subject as the first entry too (or relax the cap in the spec for custom labels). Add a QueryTemplatesTest case with a 10-word <= 40-char label asserting size >= 20, and a SearchPlannerTest invariant case with one such custom topic at budgets 4..100 asserting sum = queryBudget.",
+      "status": "fixed",
+      "note": "Round 9: for custom labels longer than 7 sanitised words, forIntent uses the first 8 non-stopword words as list.get(0) and the first 6 non-stopword words as the subject for the suffix/qualifier variants, so subject + 2 qualifiers stays <= 8 words. Simulated: 'Fall of the big US tech firms in the EU' gives 803 entries, and 'Big US tech firms lose EU court fight' (8 words, 1 stopword-free) gives 804. QueryTemplatesTest checks three 8-10-word labels for size >= 20, distinctness, safe keywords and topic-word order. SearchPlannerTest checks budgets 4..100 with one and three 10-word custom topics for sum = budget. The remaining 7-word gap is tracked as R12. Round 10 re-check: still holds after LONG_LABEL_WORDS 7->6."
+    },
+    {
+      "id": "R12",
+      "severity": "medium",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryTemplates.java",
+      "line": 25,
+      "fr": "FR-12",
+      "problem": "LONG_LABEL_WORDS = 7 leaves a gap. A custom label that sanitises to exactly 7 words (e.g. the existing test label 'Rise of quantum battery startups in Asia', or 'AI-driven job loss & new tax on robots') is kept whole as the subject. Then subject + 2-word suffix and subject + qualifier pair are 9 words, and add() rejects them. forIntent then returns only 33 entries: the label, 11 one-word suffixes and 21 new single qualifiers. That is >= 20, so the spec minimum holds. But with one custom topic the WILDCARD bucket gets floor/largest-remainder 0.4*B, which is more than 33 for B >= 83 (B = 100 gives 40). SearchPlanner.plan (line 175 loop) then plans fewer queries than buckets[WILDCARD].queries, so sum(queries) < queryBudget for valid input at an accepted budget (max 100). That is the R1/R11 invariant again, now 7 short at B = 100, and QueryExpander.merge cannot gap-fill from the same list. The invariant loops in SearchPlannerTest use only catalogue topics and 10-word custom labels, so this is not caught. Labels of 6 words (803 entries) and 8+ words (803+) are fine.",
+      "fix": "Make the reduced-subject path apply whenever subject + 2 qualifiers would exceed MAX_KEYWORDS: keep the full label as list.get(0) when it is <= 8 words, and use the <= 6-word content subject for the variants when the label has more than 6 words (i.e. LONG_LABEL_WORDS = 6). Add a 7-word custom label (e.g. 'Rise of quantum battery startups in Asia') to the SearchPlannerTest one-topic invariant loop for budgets 4..100.",
+      "status": "fixed",
+      "note": "Round 10: LONG_LABEL_WORDS = 6, so any custom label of 7+ sanitised words with >= 2 content words takes the reduced path. The full label (if <= 8 words) is list.get(0), and the variants use the first <= 6 content words, so subject + 2 qualifiers stays <= 8. Simulated: 'Rise of quantum battery startups in Asia' gives 804 entries and 'Growth of AI in the European Union' gives 804. SearchPlannerTest.everyLabelWordCountKeepsThePlanInvariantsForEveryBudget runs labels of 1..10 words (incl. 40-char ones) x 3 topic shapes x 2 aspect settings x budgets 4..100 and asserts total == budget, per-bucket count == allocation, distinctness and the R10 safety rules. Cross-intent dedupe (SearchPlanner.plan line 179) also handles duplicate custom labels and custom labels equal to catalogue labels, because every such list has about 800 entries. Remaining gap for stopword-only labels: R14."
+    },
+    {
+      "id": "R13",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/GetRunProgressIT.java",
+      "line": 20,
+      "fr": "FR-12",
+      "problem": "The new @AfterEach awaitNoActiveRuns() is sound. It is global per Spring context (each context has its own Testcontainers Postgres), it fails loudly with the stuck run ids instead of hiding them, and the opt-outs are classes with their own stage-delay properties, so no leaked pending run reaches a checked class. One problem: GetRunProgressIT opts out with the comment 'runs are kept pending on purpose', but it uses a PT1S delay and its only test waits for COMPLETED. The opt-out is unneeded and the comment is wrong. It only weakens the guard if a second test is added to that class.",
+      "fix": "Remove the override in GetRunProgressIT, or correct the comment.",
+      "status": "fixed",
+      "note": "Round 10: the opt-out override is removed. GetRunProgressIT now inherits the AbstractRunIT @AfterEach awaitNoActiveRuns() guard."
+    },
+    {
+      "id": "R14",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryTemplates.java",
+      "line": 94,
+      "fr": "FR-12",
+      "problem": "The exhaustive test closes the label-length class only for labels with at least 2 non-stopword words. longCustomWords returns null when fewer than 2 content words remain, and forIntent then keeps the full label as the subject even when it has more than 6 words. Simulated with the exact forIntent logic: 'the a of in on to x' (7 words) gives 33 entries, 'on to the at by of a an' (8 words) gives 1, and 'in on at by to of a an the for' (10 words, 30 chars, valid under maxLength 40) gives 0, an EMPTY list. That breaks the spec rule '>= 20 distinct strings ... for a custom topic', and SearchPlanner.plan then plans fewer queries than buckets[WILDCARD].queries at every budget (or at B >= 83 for the 7-word case). QueryExpander.merge cannot gap-fill from the same list. Only nonsense labels made almost entirely of stopwords hit this, so it is low. None of the LABELS in SearchPlannerTest are stopword-dominated. Separately, research-pipeline.md still says 'custom topics use the trimmed label' and does not document the sanitisation or the >6-word content-word reduction the code now applies.",
+      "fix": "When a label has more than 6 sanitised words and fewer than 2 content words, fall back to the first 6 sanitised words (stopwords included) as the variant subject, or to 'emerging topic', so the list always has >= 20 entries. Add 'in on at by to of a an the for' to the test LABELS. Document the sanitise + long-label rule in the QueryTemplates paragraph of research-pipeline.md.",
+      "status": "open"
+    },
+    {
+      "id": "R15",
+      "severity": "low",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryTemplates.java",
+      "line": 152,
+      "fr": "FR-12",
+      "problem": "sanitise() strips quotes, parentheses, '/', leading '-' and OR/AND/NOT, but keeps tokens containing ':' and other punctuation. GDELT DOC treats tokens like 'sourcecountry:france', 'domain:x.com', 'theme:...', 'near20:' and 'tone<-5' as operators. A custom label 'sourcecountry:france war' is therefore sent as operator syntax, and an invalid operator makes GDELT return its plain-text error, so the query is FAILED. Commas also pass through ('i am who i am, as'). hostileCustomLabelsNeverProduceOperatorSyntax and the exhaustive SearchPlannerTest safety checks only look for quotes, parentheses, '/', leading '-' and OR/AND/NOT, so they do not cover this. Impact is limited: the user only affects their own run.",
+      "fix": "In sanitise(), replace every character that is not a letter, digit, '-' or apostrophe with a space (or at least ':', '<', '>', '=', ','), and add 'sourcecountry:france war' and 'tone<-5 shock' to the hostile-label test.",
+      "status": "open"
+    }
+  ]
+}

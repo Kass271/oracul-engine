@@ -19,8 +19,11 @@ public class ResearchController implements ResearchApi {
 
     private final ObjectProvider<GenerationRunRepository> runs;
     private final ObjectProvider<CurrentSession> session;
+    private final ObjectProvider<SourceRepository> sources;
 
-    ResearchController(ObjectProvider<GenerationRunRepository> runs, ObjectProvider<CurrentSession> session) {
+    ResearchController(ObjectProvider<GenerationRunRepository> runs, ObjectProvider<CurrentSession> session,
+                       ObjectProvider<SourceRepository> sources) {
+        this.sources = sources;
         this.runs = runs;
         this.session = session;
     }
@@ -32,7 +35,7 @@ public class ResearchController implements ResearchApi {
         if (run.researchProfile() == null) {
             throw new ApiException(HttpStatus.CONFLICT, "RESEARCH_NOT_READY", "Research has not started yet");
         }
-        return ResponseEntity.ok(new RunResearch(run.id(), run.researchProfile(), run.counts()));
+        return ResponseEntity.ok(new RunResearch(run.id(), run.researchProfile(), run.counts()).searchPlan(run.searchPlan()));
     }
 
     @Override
@@ -47,6 +50,8 @@ public class ResearchController implements ResearchApi {
 
     @Override
     public ResponseEntity<SourceList> listRunSources(UUID runId) {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        var run = runs.getObject().find(runId, session.getObject().id())
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found"));
+        return ResponseEntity.ok(new SourceList(sources.getObject().list(run.id())));
     }
 }

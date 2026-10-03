@@ -30,6 +30,11 @@ import org.springframework.test.web.servlet.ResultActions;
 })
 class StartRunIT extends AbstractRunIT {
 
+    @Override
+    protected boolean awaitRunsAfterEach() {
+        return false; // runs are kept pending on purpose
+    }
+
     private static final String ACTIVE_MSG = "A generation is already running";
     private static final String NOT_CONNECTED_MSG = "Connect ChatGPT to generate";
     private static final String EXPIRED_MSG = "ChatGPT session expired — please reconnect";

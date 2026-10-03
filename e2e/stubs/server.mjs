@@ -7,13 +7,16 @@ const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [] };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', requests: { responses: [], gdelt: [] } };
 
 function reset() {
   state.mode = 'ok';
   state.counter = 0;
   state.codes.clear();
   state.issued.length = 0;
+  state.news = 'ok';
+  state.requests.responses.length = 0;
+  state.requests.gdelt.length = 0;
 }
 
 const json = (res, status, body) => {
@@ -30,6 +33,8 @@ const readBody = (req) =>
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   });
+const sha1 = (v) => createHash('sha1').update(v).digest('hex');
+const seendate = () => new Date(Date.now() - 86_400_000).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 const s256 = (v) => createHash('sha256').update(v).digest('base64url');
 
 function tokens() {
@@ -65,6 +70,80 @@ export const routes = {
     empty(res, 204);
   },
   'GET /__control/issued': async (req, res) => json(res, 200, { values: [...state.issued] }),
+
+  'POST /__control/news': async (req, res, url, body) => {
+    let mode;
+    try {
+      mode = JSON.parse(body || '{}').mode;
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!['ok', 'down'].includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    state.news = mode;
+    empty(res, 204);
+  },
+  'GET /__control/requests': async (req, res, url) => {
+    const kind = url.searchParams.get('kind');
+    if (!Object.hasOwn(state.requests, kind)) return json(res, 400, { error: 'unknown_kind' });
+    json(res, 200, { requests: [...state.requests[kind]] });
+  },
+
+  // OpenAI Responses API stub: routed by the "ORACUL REQUEST <PURPOSE>" marker in the prompt.
+  'POST /v1/responses': async (req, res, url, body) => {
+    let parsed;
+    try {
+      parsed = JSON.parse(body || '{}');
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    state.requests.responses.push(parsed);
+    const text = (parsed.input ?? [])
+      .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+      .map((c) => c.text ?? '')
+      .join('\n');
+    const purpose = /ORACUL REQUEST ([A-Z_]+)/.exec(text)?.[1];
+    let output;
+    if (purpose === 'QUERY_EXPANSION') {
+      const queries = [];
+      for (const m of text.matchAll(/^- (\S+) \| \S+ \| (\d+) \|/gm)) {
+        for (let i = 1; i <= Number(m[2]); i++) queries.push({ intentId: m[1], text: `${m[1]} stub query ${i}` });
+      }
+      output = JSON.stringify({ queries });
+    } else {
+      return json(res, 400, { error: 'unsupported_purpose', purpose: purpose ?? null });
+    }
+    json(res, 200, {
+      id: `resp_${state.requests.responses.length}`,
+      status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: output }] }],
+    });
+  },
+
+  // GDELT DOC 2.0 artlist stub: 5 articles per query, the first is shared by all queries (dedup).
+  'GET /api/v2/doc/doc': async (req, res, url) => {
+    const query = url.searchParams.get('query') ?? '';
+    state.requests.gdelt.push({ query, params: Object.fromEntries(url.searchParams) });
+    if (state.news === 'down') return json(res, 503, { error: 'unavailable' });
+    const n = state.requests.gdelt.length;
+    const key = sha1(query).slice(0, 8);
+    const base = 'http://stub:4010/articles';
+    const articles = [`${base}/shared?utm_source=${n}`, ...[2, 3, 4, 5].map((a) => `${base}/${key}-${a}`)].map((u, i) => ({
+      url: u,
+      url_mobile: '',
+      title: i === 0 ? 'Shared stub article' : `Stub article ${key}-${i + 1}`,
+      seendate: seendate(),
+      socialimage: '',
+      domain: 'reuters.com',
+      language: 'English',
+      sourcecountry: 'United States',
+    }));
+    json(res, 200, { articles });
+  },
+  'GET /articles/*': async (req, res, url) => {
+    const name = url.pathname.slice('/articles/'.length);
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(`<html><head><meta property="og:site_name" content="Stub Site"><meta property="og:description" content="Summary of ${name.replace(/[^\w-]/g, '')}"></head><body>x</body></html>`);
+  },
 
   'GET /oauth/authorize': async (req, res, url) => {
     const q = url.searchParams;
@@ -108,7 +187,7 @@ export const routes = {
 
 export const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  const handler = routes[`${req.method} ${url.pathname}`];
+  const handler = routes[`${req.method} ${url.pathname}`] ?? (url.pathname.startsWith('/articles/') ? routes[`${req.method} /articles/*`] : undefined);
   if (!handler) return json(res, 404, { error: 'not_found' });
   try {
     await handler(req, res, url, await readBody(req));

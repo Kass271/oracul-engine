@@ -27,15 +27,17 @@ public class PipelineExecutor {
 
     private final GenerationRunRepository runs;
     private final ResearchProfileFactory profiles;
+    private final ResearchPipeline research;
     private final Clock clock;
     private final Duration stageDelay;
     private final ThreadPoolExecutor pool;
 
-    PipelineExecutor(GenerationRunRepository runs, ResearchProfileFactory profiles, Clock clock,
+    PipelineExecutor(GenerationRunRepository runs, ResearchProfileFactory profiles, ResearchPipeline research, Clock clock,
                      @Value("${oracul.run.placeholder-stage-delay:PT1S}") Duration stageDelay,
                      @Value("${oracul.run.executor-threads:4}") int threads) {
         this.runs = runs;
         this.profiles = profiles;
+        this.research = research;
         this.clock = clock;
         this.stageDelay = stageDelay;
         AtomicInteger n = new AtomicInteger();
@@ -55,9 +57,13 @@ public class PipelineExecutor {
         try {
             runs.markStage(runId, RunStage.UNDERSTANDING, now());
             var run = runs.find(runId, sessionId).orElseThrow();
-            runs.storeProfile(runId, profiles.from(run.configuration()), now());
+            var profile = profiles.from(run.configuration());
+            runs.storeProfile(runId, profile, now());
+            if (!research.run(runId, sessionId, run.configuration(), profile)) {
+                return;
+            }
             RunStage[] stages = RunStage.values();
-            for (int i = 1; i < stages.length; i++) {
+            for (int i = 4; i < stages.length; i++) {
                 runs.markStage(runId, stages[i], now());
                 pause();
             }

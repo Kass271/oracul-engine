@@ -160,6 +160,13 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    PT2S, tests PT0S/PT30S) and the placeholder pipeline ends the run COMPLETED without headline (interim terminal
    state, replaced in slice 09). Until slices 09/11/12 the run view keeps showing the progress view for terminal runs.
    `getRunResearch` returns the Research Profile from slice 04 on (`searchPlan` absent until slice 05).
+11. Slice 05 makes stages 2–4 real. New settings: `oracul.openai.model` default `gpt-5`, `oracul.openai.timeout`
+   PT30S, `oracul.news.query-concurrency` 4, `oracul.news.article-max-bytes` 512 KB, `oracul.news.quality.*` domain
+   lists, and `oracul.run.min-stage-duration` (default PT0S, E2E PT2S) so fast real stages stay visible to the 1 s poll.
+   The query-expansion call never retries and falls back to templates on any error except an expired session.
+   Public GDELT DOC 2.0 asks clients to send about one request every 5 s. With 20 queries at concurrency 4, the real
+   service may throttle us; throttled queries count as FAILED. This is a runtime risk, not a test concern: lower
+   `oracul.research.query-budget` or `oracul.news.query-concurrency` if it appears.
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

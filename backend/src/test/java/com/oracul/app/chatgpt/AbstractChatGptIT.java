@@ -23,6 +23,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -31,6 +32,7 @@ import org.springframework.test.web.servlet.ResultActions;
 /** Shared driver for the ChatGPT sign-in flow through MockMvc against the contract paths. */
 @SpringBootTest
 @AutoConfigureMockMvc
+@TestPropertySource(properties = "oracul.run.placeholder-stage-delay=PT0S")
 @Import(TestcontainersConfiguration.class)
 abstract class AbstractChatGptIT {
 
@@ -55,6 +57,27 @@ abstract class AbstractChatGptIT {
     @BeforeEach
     void resetStub() {
         stub.reset();
+    }
+
+    /** Isolation: no in-flight run of this test may reach the shared stub after the next test resets it. */
+    @org.junit.jupiter.api.AfterEach
+    void awaitNoActiveRuns() throws Exception {
+        if (!awaitRunsAfterEach()) return;
+        long end = System.currentTimeMillis() + 5_000;
+        while (true) {
+            java.util.List<String> active = jdbc.queryForList(
+                "select cast(id as varchar) from generation_run where status in ('QUEUED','RUNNING')", String.class);
+            if (active.isEmpty()) return;
+            if (System.currentTimeMillis() >= end) {
+                throw new AssertionError("runs still active 5 s after the test (leak into next test): " + active);
+            }
+            Thread.sleep(25);
+        }
+    }
+
+    /** Override with false in ITs that deliberately keep runs pending/running (long stage delays). */
+    boolean awaitRunsAfterEach() {
+        return true;
     }
 
     /** Authorize-URL parameters (decoded) plus the raw Location. */

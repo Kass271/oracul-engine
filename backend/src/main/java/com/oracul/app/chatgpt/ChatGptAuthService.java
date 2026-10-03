@@ -236,6 +236,17 @@ public class ChatGptAuthService {
         }
     }
 
+    /** Forced refresh after the API rejected the access token (401/403); expired session when it fails. */
+    public SessionCredentials refreshAfterRejection(UUID sessionId) {
+        synchronized (lockFor(sessionId)) {
+            SessionCredentials creds = store.credentials(sessionId);
+            if (creds == null) {
+                throw expired();
+            }
+            return refresh(creds);
+        }
+    }
+
     private SessionCredentials refresh(SessionCredentials creds) {
         ChatGptTokenClient.TokenResponse token = null;
         if (creds.refreshToken() != null) {

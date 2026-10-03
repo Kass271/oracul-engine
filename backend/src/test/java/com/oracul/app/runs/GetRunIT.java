@@ -17,9 +17,15 @@ import org.springframework.test.web.servlet.ResultActions;
 // @trace FR-24
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT30S",
+    "oracul.run.min-stage-duration=PT1H",
     "oracul.run.executor-threads=32",
 })
 class GetRunIT extends AbstractRunIT {
+
+    @Override
+    protected boolean awaitRunsAfterEach() {
+        return false; // runs are kept pending on purpose
+    }
 
     private void assertNotFound(ResultActions r) throws Exception {
         r.andExpect(status().isNotFound())

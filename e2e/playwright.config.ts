@@ -5,6 +5,9 @@ export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
   retries: 0,
+  // all specs share one global stub (modes, recorded requests): no parallelism
+  workers: 1,
+  fullyParallel: false,
   reporter: [
     ['list'],
     ['json', { outputFile: 'report/results.json' }],

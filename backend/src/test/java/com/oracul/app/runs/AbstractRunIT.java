@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.jayway.jsonpath.JsonPath;
 import com.oracul.app.TestcontainersConfiguration;
 import com.oracul.app.chatgpt.StubOpenAi;
+import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubResponses;
 import jakarta.servlet.http.Cookie;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -55,6 +57,8 @@ public abstract class AbstractRunIT {
     protected JdbcTemplate jdbc;
 
     protected final StubOpenAi stub = StubOpenAi.INSTANCE;
+    protected final StubResponses responses = StubResponses.INSTANCE;
+    protected final StubGdelt gdelt = StubGdelt.INSTANCE;
 
     @DynamicPropertySource
     static void stubProps(DynamicPropertyRegistry r) {
@@ -64,6 +68,27 @@ public abstract class AbstractRunIT {
     @BeforeEach
     void resetStub() {
         stub.reset();
+    }
+
+    /** Isolation: no in-flight run of this test may reach the shared stub after the next test resets it. */
+    @org.junit.jupiter.api.AfterEach
+    void awaitNoActiveRuns() throws Exception {
+        if (!awaitRunsAfterEach()) return;
+        long end = System.currentTimeMillis() + 5_000;
+        while (true) {
+            java.util.List<String> active = jdbc.queryForList(
+                "select cast(id as varchar) from generation_run where status in ('QUEUED','RUNNING')", String.class);
+            if (active.isEmpty()) return;
+            if (System.currentTimeMillis() >= end) {
+                throw new AssertionError("runs still active 5 s after the test (leak into next test): " + active);
+            }
+            Thread.sleep(25);
+        }
+    }
+
+    /** Override with false in ITs that deliberately keep runs pending/running (long stage delays). */
+    protected boolean awaitRunsAfterEach() {
+        return true;
     }
 
     protected static Map<String, Object> json(String raw) {
@@ -123,6 +148,55 @@ public abstract class AbstractRunIT {
         var b = get("/api/runs/" + runId + "/research");
         if (sid != null) b.cookie(new Cookie("ORACUL_SID", sid));
         return mvc.perform(b);
+    }
+
+    protected ResultActions getSources(String sid, String runId) {
+        try {
+            var b = get("/api/runs/" + runId + "/sources");
+            if (sid != null) b.cookie(new Cookie("ORACUL_SID", sid));
+            return mvc.perform(b);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    /** Body of GET /research (200 expected). */
+    protected Map<String, Object> researchBody(String sid, String runId) throws Exception {
+        MvcResult r = getResearch(sid, runId).andReturn();
+        assertEquals(200, r.getResponse().getStatus(), "getRunResearch: " + r.getResponse().getContentAsString());
+        return json(r.getResponse().getContentAsString());
+    }
+
+    /** Items of GET /sources (200 expected). */
+    @SuppressWarnings("unchecked")
+    protected java.util.List<Map<String, Object>> sourceItems(String sid, String runId) throws Exception {
+        MvcResult r = getSources(sid, runId).andReturn();
+        assertEquals(200, r.getResponse().getStatus(), "listRunSources: " + r.getResponse().getContentAsString());
+        return (java.util.List<Map<String, Object>>) json(r.getResponse().getContentAsString()).get("items");
+    }
+
+    /** Terminal state within the 10 s of the research-pipeline.md slice 05 test contract. */
+    protected Map<String, Object> awaitDone(String sid, String runId) throws Exception {
+        return awaitRun(sid, runId, 10_000, m -> !"QUEUED".equals(m.get("status")) && !"RUNNING".equals(m.get("status")));
+    }
+
+    /** Polls getResearch until searchPlan is present. */
+    protected Map<String, Object> awaitPlan(String sid, String runId, long timeoutMs) throws Exception {
+        long end = System.currentTimeMillis() + timeoutMs;
+        Map<String, Object> last = Map.of();
+        while (System.currentTimeMillis() < end) {
+            MvcResult r = getResearch(sid, runId).andReturn();
+            if (r.getResponse().getStatus() == 200) {
+                last = json(r.getResponse().getContentAsString());
+                if (last.get("searchPlan") != null) return last;
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("searchPlan did not appear within " + timeoutMs + " ms; last=" + last);
+    }
+
+    protected static String withHorizon(String body, String horizon) {
+        return body.replaceFirst("\"horizon\":\"[^\"]+\"", "\"horizon\":\"" + horizon + "\"");
     }
 
     protected ResultActions disconnect(String sid) throws Exception {

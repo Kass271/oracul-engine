@@ -19,9 +19,15 @@ import org.springframework.test.web.servlet.ResultActions;
 // @trace FR-11
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT30S",
+    "oracul.run.min-stage-duration=PT1H",
     "oracul.run.executor-threads=32",
 })
 class RunResearchIT extends AbstractRunIT {
+
+    @Override
+    protected boolean awaitRunsAfterEach() {
+        return false; // runs are kept pending on purpose
+    }
 
     private static final String PROFILE_A = """
         {"darkness":0.9,"optimism":0.2,"realism":0.8,"horizon":"5y","topics":[
@@ -48,11 +54,13 @@ class RunResearchIT extends AbstractRunIT {
     void acceptanceRunExposesItsProfileAndZeroCounts() throws Exception {
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
+        awaitPlan(sid, id, 5000);
         Map<String, Object> body = researchOf(sid, id);
         assertThat(body.get("runId")).isEqualTo(id);
         assertThat(body.get("profile")).isEqualTo(json(PROFILE_A));
         assertThat(body.get("counts")).isEqualTo(json(ZERO_COUNTS));
-        assertThat(absent(body, "searchPlan")).isTrue();
+        // slice 05: the plan is stored before searching (FR-12 row A of ResearchPlanIT carries the full table)
+        assertThat(body.get("searchPlan")).isNotNull();
     }
 
     // #1 DB

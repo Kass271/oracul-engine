@@ -64,9 +64,13 @@ public final class StubOpenAi {
     public static void registerAll(DynamicPropertyRegistry r) {
         registerTokenUrl(r);
         r.add("oracul.chatgpt.authorize-url", INSTANCE::authorizeUrl);
+        com.oracul.app.research.StubResponses.registerAll(r);
+        com.oracul.app.research.StubGdelt.registerAll(r);
     }
 
     public void reset() {
+        com.oracul.app.research.StubResponses.INSTANCE.reset();
+        com.oracul.app.research.StubGdelt.INSTANCE.reset();
         requests.clear();
         issued.clear();
         responder = defaultResponder();

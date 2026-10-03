@@ -279,7 +279,8 @@ paths:
       summary: Research Profile, search plan (intents, buckets, queries) and research counts of a run
       description: |
         200 as soon as the Research Profile is stored (stage UNDERSTANDING); searchPlan is absent until the plan is
-        built. Before the profile exists → 409 RESEARCH_NOT_READY "Research has not started yet". Unknown,
+        committed during RESEARCH_STRATEGY (all queries PENDING), and the query status / articlesReturned are updated
+        when SEARCHING finishes. Before the profile exists → 409 RESEARCH_NOT_READY "Research has not started yet". Unknown,
         malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
         - $ref: '#/components/parameters/RunId'
@@ -302,6 +303,9 @@ paths:
       tags: [research]
       operationId: listRunSources
       summary: Every source retrieved for the run after basic filtering (S001…)
+      description: |
+        Items ordered by id. `items` is empty until READING_SOURCES commits the sources (also for a run that failed
+        with NEWS_UNAVAILABLE). Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -983,6 +987,8 @@ components:
           $ref: '#/components/schemas/QueryBucket'
         text:
           type: string
+          minLength: 1
+          maxLength: 120
         status:
           $ref: '#/components/schemas/SearchQueryStatus'
         articlesReturned:
@@ -1005,6 +1011,10 @@ components:
         topicKey:
           type: string
           description: ResearchTopic key for WILDCARD intents
+        category:
+          type: string
+          description: Catalogue category id for ADJACENT intents derived from a topic category (absent for the generic ADJACENT intent)
+          example: biology
         drivenBy:
           type: array
           description: Panel controls that caused this intent, e.g. "New pandemic 8/10", "Darkness 9/10"
@@ -1077,6 +1087,7 @@ components:
           type: string
         topic:
           type: string
+          description: From the first query that returned the article — WILDCARD topicKey, ADJACENT category or "general", "major", "unexpected"
         entities:
           type: array
           items:
@@ -1093,6 +1104,7 @@ components:
           description: false when the article page timed out or was unreachable (provider metadata kept)
         queryIds:
           type: array
+          description: Ids of every query that returned this (normalized) URL, in query order
           items:
             type: string
 
