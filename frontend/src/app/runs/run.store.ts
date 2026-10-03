@@ -26,6 +26,7 @@ export class RunStore {
   private failures = 0;
   private runId: string | null = null;
   private epoch = 0;
+  private expiredLoadedFor: string | null = null;
   private snack?: MatSnackBarRef<RunErrorMessage>;
 
   readonly run = signal<GenerationRun | null>(null);
@@ -114,6 +115,14 @@ export class RunStore {
         if (epoch !== this.epoch) return;
         this.failures = 0;
         this.run.set(run);
+        if (
+          run.status === 'FAILED' &&
+          run.failure?.code === 'CHATGPT_SESSION_EXPIRED' &&
+          this.expiredLoadedFor !== run.id
+        ) {
+          this.expiredLoadedFor = run.id;
+          this.connection.load();
+        }
         if (run.status === 'QUEUED' || run.status === 'RUNNING') this.schedule();
       },
       error: (err: unknown) => {

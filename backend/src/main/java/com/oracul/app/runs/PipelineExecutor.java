@@ -62,7 +62,10 @@ public class PipelineExecutor {
 
     private void execute(UUID runId, UUID sessionId) {
         try {
-            runs.markStage(runId, RunStage.UNDERSTANDING, now());
+            if (!runs.startRunning(runId, now())) {
+                runs.failTimedOut(runId, now());
+                return;
+            }
             var run = runs.find(runId, sessionId).orElseThrow();
             var profile = profiles.from(run.configuration());
             runs.storeProfile(runId, profile, now());
@@ -90,7 +93,7 @@ public class PipelineExecutor {
         } catch (RuntimeException e) {
             log.error("Pipeline failed for run {}", runId, e);
             try {
-                runs.markFailed(runId, "INTERNAL_ERROR", "Something went wrong — try again", now());
+                runs.markFailed(runId, "INTERNAL_ERROR", RunFailures.message(com.oracul.app.api.model.RunFailureCode.INTERNAL_ERROR), now());
             } catch (RuntimeException inner) {
                 log.error("Could not mark run {} failed", runId, inner);
             }

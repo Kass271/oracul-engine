@@ -1,0 +1,40 @@
+{
+  "slice": "11_run-failures",
+  "round": 6,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/RunDeadlineIT.java",
+      "line": 139,
+      "fr": "FR-32",
+      "problem": "Row #7 takes the total-request snapshot (totalAtTimeout) AFTER responses.release(purpose). StubResponses records requests on arrival (before the gate), so the gated request is already counted before release. Taking the snapshot after release leaves a short window where a request sent by a buggy pipeline right after the released response would be absorbed into the baseline. RunStartupSweepIT #2 (line 58, gdeltBefore taken after release) has the same pattern, and the spec expects exactly '0 GDELT requests' there. Today both checks almost always catch a regression, so they are slightly weaker than the spec, not wrong. Switching from 'no SCENARIO_GENERATION' to a total-count check was otherwise a correct fix: SCENARIO_GENERATION legitimately runs before STORY_WRITING.",
+      "fix": "In RunDeadlineIT #7, read responses.requests.size() right after sweep() and before release(). In RunStartupSweepIT #2, assert gdelt.requests isEmpty() (freshStubs reset it, and X is gated before SEARCHING) rather than comparing with a snapshot taken after release.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/run-failure.ts",
+      "line": 13,
+      "fr": "FR-32",
+      "problem": "The failure view replaces the progress view on its own, through polling, with no user action. failure-message is a plain <p> with no live region, so screen-reader users are not told that the run failed.",
+      "fix": "Add role=\"alert\" (or aria-live=\"assertive\") to the failure-message element or the failure-view container.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/RunFailureHygieneIT.java",
+      "line": 53,
+      "fr": "FR-32",
+      "problem": "The spec's forbidden list for row #1 contains 'boom'. The test checks 'boom http' instead, which is a narrower match than the spec requires. In practice the effect is small because the other tokens would also catch a leaked exception message.",
+      "fix": "Use \"boom\" as the forbidden token, as the spec states.",
+      "status": "open"
+    }
+  ]
+}

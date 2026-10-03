@@ -19,7 +19,12 @@ import { RunStore } from './run.store';
         <button mat-flat-button data-testid="backend-retry" (click)="runs.retry()">Try again</button>
       </div>
     } @else if (runs.run(); as run) {
-      @if (run.status === 'COMPLETED' && run.headline) {
+      @if (run.status === 'FAILED') {
+        <app-run-failure
+          [message]="run.failure?.message ?? 'Something went wrong — try again'"
+          [configuration]="run.configuration"
+        />
+      } @else if (run.status === 'COMPLETED' && run.headline) {
         <app-future-result [runId]="run.id" />
       } @else {
         <app-progress-view />

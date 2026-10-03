@@ -298,3 +298,117 @@ describe('slice 09_future-story: run view switches to the result', () => {
     http.expectOne(isResultGet);
   });
 });
+
+describe('slice 11_run-failures', () => {
+  const ID = '11111111-2222-3333-4444-555555555555';
+  const FAILURES: [string, string][] = [
+    ['NEWS_UNAVAILABLE', 'ORACUL could not reach its news sources — try again later'],
+    ['CHATGPT_RATE_LIMITED', 'ChatGPT plan limit reached — try again later'],
+    ['CHATGPT_UNAVAILABLE', 'ChatGPT is unavailable right now — try again later'],
+    ['CHATGPT_SESSION_EXPIRED', 'ChatGPT session expired — please reconnect'],
+    ['RUN_TIMEOUT', 'Generation took too long — try again'],
+    ['INVALID_SCENARIO', 'ORACUL could not construct a valid scenario'],
+    ['SCENARIO_REJECTED', 'ORACUL could not construct a scenario supported by current evidence'],
+    ['RUN_INTERRUPTED', 'Generation was interrupted — try again'],
+    ['INTERNAL_ERROR', 'Something went wrong — try again'],
+  ];
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  const isRunGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}`);
+  const isResultGet = (r: { url: string; method: string }): boolean => r.url.includes(`/api/runs/${ID}/result`);
+  const el = (): HTMLElement => harness.routeNativeElement as HTMLElement;
+  const has = (selector: string): boolean => el().querySelector(selector) !== null;
+  const text = (id: string): string => (el().querySelector(`[data-testid="${id}"]`)?.textContent ?? '').trim();
+
+  function failed(code: string | null, message?: string, stageIndex = 3): GenerationRun {
+    const [stage, stageLabel] = STAGES[stageIndex - 1];
+    return {
+      ...queued(),
+      id: ID,
+      status: 'FAILED',
+      stage,
+      stageLabel,
+      stageIndex,
+      completedAt: '2026-10-02T18:45:31Z',
+      ...(code ? { failure: { code, message } } : {}),
+    } as GenerationRun;
+  }
+
+  async function render(): Promise<void> {
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+    vi.useRealTimers();
+  });
+
+  // @trace FR-32
+  it.each(FAILURES)('a FAILED run with %s shows only the failure view with its table message', async (code, message) => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(failed(code, message));
+    await render();
+    const present = ['progress-view', 'failure-view', 'backend-unavailable'].filter((id) => has(`[data-testid="${id}"]`));
+    expect(present).toEqual(['failure-view']);
+    expect(has('app-future-result')).toBe(false);
+    expect(text('failure-message')).toBe(message);
+    expect(http.match(isResultGet)).toHaveLength(0);
+  });
+
+  // @trace FR-32
+  it('a FAILED run without a failure shows the generic message', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(failed(null));
+    await render();
+    expect(has('[data-testid="failure-view"]')).toBe(true);
+    expect(text('failure-message')).toBe('Something went wrong — try again');
+  });
+
+  // @trace FR-32
+  it('polling RUNNING then FAILED RUN_TIMEOUT switches to the failure view within one tick and stops polling', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    http.expectOne(isRunGet).flush(runAt(3));
+    harness.detectChanges();
+    expect(has('[data-testid="progress-view"]')).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    http.expectOne(isRunGet).flush(failed('RUN_TIMEOUT', 'Generation took too long — try again'));
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(has('[data-testid="failure-view"]')).toBe(true);
+    expect(has('[data-testid="progress-view"]')).toBe(false);
+    expect(text('failure-message')).toBe('Generation took too long — try again');
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(http.match(isRunGet)).toHaveLength(0);
+  });
+
+  // @trace FR-32
+  it('the failure view never shows the code, the run id, the generation id, a URL or JSON', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(failed('RUN_TIMEOUT', 'Generation took too long — try again'));
+    await render();
+    const content = el().querySelector('[data-testid="failure-view"]')?.textContent ?? '';
+    expect(content).not.toBe('');
+    for (const forbidden of ['RUN_TIMEOUT', ID, GENERATION_ID, 'http', '{', '}']) {
+      expect(content).not.toContain(forbidden);
+    }
+  });
+
+  // @trace FR-32
+  it('Try again of a FAILED run re-submits the failed run configuration', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush({ ...failed('RUN_TIMEOUT', 'Generation took too long — try again'), configuration: { ...CATALOGUE.defaults, darkness: 9 } });
+    await render();
+    (el().querySelector('[data-testid="try-again"]') as HTMLButtonElement).click();
+    const post = http.expectOne((r) => r.method === 'POST' && r.url.endsWith('/api/runs'));
+    expect(post.request.body).toEqual({ ...CATALOGUE.defaults, darkness: 9 });
+  });
+});

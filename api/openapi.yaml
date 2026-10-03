@@ -751,6 +751,17 @@ components:
 
     RunFailureCode:
       type: string
+      description: |
+        Why a run ended without a story (generation-runs.md "Run failure codes and messages"). Fixed messages:
+        NEWS_UNAVAILABLE "ORACUL could not reach its news sources — try again later" · CHATGPT_RATE_LIMITED "ChatGPT
+        plan limit reached — try again later" · CHATGPT_UNAVAILABLE "ChatGPT is unavailable right now — try again
+        later" · CHATGPT_SESSION_EXPIRED "ChatGPT session expired — please reconnect" · RUN_TIMEOUT "Generation took
+        too long — try again" (QUEUED/RUNNING run with now >= deadlineAt; scheduler every 5 s or pipeline check) ·
+        INVALID_SCENARIO "ORACUL could not construct a valid scenario" · SCENARIO_REJECTED "ORACUL could not construct
+        a scenario supported by current evidence" · ALTERNATIVE_NOT_DISTINCT "ORACUL could not find a different
+        future — try changing a setting" · INSUFFICIENT_EVIDENCE "ORACUL found insufficient current evidence to
+        construct this scenario at Realism <n>." · RUN_INTERRUPTED "Generation was interrupted — try again" (active
+        at backend start) · INTERNAL_ERROR "Something went wrong — try again".
       enum:
         - NEWS_UNAVAILABLE
         - CHATGPT_RATE_LIMITED
@@ -766,6 +777,10 @@ components:
 
     RunFailure:
       type: object
+      description: |
+        Set on GenerationRun iff status is FAILED or INSUFFICIENT_EVIDENCE; absent otherwise. Exactly the keys code and
+        message; message is the fixed text of the code (see RunFailureCode) and never contains stack traces, provider
+        bodies, URLs, JSON or tokens.
       required: [code, message]
       properties:
         code:

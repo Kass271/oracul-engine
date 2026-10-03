@@ -4,6 +4,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 
 import { App } from './app';
+import type { GenerationRun } from './api/models/generation-run';
+import { RunStore } from './runs/run.store';
 import type { ScenarioCatalogue } from './api/models/scenario-catalogue';
 import type { ScenarioConfiguration } from './api/models/scenario-configuration';
 
@@ -300,5 +302,63 @@ describe('App shell (slice 01_scenario-controls)', () => {
     expect(text('value-darkness')).toBe('5');
     expect(text('value-optimism')).toBe('5');
     expect(text('value-realism')).toBe('8');
+  });
+});
+
+describe('slice 11_run-failures: the panel stays usable', () => {
+  let fixture: ComponentFixture<App>;
+  let http: HttpTestingController;
+
+  const el = (): HTMLElement => fixture.nativeElement;
+  const byId = (id: string): HTMLElement | null => el().querySelector(`[data-testid="${id}"]`);
+  const text = (id: string): string => (byId(id)?.textContent ?? '').trim();
+
+  async function settle(): Promise<void> {
+    await fixture.whenStable();
+    fixture.detectChanges();
+    await fixture.whenStable();
+  }
+
+  function runWith(status: 'QUEUED' | 'RUNNING' | 'FAILED'): GenerationRun {
+    return {
+      id: '11111111-2222-3333-4444-555555555555',
+      generationId: 'ORC-2026-10-02-1842',
+      kind: 'STANDARD',
+      status,
+      stageIndex: 3,
+      stageCount: 10,
+      configuration: DEFAULTS,
+      counts: { searches: 0, articlesRetrieved: 0, articlesConsidered: 0, uniqueEvents: 0, eventsSelected: 0, counterSignals: 0, sourcesUsed: 0 },
+      createdAt: '2026-10-02T18:42:31Z',
+      updatedAt: '2026-10-02T18:42:40Z',
+      ...(status === 'FAILED' ? { failure: { code: 'RUN_TIMEOUT', message: 'Generation took too long — try again' } } : {}),
+    } as GenerationRun;
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [App],
+      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+    });
+    fixture = TestBed.createComponent(App);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  // @trace FR-32
+  it.each(['QUEUED', 'RUNNING', 'FAILED'] as const)('with a %s run the sliders and horizon options are enabled and editable', async (status) => {
+    fixture.detectChanges();
+    http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush(CATALOGUE);
+    http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush(DEFAULTS);
+    await settle();
+    TestBed.inject(RunStore).run.set(runWith(status));
+    await settle();
+    const darkness = byId('slider-darkness-input') as HTMLInputElement;
+    expect(darkness.disabled).toBe(false);
+    expect((byId('horizon-option-5y')!.querySelector('button') as HTMLButtonElement).disabled).toBe(false);
+    darkness.value = '3';
+    darkness.dispatchEvent(new Event('input', { bubbles: true }));
+    darkness.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(text('value-darkness')).toBe('3');
   });
 });

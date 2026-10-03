@@ -150,8 +150,8 @@ ALTERNATIVE runs skip stages 1–6 (they jump from QUEUED to stage 7).
   message (`failure-message`) and "Try again" (`try-again`) which re-submits the failed run's configuration with
   `POST /api/runs`. The panel stays usable during and after the failure.
 - Rules:
-  - Timeout: a scheduler (every 5 s, injectable `Clock`) fails active runs whose deadline_at passed with
-    RUN_TIMEOUT; the pipeline checks the deadline between steps and abandons its work; late results of an abandoned
+  - Timeout: a scheduler (every 5 s, injectable `Clock`) fails active (QUEUED or RUNNING) runs whose deadline_at
+    passed with RUN_TIMEOUT; the pipeline checks the deadline between steps and abandons its work; late results of an abandoned
     run are discarded. From slice 06 on the check is `RunGuard` (status still RUNNING and now < deadline_at,
     injected `Clock`): before every ChatGPT request of stage 5 and inside the transaction that persists its results;
     a failed check sends no further request and writes nothing; if the run is still RUNNING past its deadline the
@@ -159,7 +159,8 @@ ALTERNATIVE runs skip stages 1–6 (they jump from QUEUED to stage 7).
     stage commits are conditional on `status = 'RUNNING'` (research-pipeline.md "Slice 06_events — Run guard").
   - ChatGPT 429 → CHATGPT_RATE_LIMITED immediately (no retry). 5xx/network/timeout → one retry after 1 s, then
     CHATGPT_UNAVAILABLE. 401/403 → one refresh + retry, then CHATGPT_SESSION_EXPIRED (connection state SESSION_EXPIRED).
-  - On startup, every QUEUED/RUNNING run is set FAILED RUN_INTERRUPTED.
+  - On startup (before the web server accepts requests), every QUEUED/RUNNING run is set FAILED RUN_INTERRUPTED.
+  - A FAILED run with code CHATGPT_SESSION_EXPIRED also refreshes the header connection state ("Session expired").
   - The failure message never includes stack traces, provider bodies, URLs, JSON or tokens; technical detail goes to
     the redacted log only.
 - Errors: the API never answers 500 with internals: the global handler maps unexpected exceptions to 500
@@ -268,7 +269,7 @@ No `getRun` body contains a URL, stack trace, Java class name or token.
 Files (`src/app/runs/`): `run.store.ts` (`RunStore`, `providedIn: 'root'`), `generate-button.ts`
 (`app-generate-button`, used inside `welcome-view` instead of the static button), `run-view.ts` (route component of
 `/futures/:runId`), `progress-view.ts` (`app-progress-view`), `run-failure.ts` (`app-run-failure`, slice 04 uses it
-for "Future not found" only; slice 11 extends it), `run-error-message.ts` (snackbar content). `app.routes.ts`:
+for "Future not found" only; slice 11 extends it — see "Slice 11_run-failures"), `run-error-message.ts` (snackbar content). `app.routes.ts`:
 `''` → welcome view, `'futures/:runId'` → run view, `'**'` → redirect to `''`; `app.html` renders `<router-outlet />`
 in the `ready` state (header, panel, loading and backend-unavailable behaviour of slices 01–03 unchanged).
 
@@ -348,3 +349,200 @@ in the `ready` state (header, panel, loading and backend-unavailable behaviour o
     `progress-view` inner text matches none of `/https?:\/\/|[{}]|Exception/`; reload of the URL shows the same
     finished progress view; `/futures/00000000-0000-0000-0000-000000000000` → `failure-message` "Future not
     found", `try-again` → `welcome-view`.
+
+## Slice 11_run-failures — FR-32 test contract
+
+Delivers the run deadline scheduler, the "between steps" deadline checks of stages 1–4, the startup sweep, one
+central failure-message table, and the failure view for FAILED runs with "Try again". Most failure codes are already
+produced by slices 05–10 (NEWS_UNAVAILABLE, CHATGPT_*, INVALID_SCENARIO, SCENARIO_REJECTED, INTERNAL_ERROR) and their
+tests stay as they are; this slice adds RUN_TIMEOUT from the scheduler, RUN_INTERRUPTED, the UI and the hygiene
+checks. Not in this slice: the insufficient-evidence view (12; INSUFFICIENT_EVIDENCE runs keep showing
+`progress-view`), ALTERNATIVE_NOT_DISTINCT (17). No contract operation changes (only descriptions in
+`api/openapi.yaml`: `GenerationRun.failure`, `RunFailureCode`).
+
+### Backend (`com.oracul.app.runs`, `com.oracul.app.common`)
+
+#### Failure table (`RunFailures`, `com.oracul.app.runs`)
+`public final class RunFailures` with `public static String message(RunFailureCode code)` returning exactly the
+messages of the "Run failure codes and messages" table above for every code except INSUFFICIENT_EVIDENCE (realism
+dependent, slice 12: `message(INSUFFICIENT_EVIDENCE)` throws `IllegalArgumentException`). Every writer of a
+`failure_message` (`ResearchPipeline`, `ReasoningPipeline`, `StoryWriter`, `ChatGptCallException` factories,
+`PipelineExecutor`, `GenerationRunRepository.failTimedOut`, the scheduler and the startup sweep) takes the text from
+`RunFailures` (existing constants may delegate). The stored message never depends on an exception message.
+
+#### Deadline scheduler (`RunDeadlineScheduler`)
+- `@EnableScheduling` on a configuration class in `com.oracul.app.common` (`SchedulingConfig`).
+- `@Scheduled(fixedDelayString = "${oracul.run.deadline-check-interval:PT5S}", initialDelayString =
+  "${oracul.run.deadline-check-interval:PT5S}")` calls `public int sweep()`.
+- `sweep()`: `now` = injected `Clock` (truncated to µs, UTC); one statement
+  `UPDATE generation_run SET status='FAILED', failure_code='RUN_TIMEOUT', failure_message='Generation took too long —
+  try again', updated_at=now, completed_at=now WHERE status IN ('QUEUED','RUNNING') AND deadline_at <= now`; returns
+  the number of updated rows. `stage` / `stageIndex` stay as they were (QUEUED → `stage` absent, `stageIndex` 0).
+  Terminal runs are never touched. Any exception inside `sweep()` is logged (no row data) and swallowed, returning 0,
+  so the next tick runs again.
+- Boundary: a run is timed out iff `now >= deadline_at` (`deadline_at = created_at + oracul.run.timeout`, default
+  180 s) — same rule as `RunGuard` (passes iff `now < deadline_at`).
+
+#### Deadline checks between steps (pipeline)
+- `PipelineExecutor` starts a task with a conditional transition `QUEUED → RUNNING, stage UNDERSTANDING` only
+  `WHERE status = 'QUEUED' AND deadline_at > now`; if no row is updated the task ends at once: no ChatGPT / news /
+  metadata request, no write — except that a still-QUEUED run past its deadline is committed RUN_TIMEOUT (see
+  `failTimedOut`).
+- Before each stage transition 2…10 the pipeline calls `RunGuard.check(runId)`; a failing check abandons the run:
+  `GenerationRunRepository.failTimedOut(runId, now)` (now: `status IN ('QUEUED','RUNNING') AND deadline_at <= now`
+  → RUN_TIMEOUT; otherwise no change) and the task ends — no further provider request, no further write.
+- All run-row writes of stages 1–4 (`storeProfile`, `storeSearchPlan`, `storeSearchResults`, `storeCounts`) are
+  conditional on `status = 'RUNNING'`; the stage-4 `source` insert runs in a transaction that first calls
+  `RunGuard.lockAndCheck(runId)` and inserts nothing when it fails (then abandon as above). In-flight news / metadata
+  requests of an abandoned run may complete, their results are discarded. Stages 5–10 keep their slice 06–10 guards.
+
+#### Startup sweep (`RunStartupSweep`)
+`@Component` implementing `SmartInitializingSingleton` (runs after Flyway, before the web server accepts requests);
+`afterSingletonsInstantiated()` calls `public int sweep()`: `UPDATE generation_run SET status='FAILED',
+failure_code='RUN_INTERRUPTED', failure_message='Generation was interrupted — try again', updated_at=now,
+completed_at=now WHERE status IN ('QUEUED','RUNNING')`; returns the count; logs only the count.
+
+#### No internals in any error
+- Unchanged and regression-tested: the global handler maps any unexpected exception to `500
+  {"code":"INTERNAL_ERROR","message":"Something went wrong — try again"}` (`Content-Type: application/json`, exactly
+  the keys `code`, `message`; no `trace`, `exception`, `path`, `error`, `timestamp`); `SessionFilter` answers the same
+  body when the session lookup throws.
+- The pipeline catch-all (`PipelineExecutor`) stores `INTERNAL_ERROR` "Something went wrong — try again" for any
+  `RuntimeException`; the exception (message, class, stack) goes only to the redacted log.
+
+### Backend tests
+Common setup (extend `AbstractEvidenceIT` / `AbstractReasoningIT` as slice 09): connected session, V4 fixtures, body
+`A`, `oracul.run.placeholder-stage-delay=PT0S`, `oracul.run.min-stage-duration=PT0S`, `oracul.openai.retry-delay=PT0S`.
+`MutableClock` (new test class `com.oracul.app.runs.MutableClock extends Clock`, UTC, starts at `Instant.now()`,
+`advance(Duration)`, `set(Instant)`) is registered as `@Primary Clock` bean by the deadline classes (the ChatGPT token
+expiry and sessions use it too; the stub token lifetime of 3600 s is not crossed by +180 s). `T` = `"Generation took
+too long — try again"`, `I` = `"Generation was interrupted — try again"`. "Unchanged row" = `status, stage,
+failure_code, failure_message, updated_at, completed_at, counts` equal to the snapshot. "Slot released" = a new
+`startRun` of the same session → 202.
+
+`RunDeadlineIT` (`// @trace FR-32` and `// @trace NFR-2`; `MutableClock`; `oracul.run.deadline-check-interval=PT1H` so
+only explicit `sweep()` calls act):
+| # | Setup | Expected |
+|---|---|---|
+| 1 | `responses.gate("SCENARIO_GENERATION")`, run started, `awaitArrived(SCENARIO_GENERATION, 1)`; `clock.advance(PT179S)`; `sweep()` | returns 0; `getRun` `status` RUNNING, `stage` EXPLORING_FUTURES |
+| 2 | #1 then `clock.advance(PT1S)` (now = createdAt + 180 s); `sweep()` | returns 1; `getRun`: `status` FAILED, `failure` `{"code":"RUN_TIMEOUT","message":T}`, `stage` EXPLORING_FUTURES, `stageIndex` 7, `completedAt` = clock now; `headline` absent |
+| 3 | #2 then `responses.release("SCENARIO_GENERATION")`, watch 2.5 s | no SCENARIO_CRITIC / STORY_WRITING request; run row unchanged; 0 `future_story` rows; `getFutureResult` 409 `RESULT_NOT_READY`; slot released; a second `sweep()` returns 0 |
+| 4 | `StubGdelt` responder delays every query 3000 ms; run started; `getRun` polled until `stage` SEARCHING; `clock.advance(PT180S)`; `sweep()`; wait 5 s | returns 1; FAILED RUN_TIMEOUT, `stage` SEARCHING, `stageIndex` 3; after 5 s: row unchanged, `counts` all 0, `GET /api/runs/{id}/sources` `{"items":[]}`, 0 `source` rows, 0 EVENT_NORMALIZATION requests |
+| 5 | `responses.gate("QUERY_EXPANSION")`, run started, arrived 1; `clock.advance(PT180S)`; **no** `sweep()`; release | the pipeline itself commits FAILED `{"code":"RUN_TIMEOUT","message":T}` with `stage` RESEARCH_STRATEGY, `stageIndex` 2 (≤ 5 s); 0 GDELT requests (the check before the SEARCHING transition stops the task) |
+| 6 | a COMPLETED run, a FAILED NEWS_UNAVAILABLE run (`/news` down) and an active gated run of 3 sessions; `clock.advance(PT180S)`; `sweep()` | returns 1; COMPLETED and FAILED rows unchanged (incl. `failure`, `completedAt`); only the active run is RUN_TIMEOUT |
+| 7 | parameterized purpose P ∈ {EVENT_NORMALIZATION, STORY_WRITING}: gate P, arrive, `advance(PT180S)`, `sweep()`, release, watch 2.5 s | FAILED RUN_TIMEOUT at the stage of P (5 / 10); no request of a later purpose; row unchanged after release |
+
+`RunDeadlineQueuedIT` (`// @trace FR-32`; `MutableClock`; `oracul.run.executor-threads=1`,
+`deadline-check-interval=PT1H`):
+| # | Setup | Expected |
+|---|---|---|
+| 1 | session X: gate QUERY_EXPANSION, start, arrived 1; session Y: `startRun` body `B` → 202 QUEUED; `clock.advance(PT180S)`; `sweep()` | returns 2; Y: `status` FAILED, `failure` `{RUN_TIMEOUT, T}`, `stage` and `stageLabel` absent, `stageIndex` 0, `completedAt` set |
+| 2 | #1 then release; watch 3 s | QUERY_EXPANSION requests stay 1 (Y's task makes no request); Y row unchanged; Y slot released |
+| 3 | X gated, Y QUEUED, `advance(PT180S)`, **no** `sweep()`, release X's gate | Y ends FAILED RUN_TIMEOUT (≤ 5 s, committed by Y's task start), `stageIndex` 0, QUERY_EXPANSION requests 1 |
+
+`RunDeadlineSchedulerIT` (`// @trace FR-32`; `MutableClock`; `oracul.run.deadline-check-interval=PT1S`): gate
+SCENARIO_GENERATION, arrived 1, `clock.advance(PT180S)`; without calling `sweep()`, `getRun` polled every 200 ms →
+FAILED `{RUN_TIMEOUT, T}` within 3 s (the scheduled tick did it); release afterwards.
+
+`RunStartupSweepIT` (`// @trace FR-32`): `@Autowired RunStartupSweep`.
+| # | Setup | Expected |
+|---|---|---|
+| 1 | session X run active (gate QUERY_EXPANSION, arrived 1), session Y COMPLETED run, session Z FAILED NEWS_UNAVAILABLE run; `sweep()` | returns 1; X: FAILED `{"code":"RUN_INTERRUPTED","message":I}`, `completedAt` set, `stage` RESEARCH_STRATEGY unchanged; Y and Z rows unchanged |
+| 2 | #1 then release, watch 2.5 s | 0 GDELT requests; X row unchanged; X slot released |
+| 3 | row inserted by JDBC with `status` QUEUED (valid session, `deadline_at` = now + 180 s); `sweep()` | FAILED RUN_INTERRUPTED, `stageIndex` 0 |
+`RunStartupSweepTest` (unit, `// @trace FR-32`): `RunStartupSweep` implements `SmartInitializingSingleton` and
+`afterSingletonsInstantiated()` executes the sweep statement exactly once (mocked `JdbcTemplate` / repository).
+
+`RunFailuresTest` (unit, `// @trace FR-32`): `RunFailures.message` for each code equals exactly:
+NEWS_UNAVAILABLE "ORACUL could not reach its news sources — try again later", CHATGPT_RATE_LIMITED "ChatGPT plan limit
+reached — try again later", CHATGPT_UNAVAILABLE "ChatGPT is unavailable right now — try again later",
+CHATGPT_SESSION_EXPIRED "ChatGPT session expired — please reconnect", RUN_TIMEOUT "Generation took too long — try
+again", INVALID_SCENARIO "ORACUL could not construct a valid scenario", SCENARIO_REJECTED "ORACUL could not construct a
+scenario supported by current evidence", ALTERNATIVE_NOT_DISTINCT "ORACUL could not find a different future — try
+changing a setting", RUN_INTERRUPTED "Generation was interrupted — try again", INTERNAL_ERROR "Something went wrong —
+try again" (all U+2014); INSUFFICIENT_EVIDENCE → `IllegalArgumentException`. No message matches
+`/https?:|[{}<>]|Exception|Error:|Bearer/`.
+
+`RunFailureHygieneIT` (`// @trace FR-32`):
+| # | Setup | Expected |
+|---|---|---|
+| 1 | `@MockitoSpyBean ResearchProfileFactory`: `from(any())` throws `new IllegalStateException("boom http://internal.example {\"x\":1} Bearer sk-test at com.oracul.app.X")` | run FAILED `{"code":"INTERNAL_ERROR","message":"Something went wrong — try again"}`, `stage` UNDERSTANDING, `completedAt` set; the raw `getRun` body contains none of `boom`, `IllegalState`, `http://internal`, `Bearer`, `sk-test`, `com.oracul`; slot released |
+| 2 | ChatGPT 429 on STORY_WRITING (FR-32 acceptance 1, end to end in one place) | FAILED `{"code":"CHATGPT_RATE_LIMITED","message":"ChatGPT plan limit reached — try again later"}`; exactly 1 STORY_WRITING request (no retry); raw `getRun` body contains neither `rate_limited` nor `429` |
+| 3 | `@MockitoSpyBean RunService`: `get(any(), any())` throws `new RuntimeException("SELECT * FROM generation_run password=x")` | `GET /api/runs/{id}` → 500, `Content-Type` `application/json`, body exactly `{"code":"INTERNAL_ERROR","message":"Something went wrong — try again"}` (key set exactly `code`, `message`); same for `start(any(), any())` on `POST /api/runs` body `B` |
+| 4 | `@MockitoSpyBean SessionService`: `resolve(any())` throws | `GET /api/runs/{NO_RUN}` → 500 with exactly the body of #3 |
+
+Existing tests stay green; rows of earlier slices that asserted "progress view until slice 11" are superseded only in
+the frontend/E2E (below).
+
+### Frontend (`src/app/runs/`)
+- `run-failure.ts` (`app-run-failure`): inputs `message: string` (default `"Future not found"`) and
+  `configuration: ScenarioConfiguration | null` (default `null`). Template unchanged ids: `failure-view` containing
+  `failure-message` (exactly the message text) and `try-again` (`mat-flat-button`, text "Try again"). Click:
+  `configuration` null → `router.navigateByUrl('/')` (not-found case, unchanged); otherwise
+  `RunStore.start(configuration)` (same flow as FR-10: 202 → navigate `/futures/<newId>` with `replaceUrl`, the new
+  run's `progress-view` replaces the failure view; error → snackbar `run-error-message` with `ApiError.message` or
+  "Something went wrong — try again", the failure view stays). `try-again` is disabled while `RunStore.starting()`.
+- `run-view.ts`, exactly one of (in this order):
+  1. `notFound()` → `<app-run-failure>` with defaults ("Future not found", navigate `/`);
+  2. `unavailable()` → `backend-unavailable` (unchanged);
+  3. `run().status === 'FAILED'` → `<app-run-failure [message]="run.failure?.message ?? 'Something went wrong — try
+     again'" [configuration]="run.configuration">`; no `progress-view`, no `app-future-result`, no result request;
+  4. COMPLETED with `headline` → `app-future-result` (unchanged);
+  5. otherwise (QUEUED, RUNNING, COMPLETED without headline, INSUFFICIENT_EVIDENCE until slice 12) → `progress-view`.
+- The failure view shows only `failure.message` and "Try again": never `failure.code`, ids, URLs, JSON or stack text.
+- `RunStore`: when a `getRun` response (poll or `open`) has `status` FAILED and `failure.code`
+  `CHATGPT_SESSION_EXPIRED`, call `ConnectionStore.load()` once for that run (header shows "Session expired").
+- Panel stays usable: the Scenario Panel (`slider-*`, `horizon-option-*`, `wildcard-toggle-*`) is never disabled by
+  `RunStore` state (QUEUED / RUNNING / FAILED); "Try again" re-submits the **failed run's** configuration and does not
+  change the panel; changes made in the panel are kept.
+
+### Frontend unit tests (Vitest; `// @trace FR-32`)
+- `run-failure.spec.ts`: default inputs → text "Future not found", click → navigates `/`, no `startRun`; with
+  `configuration` C and message M → `failure-message` exactly M, click → one `POST /api/runs` whose body deep-equals
+  C; while pending `try-again` is disabled; 202 → router navigates to `/futures/<newId>` with `replaceUrl: true`; 409
+  `{"code":"RUN_ALREADY_ACTIVE","message":"A generation is already running"}` → `run-error-message` that text, failure
+  view still rendered, button enabled again; network error → "Something went wrong — try again".
+- `run-view.spec.ts` (`describe('slice 11_run-failures')`): for each code with its table message (parameterized over
+  NEWS_UNAVAILABLE, CHATGPT_RATE_LIMITED, CHATGPT_UNAVAILABLE, CHATGPT_SESSION_EXPIRED, RUN_TIMEOUT, INVALID_SCENARIO,
+  SCENARIO_REJECTED, RUN_INTERRUPTED, INTERNAL_ERROR) a FAILED run → only `failure-view` among
+  `progress-view` / `failure-view` / `backend-unavailable` / `app-future-result`, `failure-message` = the message, no
+  `GET /api/runs/{id}/result`; FAILED without `failure` → "Something went wrong — try again"; polling RUNNING →
+  FAILED `{RUN_TIMEOUT}` switches the progress view to the failure view within one tick (1000 ms, fake timers) and
+  polling stops; `failure-view` textContent never contains the code, the run id, the generationId, `http`, `{`, `}`.
+- `run.store.spec.ts`: FAILED `CHATGPT_SESSION_EXPIRED` → `ConnectionStore.load` called exactly once (also after
+  later re-renders); FAILED with another code → not called.
+- `app.spec.ts` (or `scenario-panel` spec): with `RunStore.run()` RUNNING and FAILED, `slider-darkness-input` and
+  `horizon-option-5y` are enabled and changing darkness updates `value-darkness`.
+
+### E2E (`e2e/tests/run-failures.spec.ts`; `// @trace FR-32`; fresh context per test, stub reset as in
+`future-story.spec.ts`, serial)
+No new stub modes: 429 uses the existing `POST /__control/story {"mode":"rate-limited"}`; a real 180 s timeout is not
+run in E2E (stack timeout stays PT3M; the timing proof is `RunDeadlineIT`, as NFR-2 prescribes).
+1. 429: story `rate-limited`; connect, configure acceptance `A`, `generate-button` → `failure-view` visible (timeout
+   90 s), `failure-message` exactly "ChatGPT plan limit reached — try again later"; `progress-view` and `result-view`
+   count 0; `failure-view` innerText matches none of `/https?:\/\/|[{}]|Exception|Error:|rate_limited|429|ORC-/`;
+   `GET /api/runs/<id>` → `status` FAILED, `failure.code` CHATGPT_RATE_LIMITED.
+2. Panel usable + Try again (same test): fill `slider-darkness-input` `3` → `value-darkness` "3"; set story `ok`;
+   click `try-again` with `page.waitForRequest` on `POST /api/runs` → `postDataJSON()` deep-equals `A` (darkness 9, the
+   failed run's configuration); URL becomes `/futures/<newId>` (≠ old id); `result-view` visible (timeout 90 s);
+   `value-darkness` still "3".
+3. Timeout message (UI): `page.route('**/api/runs/11111111-1111-1111-1111-111111111111', …)` fulfils 200 with
+   `{"id":"11111111-1111-1111-1111-111111111111","generationId":"ORC-2026-10-02-1842","kind":"STANDARD","status":"FAILED","stage":"SEARCHING","stageLabel":"Searching current events…","stageIndex":3,"stageCount":10,"configuration":B,"counts":<zero counts>,"failure":{"code":"RUN_TIMEOUT","message":"Generation took too long — try again"},"createdAt":"2026-10-02T18:42:31Z","updatedAt":"2026-10-02T18:45:31Z","completedAt":"2026-10-02T18:45:31Z","hasOpenCriticIssues":false}`
+   (B = slice 04 base body); `goto('/futures/11111111-1111-1111-1111-111111111111')` → `failure-message` exactly
+   "Generation took too long — try again", `try-again` visible and enabled.
+4. News unavailable: `/__control/news` `down`, start a run → `failure-message` "ORACUL could not reach its news
+   sources — try again later".
+5. No internals over HTTP: `page.request.get('/api/runs/abc')` → 404 body exactly `{"code":"RUN_NOT_FOUND","message":
+   "Future not found"}`; `page.request.post('/api/runs', {data: 'not json', headers: {'content-type':
+   'application/json'}})` → 400 body with exactly the keys `code`, `message` and no `trace` / `exception`.
+
+Superseded assertions of earlier slices (FAILED runs now show the failure view):
+- `e2e/tests/search-sources.spec.ts` "news provider down": `progress-view` visible → `failure-view` with
+  `failure-message` "ORACUL could not reach its news sources — try again later" (research-pipeline.md slice 05 note).
+- `e2e/tests/future-story.spec.ts` `invalid`: additionally `failure-message` "ORACUL could not construct a valid
+  scenario" (future-result.md "the progress view stays until slice 11").
+- scenario-reasoning.md slice 08 UI note "failed runs still show `progress-view` until slice 11" → failure view.
+
+### data-testid (this slice)
+Reused: `failure-view`, `failure-message`, `try-again`, `run-error-message`, `progress-view`, `result-view`,
+`slider-darkness-input`, `value-darkness`, `horizon-option-<code>`, `generate-button`, `chatgpt-status`. No new ids.

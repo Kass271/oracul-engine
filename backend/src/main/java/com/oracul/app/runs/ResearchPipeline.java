@@ -41,8 +41,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Component
 public class ResearchPipeline {
 
-    static final String SESSION_EXPIRED_MESSAGE = "ChatGPT session expired — please reconnect";
-    static final String NEWS_UNAVAILABLE_MESSAGE = "ORACUL could not reach its news sources — try again later";
+    static final String SESSION_EXPIRED_MESSAGE = RunFailures.message(com.oracul.app.api.model.RunFailureCode.CHATGPT_SESSION_EXPIRED);
+    static final String NEWS_UNAVAILABLE_MESSAGE = RunFailures.message(com.oracul.app.api.model.RunFailureCode.NEWS_UNAVAILABLE);
 
     private final GenerationRunRepository runs;
     private final SourceRepository sources;
@@ -96,6 +96,9 @@ public class ResearchPipeline {
         throws InterruptedException {
         // ---- stage 2: RESEARCH_STRATEGY ----
         long started = begin(runId, RunStage.RESEARCH_STRATEGY);
+        if (started < 0) {
+            return false;
+        }
         SearchPlan plan;
         try {
             SearchPlan template = planner.plan(profile, cfg, queryBudget);
@@ -109,6 +112,9 @@ public class ResearchPipeline {
 
         // ---- stage 3: SEARCHING ----
         started = begin(runId, RunStage.SEARCHING);
+        if (started < 0) {
+            return false;
+        }
         SourceRetrieval.SearchOutcome outcome = retrieval.search(plan, cfg.getHorizon());
         ResearchCounts counts = new ResearchCounts(outcome.searches(), outcome.articlesRetrieved(), 0, 0, 0, 0, 0);
         if (outcome.allFailed()) {
@@ -123,17 +129,32 @@ public class ResearchPipeline {
 
         // ---- stage 4: READING_SOURCES ----
         started = begin(runId, RunStage.READING_SOURCES);
+        if (started < 0) {
+            return false;
+        }
         List<SourceRepository.Stored> found = retrieval.readSources(outcome, cfg.getHorizon());
         ResearchCounts withSources = new ResearchCounts(counts.getSearches(), counts.getArticlesRetrieved(),
             found.size(), 0, 0, 0, 0);
-        tx.executeWithoutResult(s -> {
+        Boolean read = tx.execute(s -> {
+            if (!guard.lockAndCheck(runId)) {
+                s.setRollbackOnly();
+                return false;
+            }
             sources.insertAll(runId, found);
             runs.storeCounts(runId, withSources, now());
+            return true;
         });
+        if (!Boolean.TRUE.equals(read)) {
+            abandon(runId);
+            return false;
+        }
         remainder(started);
 
         // ---- stage 5: CONNECTING_SIGNALS ----
         started = begin(runId, RunStage.CONNECTING_SIGNALS);
+        if (started < 0) {
+            return false;
+        }
         List<NormalizedEvent> normalized = List.of();
         if (!found.isEmpty()) {
             List<Source> list = found.stream().map(SourceRepository.Stored::source).toList();
@@ -175,6 +196,9 @@ public class ResearchPipeline {
 
         // ---- stage 6: RANKING ----
         started = begin(runId, RunStage.RANKING);
+        if (started < 0) {
+            return false;
+        }
         Instant cutoff = clock.instant().truncatedTo(ChronoUnit.MINUTES);
         Map<String, Source> byId = new LinkedHashMap<>();
         for (SourceRepository.Stored st : found) {
@@ -222,7 +246,12 @@ public class ResearchPipeline {
         runs.failTimedOut(runId, now());
     }
 
+    /** Checks the run guard, then persists the stage; -1 when the run must be abandoned. */
     private long begin(UUID runId, RunStage stage) {
+        if (!guard.check(runId)) {
+            abandon(runId);
+            return -1;
+        }
         runs.markStage(runId, stage, now());
         return System.nanoTime();
     }

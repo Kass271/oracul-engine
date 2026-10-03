@@ -45,8 +45,8 @@ public class ReasoningPipeline {
         ACCEPTED
     }
 
-    static final String INVALID_MESSAGE = "ORACUL could not construct a valid scenario";
-    static final String REJECTED_MESSAGE = "ORACUL could not construct a scenario supported by current evidence";
+    static final String INVALID_MESSAGE = com.oracul.app.runs.RunFailures.message(com.oracul.app.api.model.RunFailureCode.INVALID_SCENARIO);
+    static final String REJECTED_MESSAGE = com.oracul.app.runs.RunFailures.message(com.oracul.app.api.model.RunFailureCode.SCENARIO_REJECTED);
     private static final String PURPOSE = "SCENARIO_GENERATION";
 
     private final GenerationRunRepository runs;

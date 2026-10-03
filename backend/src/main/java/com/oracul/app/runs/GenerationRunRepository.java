@@ -60,27 +60,33 @@ public class GenerationRunRepository {
 
     /** Stage transition of an active run. */
     void markStage(UUID id, RunStage stage, OffsetDateTime now) {
-        jdbc.update("update generation_run set status = 'RUNNING', stage = ?, updated_at = ? "
-            + "where id = ? and status in ('QUEUED','RUNNING')", stage.getValue(), now, id);
+        jdbc.update("update generation_run set stage = ?, updated_at = ? where id = ? and status = 'RUNNING'",
+            stage.getValue(), now, id);
+    }
+
+    /** QUEUED to RUNNING at stage UNDERSTANDING, only before the deadline; false when nothing was updated. */
+    boolean startRunning(UUID id, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'RUNNING', stage = 'UNDERSTANDING', updated_at = ? "
+            + "where id = ? and status = 'QUEUED' and deadline_at > ?", now, id, now) == 1;
     }
 
     void storeProfile(UUID id, ResearchProfile profile, OffsetDateTime now) {
-        jdbc.update("update generation_run set research_profile = cast(? as jsonb), updated_at = ? where id = ?",
+        jdbc.update("update generation_run set research_profile = cast(? as jsonb), updated_at = ? where id = ? and status = 'RUNNING'",
             write(profile), now, id);
     }
 
     void storeSearchPlan(UUID id, SearchPlan plan, OffsetDateTime now) {
-        jdbc.update("update generation_run set search_plan = cast(? as jsonb), updated_at = ? where id = ?",
+        jdbc.update("update generation_run set search_plan = cast(? as jsonb), updated_at = ? where id = ? and status = 'RUNNING'",
             write(plan), now, id);
     }
 
     void storeSearchResults(UUID id, SearchPlan plan, ResearchCounts counts, OffsetDateTime now) {
         jdbc.update("update generation_run set search_plan = cast(? as jsonb), counts = cast(? as jsonb), "
-            + "updated_at = ? where id = ?", write(plan), write(counts), now, id);
+            + "updated_at = ? where id = ? and status = 'RUNNING'", write(plan), write(counts), now, id);
     }
 
     void storeCounts(UUID id, ResearchCounts counts, OffsetDateTime now) {
-        jdbc.update("update generation_run set counts = cast(? as jsonb), updated_at = ? where id = ?",
+        jdbc.update("update generation_run set counts = cast(? as jsonb), updated_at = ? where id = ? and status = 'RUNNING'",
             write(counts), now, id);
     }
 
@@ -99,8 +105,8 @@ public class GenerationRunRepository {
     /** Commits RUN_TIMEOUT when the run is still RUNNING and its deadline has passed; false otherwise. */
     public boolean failTimedOut(UUID id, OffsetDateTime now) {
         return jdbc.update("update generation_run set status = 'FAILED', failure_code = 'RUN_TIMEOUT', "
-            + "failure_message = ?, updated_at = ?, completed_at = ? where id = ? and status = 'RUNNING' "
-            + "and deadline_at <= ?", "Generation took too long — try again", now, now, id, now) == 1;
+            + "failure_message = ?, updated_at = ?, completed_at = ? where id = ? and status in ('QUEUED','RUNNING') "
+            + "and deadline_at <= ?", RunFailures.message(com.oracul.app.api.model.RunFailureCode.RUN_TIMEOUT), now, now, id, now) == 1;
     }
 
     /** Accepts an attempt: final_attempt and the counts in one statement; false when the run is no longer RUNNING. */

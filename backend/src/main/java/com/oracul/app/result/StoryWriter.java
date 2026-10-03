@@ -29,7 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Component
 public class StoryWriter {
 
-    static final String INVALID_MESSAGE = "ORACUL could not construct a valid scenario";
+    static final String INVALID_MESSAGE = com.oracul.app.runs.RunFailures.message(com.oracul.app.api.model.RunFailureCode.INVALID_SCENARIO);
     private static final String PURPOSE = "STORY_WRITING";
 
     private final GenerationRunRepository runs;

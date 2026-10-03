@@ -139,8 +139,9 @@ test.describe('FR-13 Current-news search and source retrieval', () => {
     expect(await recorded(page, 'responses')).toHaveLength(1);
     const sources = await page.request.get(`/api/runs/${id}/sources`);
     expect(await sources.json()).toEqual({ items: [] });
-    // the run view keeps showing progress until the failure view of a later slice
-    await expect(page.getByTestId('progress-view')).toBeVisible();
+    // slice 11: a FAILED run shows the failure view with the fixed message
+    await expect(page.getByTestId('failure-view')).toBeVisible();
+    await expect(page.getByTestId('failure-message')).toHaveText('ORACUL could not reach its news sources — try again later');
   });
 
   test('sources of an unknown run is 404 RUN_NOT_FOUND', async ({ page }) => {

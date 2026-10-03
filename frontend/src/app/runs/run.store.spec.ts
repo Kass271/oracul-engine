@@ -4,6 +4,7 @@ import { HttpTestingController, provideHttpClientTesting, type TestRequest } fro
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { Router, provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 
 import { App } from '../app';
 import { routes } from '../app.routes';
@@ -328,5 +329,55 @@ describe('slice 04_run-start', () => {
     expect(text('failure-message')).toBe('Future not found');
     await tick(5 * POLL_MS);
     expect(pendingPolls()).toBe(0);
+  });
+});
+
+describe('slice 11_run-failures: session expiry refreshes the connection state', () => {
+  const ID = RUN_ID;
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  const isRunGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}`);
+  const isConnectionGet = (r: { url: string; method: string }): boolean =>
+    r.method === 'GET' && r.url.endsWith('/api/auth/chatgpt/connection');
+
+  function failed(code: string, message: string): GenerationRun {
+    return { ...runAt(10), status: 'FAILED', failure: { code, message }, completedAt: '2026-10-02T18:45:31Z' } as GenerationRun;
+  }
+
+  async function render(): Promise<void> {
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+  });
+
+  // @trace FR-32
+  it('FAILED with CHATGPT_SESSION_EXPIRED loads the connection state exactly once, also after re-renders', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(failed('CHATGPT_SESSION_EXPIRED', 'ChatGPT session expired — please reconnect'));
+    await render();
+    const first = http.match(isConnectionGet);
+    expect(first).toHaveLength(1);
+    first[0].flush({ state: 'SESSION_EXPIRED', canGenerate: false });
+    await render();
+    await render();
+    expect(http.match(isConnectionGet)).toHaveLength(0);
+  });
+
+  // @trace FR-32
+  it('FAILED with another code does not load the connection state', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(failed('RUN_TIMEOUT', 'Generation took too long — try again'));
+    await render();
+    expect(http.match(isConnectionGet)).toHaveLength(0);
   });
 });

@@ -205,6 +205,7 @@ test.describe('FR-23 / FR-25 Future story and metadata', () => {
     expect(res.status()).toBe(409);
     expect(await res.json()).toEqual({ code: 'RESULT_NOT_READY', message: 'This future is not ready yet' });
     await expect(page.getByTestId('result-view')).toHaveCount(0);
+    await expect(page.getByTestId('failure-message')).toHaveText('ORACUL could not construct a valid scenario');
   });
 
   test('FR-23 the result of an unknown run is 404', async ({ page }) => {
