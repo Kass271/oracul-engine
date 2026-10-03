@@ -109,6 +109,8 @@ error_description 2048, client_id 256) are enforced by the service and lead to `
 | `oracul.news.gdelt.base-url` | `https://api.gdeltproject.org` (`/api/v2/doc/doc`) | FR-13 |
 | `oracul.frontend-base-url` | `http://localhost:4200` | post-callback redirect |
 | `oracul.run.executor-threads` / `oracul.run.timeout` / `oracul.run.placeholder-stage-delay` | 4 / PT3M / PT1S | FR-10, FR-24, FR-32 |
+| `oracul.openai.retry-delay` / `oracul.events.normalization-batch-size` / `oracul.events.classification-batch-size` | PT1S / 40 / 20 | FR-14, FR-15 (research-pipeline.md "Slice 06_events") |
+| `oracul.events.normalization-concurrency` / `oracul.events.classification-concurrency` / `oracul.events.max-sources` | 4 / 4 / 120 | FR-14, FR-15, NFR-2 (research-pipeline.md "Slice 06_events": parallel batches, source cap) |
 
 ## UI component hierarchy (Angular standalone, signals, lazy routes)
 ```
@@ -167,6 +169,13 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    Public GDELT DOC 2.0 asks clients to send about one request every 5 s. With 20 queries at concurrency 4, the real
    service may throttle us; throttled queries count as FAILED. This is a runtime risk, not a test concern: lower
    `oracul.research.query-budget` or `oracul.news.query-concurrency` if it appears.
+12. Slice 06 (review R3, NFR-2): EVENT_NORMALIZATION / EVENT_CLASSIFICATION batches run with bounded parallelism
+   (`oracul.events.*-concurrency`, default 4) instead of sequentially; results are merged in batch-index order after
+   all batches finished, so events and ids do not depend on completion order. At most `oracul.events.max-sources`
+   (default 120; quality desc, then recency, then id) sources are normalised; the rest stay listed with `entities`
+   `[]` and never become evidence. `RunGuard` (status RUNNING and before deadline) is checked before every EVENT_*
+   request and before persisting; a run past its deadline stops calling ChatGPT, writes nothing and ends RUN_TIMEOUT
+   (the slice-11 scheduler uses the same code). No contract change (`api/openapi.yaml` unchanged).
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

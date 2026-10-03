@@ -84,9 +84,22 @@ public class GenerationRunRepository {
             write(counts), now, id);
     }
 
-    void markCompleted(UUID id, RunStage stage, OffsetDateTime now) {
-        jdbc.update("update generation_run set status = 'COMPLETED', stage = ?, updated_at = ?, completed_at = ? "
-            + "where id = ? and status in ('QUEUED','RUNNING')", stage.getValue(), now, now, id);
+    /** Stage transition that only applies while the run is RUNNING; false when the run was ended meanwhile. */
+    boolean markStageIfRunning(UUID id, RunStage stage, OffsetDateTime now) {
+        return jdbc.update("update generation_run set stage = ?, updated_at = ? where id = ? and status = 'RUNNING'",
+            stage.getValue(), now, id) == 1;
+    }
+
+    /** Commits RUN_TIMEOUT when the run is still RUNNING and its deadline has passed; false otherwise. */
+    boolean failTimedOut(UUID id, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'FAILED', failure_code = 'RUN_TIMEOUT', "
+            + "failure_message = ?, updated_at = ?, completed_at = ? where id = ? and status = 'RUNNING' "
+            + "and deadline_at <= ?", "Generation took too long — try again", now, now, id, now) == 1;
+    }
+
+    boolean markCompleted(UUID id, RunStage stage, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'COMPLETED', stage = ?, updated_at = ?, completed_at = ? "
+            + "where id = ? and status = 'RUNNING'", stage.getValue(), now, now, id) == 1;
     }
 
     void markFailed(UUID id, String code, String message, OffsetDateTime now) {

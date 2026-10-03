@@ -20,9 +20,12 @@ public class ResearchController implements ResearchApi {
     private final ObjectProvider<GenerationRunRepository> runs;
     private final ObjectProvider<CurrentSession> session;
     private final ObjectProvider<SourceRepository> sources;
+    private final ObjectProvider<EventRepository> events;
 
     ResearchController(ObjectProvider<GenerationRunRepository> runs, ObjectProvider<CurrentSession> session,
-                       ObjectProvider<SourceRepository> sources) {
+                       ObjectProvider<SourceRepository> sources,
+                       ObjectProvider<EventRepository> events) {
+        this.events = events;
         this.sources = sources;
         this.runs = runs;
         this.session = session;
@@ -45,7 +48,9 @@ public class ResearchController implements ResearchApi {
 
     @Override
     public ResponseEntity<EventList> listRunEvents(UUID runId) {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        var run = runs.getObject().find(runId, session.getObject().id())
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found"));
+        return ResponseEntity.ok(new EventList(events.getObject().list(run.id())));
     }
 
     @Override

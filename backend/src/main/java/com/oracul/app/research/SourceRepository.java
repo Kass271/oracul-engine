@@ -52,6 +52,17 @@ public class SourceRepository {
             });
     }
 
+    /** Sets the entities of each listed source (source id to entities). */
+    public void updateEntities(UUID runId, java.util.Map<String, List<String>> entities) {
+        List<java.util.Map.Entry<String, List<String>>> rows = new java.util.ArrayList<>(entities.entrySet());
+        jdbc.batchUpdate("update source set entities = cast(? as jsonb) where run_id = ? and id = ?", rows, 100,
+            (ps, row) -> {
+                ps.setString(1, json.writeValueAsString(row.getValue()));
+                ps.setObject(2, runId);
+                ps.setString(3, row.getKey());
+            });
+    }
+
     public List<Source> list(UUID runId) {
         return jdbc.query("select id, url, publisher, title, published_at, retrieved_at, summary, topic, entities, "
                 + "source_type, source_quality, metadata_fetched, query_ids from source where run_id = ? "

@@ -63,8 +63,10 @@ public class PipelineExecutor {
                 return;
             }
             RunStage[] stages = RunStage.values();
-            for (int i = 4; i < stages.length; i++) {
-                runs.markStage(runId, stages[i], now());
+            for (int i = 5; i < stages.length; i++) {
+                if (!runs.markStageIfRunning(runId, stages[i], now())) {
+                    return; // ended by another writer: the task ends silently
+                }
                 pause();
             }
             runs.markCompleted(runId, RunStage.WRITING_STORY, now());

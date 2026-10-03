@@ -90,8 +90,9 @@ test.describe('FR-12 Search plan and query generation', () => {
     expect(plan.queries).toHaveLength(20);
 
     const requests = await recorded(page, 'responses');
-    expect(requests).toHaveLength(1);
-    expect(JSON.stringify(requests[0])).not.toContain('"tools"');
+    const expansions = requests.filter((r) => JSON.stringify(r).includes('ORACUL REQUEST QUERY_EXPANSION'));
+    expect(expansions).toHaveLength(1);
+    expect(requests.some((r) => JSON.stringify(r).includes('"tools"'))).toBe(false);
   });
 
   test('research of an unknown run is 404 with the stable error code', async ({ page }) => {

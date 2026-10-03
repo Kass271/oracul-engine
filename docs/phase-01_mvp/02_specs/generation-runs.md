@@ -152,7 +152,11 @@ ALTERNATIVE runs skip stages 1–6 (they jump from QUEUED to stage 7).
 - Rules:
   - Timeout: a scheduler (every 5 s, injectable `Clock`) fails active runs whose deadline_at passed with
     RUN_TIMEOUT; the pipeline checks the deadline between steps and abandons its work; late results of an abandoned
-    run are discarded.
+    run are discarded. From slice 06 on the check is `RunGuard` (status still RUNNING and now < deadline_at,
+    injected `Clock`): before every ChatGPT request of stage 5 and inside the transaction that persists its results;
+    a failed check sends no further request and writes nothing; if the run is still RUNNING past its deadline the
+    pipeline itself commits RUN_TIMEOUT (`WHERE status = 'RUNNING'`), otherwise it leaves the run row untouched; later
+    stage commits are conditional on `status = 'RUNNING'` (research-pipeline.md "Slice 06_events — Run guard").
   - ChatGPT 429 → CHATGPT_RATE_LIMITED immediately (no retry). 5xx/network/timeout → one retry after 1 s, then
     CHATGPT_UNAVAILABLE. 401/403 → one refresh + retry, then CHATGPT_SESSION_EXPIRED (connection state SESSION_EXPIRED).
   - On startup, every QUEUED/RUNNING run is set FAILED RUN_INTERRUPTED.

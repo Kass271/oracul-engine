@@ -125,7 +125,8 @@ class SourceRetrievalIT extends AbstractRunIT {
         Map<String, Object> run = json(getRun(sid, id));
         assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS
             .replace("\"searches\":0", "\"searches\":20").replace("\"articlesRetrieved\":0", "\"articlesRetrieved\":20")
-            .replace("\"articlesConsidered\":0", "\"articlesConsidered\":20")));
+            .replace("\"articlesConsidered\":0", "\"articlesConsidered\":20")
+            .replace("\"uniqueEvents\":0", "\"uniqueEvents\":20")));
     }
 
     // #11

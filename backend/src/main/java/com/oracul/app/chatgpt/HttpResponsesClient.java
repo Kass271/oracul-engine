@@ -28,11 +28,18 @@ public class HttpResponsesClient {
     private final String baseUrl;
     private final String model;
     private final Duration timeout;
+    private final Duration retryDelay;
 
+    HttpResponsesClient(ChatGptAuthService auth, String baseUrl, String model, Duration timeout) {
+        this(auth, baseUrl, model, timeout, Duration.ofSeconds(1));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     HttpResponsesClient(ChatGptAuthService auth,
                         @Value("${oracul.openai.responses-base-url:https://api.openai.com/v1}") String baseUrl,
                         @Value("${oracul.openai.model:gpt-5}") String model,
-                        @Value("${oracul.openai.timeout:PT30S}") Duration timeout) {
+                        @Value("${oracul.openai.timeout:PT30S}") Duration timeout,
+                        @Value("${oracul.openai.retry-delay:PT1S}") Duration retryDelay) {
         this.auth = auth;
         String base = baseUrl;
         while (base.endsWith("/")) {
@@ -41,6 +48,7 @@ public class HttpResponsesClient {
         this.baseUrl = base;
         this.model = model;
         this.timeout = timeout;
+        this.retryDelay = retryDelay;
         this.http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(timeout).followRedirects(HttpClient.Redirect.NEVER).build();
     }
 
@@ -62,6 +70,69 @@ public class HttpResponsesClient {
             result = send(creds, payload);
         }
         return result.text();
+    }
+
+    /**
+     * Like {@link #createText} but with the transport-failure handling of the event calls: 429 fails at once, other
+     * failures are retried once after the retry delay, a rejected token is refreshed once. Empty means the call
+     * succeeded without usable output text (a content problem). Throws {@link ChatGptCallException} otherwise.
+     */
+    public Optional<String> createTextOrThrow(UUID sessionId, Map<String, Object> body) {
+        return createTextOrThrow(sessionId, body, () -> { });
+    }
+
+    /**
+     * As {@link #createTextOrThrow(UUID, Map)}; {@code beforeSend} runs before every HTTP request (first attempt, token
+     * refresh retry, transport retry) and may throw to stop the call, e.g. {@link CallAbandonedException}.
+     */
+    public Optional<String> createTextOrThrow(UUID sessionId, Map<String, Object> body, Runnable beforeSend) {
+        String payload = json.writeValueAsString(body);
+        try {
+            beforeSend.run();
+            SessionCredentials creds = auth.requireUsableCredentials(sessionId);
+            Result result = send(creds, payload);
+            if (rejected(result)) {
+                beforeSend.run();
+                creds = auth.refreshAfterRejection(sessionId);
+                result = send(creds, payload);
+                if (rejected(result)) {
+                    throw ChatGptCallException.sessionExpired();
+                }
+            }
+            if (result.status() == 429) {
+                throw ChatGptCallException.rateLimited();
+            }
+            if (failed(result)) {
+                try {
+                    Thread.sleep(retryDelay.toMillis());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw ChatGptCallException.unavailable();
+                }
+                beforeSend.run();
+                result = send(creds, payload);
+                if (rejected(result)) {
+                    throw ChatGptCallException.sessionExpired();
+                }
+                if (result.status() == 429) {
+                    throw ChatGptCallException.rateLimited();
+                }
+                if (failed(result)) {
+                    throw ChatGptCallException.unavailable();
+                }
+            }
+            return result.text();
+        } catch (com.oracul.app.common.ApiException e) {
+            throw ChatGptCallException.sessionExpired();
+        }
+    }
+
+    private static boolean rejected(Result r) {
+        return r.status() == 401 || r.status() == 403;
+    }
+
+    private static boolean failed(Result r) {
+        return r.status() < 200 || r.status() >= 300;
     }
 
     private record Result(int status, Optional<String> text) {

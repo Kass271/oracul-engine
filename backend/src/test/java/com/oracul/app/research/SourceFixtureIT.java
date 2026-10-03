@@ -18,6 +18,7 @@ import org.springframework.test.context.TestPropertySource;
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
     "oracul.research.query-budget=18",
+    "oracul.events.max-sources=1000",
 })
 class SourceFixtureIT extends AbstractRunIT {
 
@@ -86,7 +87,7 @@ class SourceFixtureIT extends AbstractRunIT {
             assertThat(s.get("sourceType")).isEqualTo("NEWS");
             assertThat(s.get("sourceQuality")).isEqualTo(0.85);
             assertThat(s.get("metadataFetched")).isEqualTo(true);
-            assertThat((List<?>) s.get("entities")).isEmpty();
+            assertThat((List<?>) s.get("entities")).isEqualTo(List.of("Entity " + s.get("id")));
             assertThat((List<?>) s.get("queryIds")).isNotEmpty();
             List<String> ids = (List<String>) s.get("queryIds");
             assertThat(ids).isSorted().doesNotHaveDuplicates();

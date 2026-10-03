@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', requests: { responses: [], gdelt: [] } };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', requests: { responses: [], gdelt: [] } };
 
 function reset() {
   state.mode = 'ok';
@@ -15,6 +15,7 @@ function reset() {
   state.codes.clear();
   state.issued.length = 0;
   state.news = 'ok';
+  state.events = 'ok';
   state.requests.responses.length = 0;
   state.requests.gdelt.length = 0;
 }
@@ -33,8 +34,16 @@ const readBody = (req) =>
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sha1 = (v) => createHash('sha1').update(v).digest('hex');
 const seendate = () => new Date(Date.now() - 86_400_000).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+const dataBlock = (text, name) => {
+  const open = `<<<ORACUL_UNTRUSTED_DATA name="${name}">>>`;
+  const start = text.indexOf(open);
+  if (start < 0) return '';
+  const end = text.indexOf('<<<END_ORACUL_UNTRUSTED_DATA>>>', start);
+  return end < 0 ? '' : text.slice(start + open.length, end);
+};
 const s256 = (v) => createHash('sha256').update(v).digest('base64url');
 
 function tokens() {
@@ -82,6 +91,17 @@ export const routes = {
     state.news = mode;
     empty(res, 204);
   },
+  'POST /__control/events': async (req, res, url, body) => {
+    let mode;
+    try {
+      mode = JSON.parse(body || '{}').mode;
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!['ok', 'malformed-classification', 'rate-limited'].includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    state.events = mode;
+    empty(res, 204);
+  },
   'GET /__control/requests': async (req, res, url) => {
     const kind = url.searchParams.get('kind');
     if (!Object.hasOwn(state.requests, kind)) return json(res, 400, { error: 'unknown_kind' });
@@ -97,11 +117,15 @@ export const routes = {
       return json(res, 400, { error: 'invalid_json' });
     }
     state.requests.responses.push(parsed);
+    const responseId = `resp_${state.requests.responses.length}`; // taken synchronously: stays unique under concurrent requests
     const text = (parsed.input ?? [])
       .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
       .map((c) => c.text ?? '')
       .join('\n');
     const purpose = /ORACUL REQUEST ([A-Z_]+)/.exec(text)?.[1];
+    // The backend sends up to 4 EVENT_* batches in parallel (research-pipeline.md "Parallel batches"): answer with a small
+    // asynchronous delay so concurrent requests really overlap. Every answer depends on its own request text only.
+    if (purpose === 'EVENT_NORMALIZATION' || purpose === 'EVENT_CLASSIFICATION') await sleep(40);
     let output;
     if (purpose === 'QUERY_EXPANSION') {
       const queries = [];
@@ -109,11 +133,34 @@ export const routes = {
         for (let i = 1; i <= Number(m[2]); i++) queries.push({ intentId: m[1], text: `${m[1]} stub query ${i}` });
       }
       output = JSON.stringify({ queries });
+    } else if (purpose === 'EVENT_NORMALIZATION') {
+      if (state.events === 'rate-limited') return json(res, 429, { error: 'rate_limited' });
+      const ids = [...dataBlock(text, 'sources').matchAll(/^(S\d+) \| /gm)].map((m) => m[1]);
+      const events = [];
+      for (let i = 0; i < ids.length; i += 2) {
+        const group = ids.slice(i, i + 2);
+        events.push({ sourceIds: group, date: null, category: 'general', entities: [`Entity ${group[0]}`], summary: `Stub event ${group[0]}`, disagreement: null, confidence: 0.8 });
+      }
+      output = JSON.stringify({ events });
+    } else if (purpose === 'EVENT_CLASSIFICATION') {
+      if (state.events === 'malformed-classification') {
+        output = 'not json';
+      } else {
+        // exactly the backend StubResponses default: wildcardMatches is empty, so the backend's 0.0 fill per profile topic
+        // is exercised end to end
+        const ids = [...dataBlock(text, 'events').matchAll(/^(EV\d+) \| /gm)].map((m) => m[1]);
+        output = JSON.stringify({
+          classifications: ids.map((eventId) => ({
+            eventId, topic: 'general', subtopics: [], sentiment: 0.1, risk: 0.4, opportunity: 0.6, impact: 0.5, novelty: 0.5,
+            trend: 'ESTABLISHED', geography: 'global', wildcardMatches: [],
+          })),
+        });
+      }
     } else {
       return json(res, 400, { error: 'unsupported_purpose', purpose: purpose ?? null });
     }
     json(res, 200, {
-      id: `resp_${state.requests.responses.length}`,
+      id: responseId,
       status: 'completed',
       output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: output }] }],
     });

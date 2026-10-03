@@ -1,0 +1,152 @@
+import { expect, test, type Page } from '@playwright/test';
+
+const STUB = 'http://localhost:4010';
+
+test.describe.configure({ mode: 'serial' });
+
+test.beforeEach(async ({ request }) => {
+  const r = await request.post(`${STUB}/__control/reset`);
+  expect(r.status()).toBe(204);
+  await request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
+  // the reset must also bring the event answers back to normal
+  const events = await request.post(`${STUB}/__control/events`, { data: { mode: 'ok' } });
+  expect(events.status()).toBe(204);
+});
+
+async function connect(page: Page): Promise<void> {
+  await page.goto('/');
+  await expect(page.getByTestId('chatgpt-status')).toHaveText('Not connected');
+  await page.getByTestId('chatgpt-connect').click();
+  await expect(page.getByTestId('chatgpt-status')).toHaveText('ChatGPT connected');
+}
+
+/** Acceptance configuration A of generation-runs.md "Slice 04_run-start" through the panel. */
+async function configureAcceptance(page: Page): Promise<void> {
+  await page.getByTestId('slider-darkness-input').fill('9');
+  await page.getByTestId('slider-optimism-input').fill('2');
+  await page.getByTestId('horizon-option-5y').click();
+  for (const [category, id, intensity] of [
+    ['biology', 'biology-new-pandemic', '8'],
+    ['robotics', 'robotics-humanoid-boom', '6'],
+  ]) {
+    await page.getByTestId(`wildcard-category-header-${category}`).click();
+    await page.getByTestId(`wildcard-toggle-${id}`).getByRole('switch').click();
+    await page.getByTestId(`wildcard-intensity-${id}-input`).fill(intensity);
+  }
+}
+
+async function startAcceptanceRun(page: Page): Promise<string> {
+  await connect(page);
+  await configureAcceptance(page);
+  await page.getByTestId('generate-button').click();
+  await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
+  return page.url().split('/').pop()!;
+}
+
+async function awaitStatus(page: Page, id: string, wanted: string, timeout: number) {
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).status, { timeout, intervals: [500] })
+    .toBe(wanted);
+  return (await page.request.get(`/api/runs/${id}`)).json();
+}
+
+async function recorded(page: Page): Promise<any[]> {
+  const res = await page.request.get(`${STUB}/__control/requests?kind=responses`);
+  expect(res.status()).toBe(200);
+  const body = await res.json();
+  return Array.isArray(body) ? body : body.requests;
+}
+
+function purposeOf(request: any): string | undefined {
+  return /ORACUL REQUEST ([A-Z_]+)/.exec(JSON.stringify(request))?.[1];
+}
+
+async function listEvents(page: Page, id: string): Promise<any[]> {
+  const res = await page.request.get(`/api/runs/${id}/events`);
+  expect(res.status()).toBe(200);
+  return (await res.json()).items;
+}
+
+// @trace FR-14
+// @trace FR-15
+test.describe('FR-14 / FR-15 Event normalisation and semantic classification', () => {
+  test('the acceptance run produces 41 normalized, classified events', async ({ page }) => {
+    test.setTimeout(90_000);
+    const id = await startAcceptanceRun(page);
+    const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
+    expect(run.counts.uniqueEvents).toBe(41);
+
+    const events = await listEvents(page, id);
+    expect(events).toHaveLength(41);
+    expect(events[0].id).toBe('EV001');
+    expect(events[40].id).toBe('EV041');
+    expect(events[0].sourceIds).toEqual(['S001', 'S002']);
+    expect(events[40].sourceIds).toEqual(['S081']);
+    for (const e of events) {
+      expect(e.excludedReason).toBeUndefined();
+      expect(e.classification).toBeTruthy();
+      const c = e.classification;
+      expect(c.sentiment).toBeGreaterThanOrEqual(-1);
+      expect(c.sentiment).toBeLessThanOrEqual(1);
+      for (const k of ['risk', 'opportunity', 'impact', 'novelty', 'sourceQuality']) {
+        expect(c[k]).toBeGreaterThanOrEqual(0);
+        expect(c[k]).toBeLessThanOrEqual(1);
+      }
+      // the stub answers wildcardMatches [] -> one 0.0 entry per profile topic, in profile order
+      expect(c.wildcardMatches).toEqual([
+        { key: 'biology-new-pandemic', score: 0 },
+        { key: 'robotics-humanoid-boom', score: 0 },
+      ]);
+    }
+
+    const sources = await page.request.get(`/api/runs/${id}/sources`);
+    const s001 = (await sources.json()).items.find((s: any) => s.id === 'S001');
+    expect(s001.entities).toEqual(['Entity S001']);
+
+    const requests = await recorded(page);
+    const purposes = requests.map(purposeOf);
+    expect(purposes.filter((p) => p === 'QUERY_EXPANSION')).toHaveLength(1);
+    expect(purposes.filter((p) => p === 'EVENT_NORMALIZATION')).toHaveLength(3);
+    expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(3);
+    expect(requests.some((r) => JSON.stringify(r).includes('"tools"'))).toBe(false);
+  });
+
+  test('FR-15 malformed classification answers exclude every event with CLASSIFICATION_FAILED', async ({ page }) => {
+    test.setTimeout(90_000);
+    const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'malformed-classification' } });
+    expect(mode.status()).toBe(204);
+    const id = await startAcceptanceRun(page);
+    const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
+    expect(run.counts.uniqueEvents).toBe(41);
+    const events = await listEvents(page, id);
+    expect(events).toHaveLength(41);
+    for (const e of events) {
+      expect(e.excludedReason).toBe('CLASSIFICATION_FAILED');
+      expect(e.classification).toBeUndefined();
+    }
+    const purposes = (await recorded(page)).map(purposeOf);
+    expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(6);
+  });
+
+  test('FR-14 a rate-limited normalisation fails the run with the plan-limit message and writes no events', async ({ page }) => {
+    test.setTimeout(90_000);
+    const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'rate-limited' } });
+    expect(mode.status()).toBe(204);
+    const id = await startAcceptanceRun(page);
+    const run = await awaitStatus(page, id, 'FAILED', 40_000);
+    expect(run.failure.code).toBe('CHATGPT_RATE_LIMITED');
+    expect(run.failure.message).toBe('ChatGPT plan limit reached — try again later');
+    expect(run.stageIndex).toBe(5);
+    expect(run.counts.uniqueEvents).toBe(0);
+    const res = await page.request.get(`/api/runs/${id}/events`);
+    expect(res.status()).toBe(200);
+    expect(await res.json()).toEqual({ items: [] });
+  });
+
+  test('events of an unknown run is 404 RUN_NOT_FOUND', async ({ page }) => {
+    await connect(page);
+    const res = await page.request.get('/api/runs/00000000-0000-0000-0000-000000000000/events');
+    expect(res.status()).toBe(404);
+    expect(await res.json()).toEqual({ code: 'RUN_NOT_FOUND', message: 'Future not found' });
+  });
+});
