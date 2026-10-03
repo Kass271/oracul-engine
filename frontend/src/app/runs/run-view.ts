@@ -1,4 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { ActivatedRoute } from '@angular/router';
 
@@ -40,12 +41,14 @@ import { RunStore } from './run.store';
   `,
   styles: `.unavailable { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 16px; }`,
 })
-export class RunView implements OnInit {
+export class RunView {
   protected readonly runs = inject(RunStore);
   private readonly route = inject(ActivatedRoute);
 
-  ngOnInit(): void {
-    const id = this.route.snapshot.paramMap.get('runId');
-    if (id) this.runs.open(id);
+  constructor() {
+    this.route.paramMap.pipe(takeUntilDestroyed()).subscribe((params) => {
+      const id = params.get('runId');
+      if (id) this.runs.open(id);
+    });
   }
 }

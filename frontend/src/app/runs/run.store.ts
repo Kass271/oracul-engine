@@ -7,6 +7,7 @@ import type { GenerationRun } from '../api/models/generation-run';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
 import { RunsService } from '../api/services/runs.service';
 import { ConnectionStore } from '../chatgpt/connection.store';
+import { ScenarioStore } from '../scenario/scenario.store';
 import { RunErrorMessage } from './run-error-message';
 
 export const POLL_INTERVAL_MS = 1000;
@@ -21,6 +22,8 @@ export class RunStore {
   private readonly snackBar = inject(MatSnackBar);
   private readonly router = inject(Router);
   private readonly connection = inject(ConnectionStore);
+  private readonly panel = inject(ScenarioStore);
+  private panelPending = false;
 
   private timer?: ReturnType<typeof setTimeout>;
   private failures = 0;
@@ -69,6 +72,7 @@ export class RunStore {
     }
     this.reset();
     this.runId = runId;
+    this.panelPending = true;
     this.poll();
   }
 
@@ -91,6 +95,7 @@ export class RunStore {
     this.unavailable.set(false);
     this.failures = 0;
     this.runId = null;
+    this.panelPending = false;
   }
 
   private clear(): void {
@@ -115,6 +120,10 @@ export class RunStore {
         if (epoch !== this.epoch) return;
         this.failures = 0;
         this.run.set(run);
+        if (this.panelPending) {
+          this.panelPending = false;
+          this.panel.load(run.configuration);
+        }
         if (
           run.status === 'FAILED' &&
           run.failure?.code === 'CHATGPT_SESSION_EXPIRED' &&

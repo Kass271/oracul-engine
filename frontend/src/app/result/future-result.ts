@@ -1,5 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
+import type { Subscription } from 'rxjs';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 
 import type { FutureResult } from '../api/models/future-result';
@@ -34,14 +35,27 @@ const GENERIC_ERROR = 'Something went wrong — try again';
     .loading { padding: 16px; }
   `,
 })
-export class FutureResultComponent implements OnInit {
+export class FutureResultComponent {
   private readonly api = inject(ResultService);
   readonly runId = input.required<string>();
   protected readonly result = signal<FutureResult | null>(null);
   protected readonly error = signal<string | null>(null);
 
-  ngOnInit(): void {
-    this.api.getFutureResult({ runId: this.runId() }).subscribe({
+  private sub?: Subscription;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.sub?.unsubscribe());
+    effect(() => {
+      const runId = this.runId();
+      untracked(() => this.load(runId));
+    });
+  }
+
+  private load(runId: string): void {
+    this.sub?.unsubscribe();
+    this.result.set(null);
+    this.error.set(null);
+    this.sub = this.api.getFutureResult({ runId }).subscribe({
       next: (r) => this.result.set(r),
       error: (err: unknown) => {
         const body = err instanceof HttpErrorResponse ? err.error : null;

@@ -215,6 +215,11 @@ paths:
       tags: [history]
       operationId: listRecentRuns
       summary: Recent futures — the 20 newest COMPLETED runs of this session, newest first
+      description: |
+        Runs of the caller's browser session (cookie ORACUL_SID; none/unknown → new session → empty list) with status
+        COMPLETED and a headline, ordered by createdAt desc, ties by id desc, at most 20. FAILED,
+        INSUFFICIENT_EVIDENCE, QUEUED and RUNNING runs and runs of other sessions are never listed. Older runs stay
+        stored and reachable via getRun / getFutureResult. No parameters.
       responses:
         '200':
           description: Recent futures
@@ -926,6 +931,7 @@ components:
 
     RecentRunSummary:
       type: object
+      description: One COMPLETED run; configuration equals getRun.configuration, headline equals the story headline
       required: [id, generationId, kind, createdAt, headline, configuration]
       properties:
         id:

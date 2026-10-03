@@ -1,0 +1,18 @@
+{
+  "slice": "15_recent-futures",
+  "round": 3,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "frontend/src/app/runs/run-view.spec.ts",
+      "line": 1,
+      "fr": "FR-33",
+      "problem": "Round 2 E2E failure (meta-darkness 'Darkness 3/10' instead of 9 after reopening run 1 from /futures/<run2>) was fixed by making RunView subscribe to route.paramMap and FutureResultComponent reload on runId changes (run-view.ts, future-result.ts). No unit test covers navigating between two /futures/:runId URLs inside the same RunView instance, so only the 60 s E2E guards the regression. Missing exhaustive test for route-param change in RunView: /futures/A -> /futures/B must issue getRun(B), then getFutureResult(B) (no further getFutureResult(A)), render B's headline/meta, and load B's configuration into ScenarioStore. The case /futures/A -> /futures/A (same id, e.g. after start()) must issue no second getRun and must not touch the panel.",
+      "fix": "Add a `// @trace FR-33` describe in run-view.spec.ts using RouterTestingHarness: create at /futures/A, flush COMPLETED A (darkness 9) + result A; harness.navigateByUrl('/futures/B'); expect one GET /api/runs/B, flush COMPLETED B (darkness 3), expect one GET /api/runs/B/result, flush; assert meta-darkness 'Darkness 3/10', story-headline = B's, ScenarioStore.darkness() === 3, and http.match for A's endpoints is empty. Add the same-id navigation case as a second it().",
+      "status": "fixed"
+    }
+  ]
+}

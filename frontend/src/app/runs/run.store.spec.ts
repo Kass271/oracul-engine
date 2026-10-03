@@ -1,4 +1,4 @@
-// @trace FR-10, FR-24
+// @trace FR-10, FR-24, FR-33
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
@@ -8,6 +8,8 @@ import { RouterTestingHarness } from '@angular/router/testing';
 
 import { App } from '../app';
 import { routes } from '../app.routes';
+import { RunStore } from './run.store';
+import { ScenarioStore } from '../scenario/scenario.store';
 import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-state';
 import type { GenerationRun } from '../api/models/generation-run';
 
@@ -379,5 +381,75 @@ describe('slice 11_run-failures: session expiry refreshes the connection state',
     http.expectOne(isRunGet).flush(failed('RUN_TIMEOUT', 'Generation took too long — try again'));
     await render();
     expect(http.match(isConnectionGet)).toHaveLength(0);
+  });
+});
+
+// @trace FR-33
+describe('slice 15_recent-futures: reopening a run loads its configuration into the panel', () => {
+  const ID = '99999999-2222-3333-4444-555555555555';
+  let http: HttpTestingController;
+
+  const isRunGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}`);
+  const isRunsPost = (r: { url: string; method: string }): boolean => r.method === 'POST' && r.url.endsWith('/api/runs');
+
+  const config = (darkness: number, horizon = '5y') => ({ ...CATALOGUE.defaults, darkness, horizon }) as GenerationRun['configuration'];
+  const runWith = (darkness: number, status = 'RUNNING', id = ID): GenerationRun =>
+    ({ ...queued(), id, status, stage: 'SEARCHING', stageLabel: 'Searching current events…', stageIndex: 3, configuration: config(darkness) }) as GenerationRun;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    TestBed.inject(RunStore).stop();
+    http.match(() => true);
+    vi.useRealTimers();
+  });
+
+  // @trace FR-33
+  it('open() puts the run configuration into the ScenarioStore on the first successful getRun', () => {
+    const panel = TestBed.inject(ScenarioStore);
+    expect(panel.darkness()).toBe(5);
+    TestBed.inject(RunStore).open(ID);
+    expect(panel.darkness()).toBe(5);
+    http.expectOne(isRunGet).flush(runWith(9, 'COMPLETED'));
+    expect(panel.darkness()).toBe(9);
+    expect(panel.horizon()).toBe('5y');
+    expect(panel.configuration()).toEqual(config(9));
+  });
+
+  // @trace FR-33
+  it('a later poll with another configuration does not change the panel', async () => {
+    const panel = TestBed.inject(ScenarioStore);
+    TestBed.inject(RunStore).open(ID);
+    http.expectOne(isRunGet).flush(runWith(9));
+    expect(panel.darkness()).toBe(9);
+    panel.setDarkness(4);
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    http.expectOne(isRunGet).flush(runWith(2));
+    expect(panel.darkness()).toBe(4);
+  });
+
+  // @trace FR-33
+  it('a failed first getRun leaves the panel untouched', () => {
+    const panel = TestBed.inject(ScenarioStore);
+    TestBed.inject(RunStore).open(ID);
+    http.expectOne(isRunGet).flush({ code: 'RUN_NOT_FOUND', message: 'Future not found' }, { status: 404, statusText: 'Not Found' });
+    expect(panel.darkness()).toBe(5);
+  });
+
+  // @trace FR-33
+  it('start() and its polls never touch the panel', async () => {
+    const panel = TestBed.inject(ScenarioStore);
+    panel.setDarkness(3);
+    const store = TestBed.inject(RunStore);
+    store.start(panel.configuration());
+    http.expectOne(isRunsPost).flush(runWith(9, 'QUEUED'), { status: 202, statusText: 'Accepted' });
+    expect(panel.darkness()).toBe(3);
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    http.expectOne(isRunGet).flush(runWith(7));
+    expect(panel.darkness()).toBe(3);
   });
 });

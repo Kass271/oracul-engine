@@ -9,7 +9,9 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { App } from '../app';
 import { routes } from '../app.routes';
 import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-state';
+import type { FutureResult } from '../api/models/future-result';
 import type { GenerationRun } from '../api/models/generation-run';
+import { ScenarioStore } from '../scenario/scenario.store';
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
 const GENERATION_ID = 'ORC-2026-10-02-1842';
@@ -479,5 +481,122 @@ describe('slice 12_insufficient-evidence', () => {
     expect(has('[data-testid="progress-view"]')).toBe(false);
     await vi.advanceTimersByTimeAsync(5000);
     expect(http.match(isRunGet)).toHaveLength(0);
+  });
+});
+
+// @trace FR-33
+describe('slice 15_recent-futures: navigating between /futures/:runId inside the same RunView', () => {
+  const A = 'aaaaaaaa-0000-0000-0000-00000000000a';
+  const B = 'bbbbbbbb-0000-0000-0000-00000000000b';
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  const runGet = (id: string) => (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${id}`);
+  const resultGet = (id: string) => (r: { url: string; method: string }): boolean =>
+    r.method === 'GET' && r.url.endsWith(`/api/runs/${id}/result`);
+  const el = (): HTMLElement => harness.routeNativeElement as HTMLElement;
+  const text = (id: string): string => (el().querySelector(`[data-testid="${id}"]`)?.textContent ?? '').trim();
+
+  const config = (darkness: number) => ({
+    realism: 8,
+    darkness,
+    optimism: 2,
+    horizon: '5y',
+    wildcards: [],
+    customWildcards: [],
+    output: { story: true, illustration: false },
+  });
+  const headline = (id: string): string => `Headline of ${id === A ? 'A' : 'B'}`;
+
+  function completed(id: string, darkness: number): GenerationRun {
+    return {
+      id,
+      generationId: 'ORC-2026-10-02-1842',
+      kind: 'STANDARD',
+      status: 'COMPLETED',
+      stage: 'WRITING_STORY',
+      stageLabel: 'Writing from the future…',
+      stageIndex: 10,
+      stageCount: 10,
+      headline: headline(id),
+      configuration: config(darkness),
+      counts: COUNTS,
+      createdAt: '2026-10-02T18:42:31Z',
+      updatedAt: '2026-10-02T18:43:10Z',
+      completedAt: '2026-10-02T18:43:10Z',
+    } as unknown as GenerationRun;
+  }
+
+  function result(id: string, darkness: number): FutureResult {
+    return {
+      runId: id,
+      generationId: 'ORC-2026-10-02-1842',
+      labels: ['AI-GENERATED FUTURE SCENARIO', 'POSSIBLE FUTURE — NOT CURRENT NEWS'],
+      story: { headline: headline(id), dateline: 'ORACUL FUTURE — March 1, 2027', futureDate: '2027-03-01', body: 'a\n\nb\n\nc' },
+      metadata: { configuration: config(darkness), horizonLabel: '5 years', wildcards: [], counts: COUNTS },
+      causalChain: [],
+      sources: [],
+      research: { intents: [], counts: COUNTS },
+      openCriticIssues: [],
+    } as unknown as FutureResult;
+  }
+
+  async function render(): Promise<void> {
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+  }
+
+  async function openA(): Promise<void> {
+    harness = await RouterTestingHarness.create(`/futures/${A}`);
+    http.expectOne(runGet(A)).flush(completed(A, 9));
+    await render();
+    http.expectOne(resultGet(A)).flush(result(A, 9));
+    await render();
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+  });
+
+  it('/futures/A -> /futures/B loads B once (run, then result), renders B and loads B into the panel without touching A', async () => {
+    await openA();
+    expect(text('story-headline')).toBe(headline(A));
+    expect(text('meta-darkness')).toBe('Darkness 9/10');
+    expect(TestBed.inject(ScenarioStore).darkness()).toBe(9);
+
+    await harness.navigateByUrl(`/futures/${B}`);
+    harness.detectChanges();
+    http.expectOne(runGet(B)).flush(completed(B, 3));
+    await render();
+    http.expectOne(resultGet(B)).flush(result(B, 3));
+    await render();
+
+    expect(text('meta-darkness')).toBe('Darkness 3/10');
+    expect(text('story-headline')).toBe(headline(B));
+    expect(TestBed.inject(ScenarioStore).darkness()).toBe(3);
+    expect(http.match(runGet(A))).toHaveLength(0);
+    expect(http.match(resultGet(A))).toHaveLength(0);
+    http.verify();
+  });
+
+  it('/futures/A -> /futures/A issues no second getRun and does not reload the panel', async () => {
+    await openA();
+    const store = TestBed.inject(ScenarioStore);
+    store.setDarkness(4);
+
+    await harness.navigateByUrl(`/futures/${A}`);
+    await render();
+
+    expect(http.match(runGet(A))).toHaveLength(0);
+    expect(http.match(resultGet(A))).toHaveLength(0);
+    expect(store.darkness()).toBe(4);
+    expect(text('story-headline')).toBe(headline(A));
+    http.verify();
   });
 });

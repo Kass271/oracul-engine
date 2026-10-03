@@ -139,6 +139,39 @@ public class GenerationRunRepository {
             code, message, now, now, id);
     }
 
+    /** The newest COMPLETED runs with a headline of the session, newest first (ties by id desc). */
+    public List<Row> findRecentCompleted(UUID sessionId, int limit) {
+        return jdbc.query("select " + COLUMNS + " from generation_run where session_id = ? and status = 'COMPLETED' "
+            + "and headline is not null order by created_at desc, id desc limit ?", (rs, i) -> mapRow(rs, false),
+            sessionId, limit);
+    }
+
+    /** Configuration of the newest run of the session, any status. */
+    public Optional<ScenarioConfiguration> findNewestConfiguration(UUID sessionId) {
+        return jdbc.query("select configuration from generation_run where session_id = ? "
+            + "order by created_at desc, id desc limit 1",
+            (rs, i) -> read(rs.getString("configuration"), ScenarioConfiguration.class), sessionId).stream().findFirst();
+    }
+
+    private Row mapRow(java.sql.ResultSet rs, boolean openCritic) throws java.sql.SQLException {
+        return new Row(
+            rs.getObject("id", UUID.class), rs.getString("generation_id"), rs.getObject("session_id", UUID.class),
+            RunKind.fromValue(rs.getString("kind")), rs.getObject("parent_run_id", UUID.class),
+            RunStatus.fromValue(rs.getString("status")),
+            rs.getString("stage") == null ? null : RunStage.fromValue(rs.getString("stage")),
+            read(rs.getString("configuration"), ScenarioConfiguration.class),
+            rs.getString("research_profile") == null ? null
+                : read(rs.getString("research_profile"), ResearchProfile.class),
+            read(rs.getString("counts"), ResearchCounts.class),
+            rs.getString("failure_code"), rs.getString("failure_message"),
+            (Integer) rs.getObject("suggested_realism"), rs.getString("headline"),
+            utc(rs.getObject("created_at", OffsetDateTime.class)),
+            utc(rs.getObject("updated_at", OffsetDateTime.class)),
+            utc(rs.getObject("completed_at", OffsetDateTime.class)),
+            rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
+            rs.getObject("evidence_pack_id", UUID.class), openCritic);
+    }
+
     public Optional<Row> find(UUID id, UUID sessionId) {
         List<Row> rows = jdbc.query("select " + COLUMNS + ", exists (select 1 from scenario_attempt a where a.run_id = generation_run.id "
                 + "and a.attempt = generation_run.final_attempt and a.critic_report ->> 'verdict' = 'FAIL') "

@@ -9,6 +9,7 @@ import { MatToolbarModule } from '@angular/material/toolbar';
 import { ChatGptConnectionComponent } from './chatgpt/chatgpt-connection';
 import { ConnectionStore } from './chatgpt/connection.store';
 import { WelcomeView } from './center/welcome-view';
+import { RecentFuturesComponent } from './history/recent-futures';
 import { ScenarioPanel } from './scenario/scenario-panel';
 import { ScenarioLoader } from './scenario/scenario.loader';
 
@@ -23,6 +24,7 @@ import { ScenarioLoader } from './scenario/scenario.loader';
     RouterOutlet,
     WelcomeView,
     ChatGptConnectionComponent,
+    RecentFuturesComponent,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',
