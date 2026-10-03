@@ -36,17 +36,17 @@ import tools.jackson.databind.node.ObjectNode;
  * "Slice 08_validated-scenario"). The production classes are reached by reflection so RED compiles whatever they look
  * like; a missing class or method is an AssertionError naming it. Generated API models are used directly.
  */
-final class ReasoningHarness {
+public final class ReasoningHarness {
 
-    static final String PKG = "com.oracul.app.reasoning.";
-    static final OffsetDateTime CUTOFF = OffsetDateTime.parse("2026-10-02T18:42:00Z");
-    static final JsonMapper MAPPER = JsonMapper.builder().build();
+    public static final String PKG = "com.oracul.app.reasoning.";
+    public static final OffsetDateTime CUTOFF = OffsetDateTime.parse("2026-10-02T18:42:00Z");
+    public static final JsonMapper MAPPER = JsonMapper.builder().build();
 
     private ReasoningHarness() {}
 
     // ---- reflection -------------------------------------------------------------------------------------------
 
-    static Class<?> type(String name) {
+    public static Class<?> type(String name) {
         try {
             return Class.forName(PKG + name);
         } catch (ClassNotFoundException e) {
@@ -54,7 +54,7 @@ final class ReasoningHarness {
         }
     }
 
-    static Object constant(String className, String field) {
+    public static Object constant(String className, String field) {
         Class<?> type = type(className);
         try {
             Field f = type.getDeclaredField(field);
@@ -82,7 +82,7 @@ final class ReasoningHarness {
         throw new AssertionError(type.getSimpleName() + "." + m.getName() + " is not static and the class has no no-arg constructor");
     }
 
-    static Object call(String className, String method, Object... args) {
+    public static Object call(String className, String method, Object... args) {
         Class<?> type = type(className);
         Method m = null;
         for (Method c : type.getDeclaredMethods()) {
@@ -111,17 +111,17 @@ final class ReasoningHarness {
 
     // ---- prompt -------------------------------------------------------------------------------------------------
 
-    static String closedEvidenceMode() {
+    public static String closedEvidenceMode() {
         return (String) constant("ClosedEvidenceMode", "INSTRUCTIONS");
     }
 
-    static String instructions() {
+    public static String instructions() {
         return (String) constant("ScenarioGenerationPrompt", "INSTRUCTIONS");
     }
 
     /** GenerationRequest(attempt, reason, schemaErrors, guardViolations) built reflectively. */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    static Object generationRequest(int attempt, String reason, List<String> schemaErrors, List<GuardViolation> violations) {
+    public static Object generationRequest(int attempt, String reason, List<String> schemaErrors, List<GuardViolation> violations) {
         Class<?> type = type("GenerationRequest");
         if (!type.isRecord()) throw new AssertionError("GenerationRequest must be a record");
         RecordComponent[] comps = type.getRecordComponents();
@@ -146,16 +146,16 @@ final class ReasoningHarness {
         }
     }
 
-    static Object initial() {
+    public static Object initial() {
         return generationRequest(1, "INITIAL", List.of(), List.of());
     }
 
-    static String inputText(EvidencePack pack, Object request) {
+    public static String inputText(EvidencePack pack, Object request) {
         return (String) call("ScenarioGenerationPrompt", "inputText", pack, request);
     }
 
     @SuppressWarnings("unchecked")
-    static Map<String, Object> body(String model, EvidencePack pack, Object request) {
+    public static Map<String, Object> body(String model, EvidencePack pack, Object request) {
         return (Map<String, Object>) call("ScenarioGenerationPrompt", "body", model, pack, request);
     }
 
@@ -164,12 +164,12 @@ final class ReasoningHarness {
     record Parsed(Optional<StructuredScenario> scenario, List<String> errors) {}
 
     @SuppressWarnings("unchecked")
-    static Parsed parse(Optional<String> outputText) {
+    public static Parsed parse(Optional<String> outputText) {
         Object result = call("StructuredScenarioParser", "parse", outputText);
         return new Parsed((Optional<StructuredScenario>) accessor(result, "scenario"), (List<String>) accessor(result, "errors"));
     }
 
-    static Parsed parse(String text) {
+    public static Parsed parse(String text) {
         return parse(Optional.of(text));
     }
 
@@ -186,18 +186,18 @@ final class ReasoningHarness {
         }
     }
 
-    static Checked check(StructuredScenario scenario, EvidencePack pack, int attempt, boolean finalAttempt) {
+    public static Checked check(StructuredScenario scenario, EvidencePack pack, int attempt, boolean finalAttempt) {
         Object result = call("EvidenceGuard", "check", scenario, pack, attempt, finalAttempt);
         return new Checked((GuardReport) accessor(result, "report"), (StructuredScenario) accessor(result, "cleaned"));
     }
 
     /** "TYPE | claimId or - | evidenceId or - | detail | ACTION" */
-    static String line(GuardViolation v) {
+    public static String line(GuardViolation v) {
         return v.getType().name() + " | " + nz(v.getClaimId()) + " | " + nz(v.getEvidenceId()) + " | " + v.getDetail() + " | "
             + v.getAction().name();
     }
 
-    static String v(String type, String claimId, String evidenceId, String detail, String action) {
+    public static String v(String type, String claimId, String evidenceId, String detail, String action) {
         return type + " | " + nz(claimId) + " | " + nz(evidenceId) + " | " + detail + " | " + action;
     }
 
@@ -207,21 +207,21 @@ final class ReasoningHarness {
 
     // ---- scenarios (JSON <-> model) -----------------------------------------------------------------------------
 
-    static StructuredScenario scenario(String json) {
+    public static StructuredScenario scenario(String json) {
         return MAPPER.readValue(json, StructuredScenario.class);
     }
 
     /** Scenario JSON with the mutation applied (document order preserved). */
-    static ObjectNode tree(String json) {
+    public static ObjectNode tree(String json) {
         return (ObjectNode) MAPPER.readTree(json);
     }
 
-    static ObjectNode copy(StructuredScenario s) {
+    public static ObjectNode copy(StructuredScenario s) {
         return (ObjectNode) MAPPER.valueToTree(s);
     }
 
     /** JSON tree without null values and without an empty "unknowns" array: the comparable form of a scenario. */
-    static JsonNode comparable(Object scenarioOrJson) {
+    public static JsonNode comparable(Object scenarioOrJson) {
         JsonNode n = scenarioOrJson instanceof String s ? MAPPER.readTree(s) : MAPPER.valueToTree(scenarioOrJson);
         return strip(n);
     }
@@ -247,20 +247,20 @@ final class ReasoningHarness {
 
     // ---- packs --------------------------------------------------------------------------------------------------
 
-    static ScenarioConfiguration configA(HorizonCode horizon) {
+    public static ScenarioConfiguration configA(HorizonCode horizon) {
         return new ScenarioConfiguration(8, 9, 2, horizon,
             new ArrayList<>(List.of(new WildcardSetting("biology-new-pandemic", 8), new WildcardSetting("robotics-humanoid-boom", 6))),
             new ArrayList<>(), new OutputSettings(true, false));
     }
 
-    static final ResearchTopic PANDEMIC = new ResearchTopic("biology-new-pandemic", "New pandemic", "biology", 0.8, false);
-    static final ResearchTopic HUMANOID = new ResearchTopic("robotics-humanoid-boom", "Humanoid robot boom", "robotics", 0.6, false);
+    public static final ResearchTopic PANDEMIC = new ResearchTopic("biology-new-pandemic", "New pandemic", "biology", 0.8, false);
+    public static final ResearchTopic HUMANOID = new ResearchTopic("robotics-humanoid-boom", "Humanoid robot boom", "robotics", 0.6, false);
 
-    static ResearchProfile profile(HorizonCode horizon, ResearchTopic... topics) {
+    public static ResearchProfile profile(HorizonCode horizon, ResearchTopic... topics) {
         return new ResearchProfile(0.9, 0.2, 0.8, horizon, new ArrayList<>(List.of(topics)));
     }
 
-    static EvidenceItem item(String evidenceId, EvidenceSection section, String summary) {
+    public static EvidenceItem item(String evidenceId, EvidenceSection section, String summary) {
         EvidenceItem i = new EvidenceItem(evidenceId, section, "EV00" + evidenceId.substring(evidenceId.length() - 1),
             "labour", summary, new ArrayList<>(List.of("Entity")), new ArrayList<>(List.of("S001")), 0.85, 0.8);
         i.setDate(LocalDate.parse("2026-10-01"));
@@ -268,7 +268,7 @@ final class ReasoningHarness {
     }
 
     /** The V4 promptText exactly as the Evidence Pack renderer produces it for body A. */
-    static String v4PromptText(String summaryE001) {
+    public static String v4PromptText(String summaryE001) {
         return String.join("\n",
             "ORACUL EVIDENCE PACK",
             "Generation: ORC-2026-10-02-1842",
@@ -286,7 +286,7 @@ final class ReasoningHarness {
                 + " · sources: Stub Site (S001), Stub Site (S002), Stub Site (S003) · quality 0.95");
     }
 
-    static EvidencePack pack(ScenarioConfiguration cfg, ResearchProfile profile, String promptText) {
+    public static EvidencePack pack(ScenarioConfiguration cfg, ResearchProfile profile, String promptText) {
         return new EvidencePack(UUID.randomUUID(), "ORC-2026-10-02-1842", CUTOFF, cfg, profile,
             new ArrayList<>(List.of(item("E001", EvidenceSection.CORE, "Dock workers strike over humanoid robots."))),
             new ArrayList<>(),
@@ -295,17 +295,17 @@ final class ReasoningHarness {
     }
 
     /** The V4 pack under body A (horizon 5y, wildcards pandemic 8 and humanoid 6). */
-    static EvidencePack v4Pack() {
+    public static EvidencePack v4Pack() {
         return pack(configA(HorizonCode._5Y), profile(HorizonCode._5Y, PANDEMIC, HUMANOID),
             v4PromptText("Dock workers strike over humanoid robots."));
     }
 
     /** Fixture GP: V4 pack with the given horizon (profile and configuration agree). */
-    static EvidencePack gp(HorizonCode horizon) {
+    public static EvidencePack gp(HorizonCode horizon) {
         return pack(configA(horizon), profile(horizon, PANDEMIC, HUMANOID), v4PromptText("Dock workers strike over humanoid robots."));
     }
 
-    static EvidencePack withCustom(String label, int intensity) {
+    public static EvidencePack withCustom(String label, int intensity) {
         ScenarioConfiguration cfg = configA(HorizonCode._5Y);
         cfg.setCustomWildcards(new ArrayList<>(List.of(new CustomWildcard(label, intensity))));
         ResearchProfile prof = profile(HorizonCode._5Y, PANDEMIC, HUMANOID,

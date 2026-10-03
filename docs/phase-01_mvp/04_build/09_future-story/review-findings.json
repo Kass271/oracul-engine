@@ -1,0 +1,95 @@
+{
+  "slice": "09_future-story",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "e2e/tests/run-start.spec.ts",
+      "line": 182,
+      "fr": "FR-24",
+      "problem": "The superseded FR-24 E2E was rewritten to end in result-view, but the only check of FR-24 acceptance #2 (no technical details in the progress view: `expect(inner).not.toMatch(/https?:\\/\\/|[{}]|Exception/)`) was deleted along with the 'all steps done' assertions. Nothing replaces it. A grep of e2e/tests and frontend runs/*.spec.ts finds no other assertion on progress-view text, so FR-24's 'no URLs, JSON, stack traces' criterion is no longer tested anywhere. The spec only superseded the 'all 10 steps done / aria-valuenow 100 / reload shows finished progress view' assertions, not the technical-details check.",
+      "fix": "Inside the stage loop (e.g. when the stage is WRITING_STORY, before the result view replaces it), read `page.getByTestId('progress-view').innerText()` and assert it does not match /https?:\\/\\/|[{}]|Exception/.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/result/future-result.ts",
+      "line": 41,
+      "fr": "FR-23",
+      "problem": "Spec: FutureResult 'on init (and when `runId` changes) calls getFutureResult exactly once'. The component fetches only in ngOnInit. If the runId input changes while the component stays mounted, it keeps showing the old future's story and metadata. Today RunStore.start() resets the run to null first, which destroys the component, so the bug is latent. It will surface once one completed run can be switched to another in place (for example Recent futures, or back/forward between two /futures/<id> URLs).",
+      "fix": "Load from an effect (or ngOnChanges) keyed on runId(): reset result/error, then call getFutureResult once per distinct runId.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/result/future-result.ts",
+      "line": 20,
+      "fr": "FR-23",
+      "problem": "Spec (Frontend, 200 case): '`result-view` (a `mat-card`) with … story-labels … story-headline … then scenario-metadata'. Here result-view is a plain div and only the metadata panel is a mat-card, so the story itself sits on the bare surface.",
+      "fix": "Render result-view as `<mat-card appearance=\"outlined\" data-testid=\"result-view\">` (or document the deviation in the spec), keeping the label/headline/dateline/body/metadata order.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/result/scenario-metadata.ts",
+      "line": 49,
+      "fr": "FR-25",
+      "problem": "The critic-issues notice is titled 'Open critic notes', but FR-25 specifies the heading \"Open questions from ORACUL's critic\". This is inert in this slice because openCriticIssues is always [], but the code and its unit test (which only checks the list items) would carry the wrong text into slice 10.",
+      "fix": "Use the exact heading \"Open questions from ORACUL's critic\" and assert it in the scenario-metadata.spec.ts critic-issues test.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/reasoning/ReasoningHarness.java-E",
+      "line": 1,
+      "fr": "FR-23",
+      "problem": "Stray BSD `sed -i -E` backup file (14 KB, the old package-private ReasoningHarness) left untracked in the test source tree. It is not compiled, but it would be committed with the slice and confuses readers.",
+      "fix": "Delete backend/src/test/java/com/oracul/app/reasoning/ReasoningHarness.java-E.",
+      "status": "fixed"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/result/StoryParser.java",
+      "line": 77,
+      "fr": "FR-23",
+      "problem": "Headline normalization only collapses ASCII `\\s` runs. Control characters are not removed (the body strips them via isISOControl). A model headline containing a JSON-escaped \\u0000 passes validation, and Postgres then rejects the text insert ('invalid byte sequence 0x00'). PipelineExecutor maps that to a generic INTERNAL_ERROR instead of the specified correction/INVALID_SCENARIO path. Other C0/C1 controls (e.g. ESC) are stored and shown verbatim. This is a spec gap rather than a spec violation.",
+      "fix": "Apply the body's control-character removal (keep only non-ISO-control code points, with newlines and tabs mapped to spaces first) to the headline before collapsing whitespace, and add a parser unit row for it.",
+      "status": "open"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/ScenarioWindow.java",
+      "line": 13,
+      "fr": "FR-23",
+      "problem": "'Never today' is only guaranteed for the UTC calendar date: the window lower bound is the UTC date of the pack cutoff. For a 1d horizon (futureDate must be exactly cutoff+1), a user east of UTC late in the UTC day (e.g. cutoff 2026-10-02T18:42Z = Oct 3 04:42 in UTC+10) sees a dateline equal to their local today. The implementation matches the spec, and the E2E only checks today's UTC date, so this is a spec-level gap.",
+      "fix": "Decide at approval: either accept UTC as the reference day (and state it in future-result.md), or compute the lower bound from the latest timezone (cutoff instant at UTC+14) so that cutoff+1d is never 'today' anywhere.",
+      "status": "open"
+    },
+    {
+      "id": "R8",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/TestcontainersConfiguration.java",
+      "line": 27,
+      "fr": "FR-23",
+      "problem": "All cached Spring contexts in a fork now share one Postgres server, and it runs with the default max_connections=100. Each context keeps a default Hikari pool (maximumPoolSize 10, minimumIdle 10). With spring.test.context.cache.maxSize=8, plus the new context that is loaded before the eldest is evicted, that is about 90 pooled connections plus the admin connection. Today this fits, but raising the cache size or any pool size later would cause intermittent 'too many clients' failures unrelated to the code under test. Per-context isolation itself is sound: one database per context, Flyway runs per database, the database is dropped WITH (FORCE) after the DataSource is destroyed, admin connections are closed, stub servers use ephemeral ports, and each fork has its own container.",
+      "fix": "Add a comment tying cache maxSize to the connection budget. Alternatively, set spring.datasource.hikari.maximum-pool-size (e.g. 4) for tests, or start the container with .withCommand(\"postgres\", \"-c\", \"max_connections=300\").",
+      "status": "open"
+    }
+  ]
+}

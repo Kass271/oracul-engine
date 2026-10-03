@@ -114,6 +114,12 @@ public class GenerationRunRepository {
             + "where id = ? and status = 'RUNNING'", stage.getValue(), now, now, id) == 1;
     }
 
+    /** Completes the run with its story headline; false when the run is no longer RUNNING. */
+    public boolean markCompletedWithHeadline(UUID id, RunStage stage, String headline, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'COMPLETED', stage = ?, headline = ?, updated_at = ?, "
+            + "completed_at = ? where id = ? and status = 'RUNNING'", stage.getValue(), headline, now, now, id) == 1;
+    }
+
     public void markFailed(UUID id, String code, String message, OffsetDateTime now) {
         jdbc.update("update generation_run set status = 'FAILED', failure_code = ?, failure_message = ?, "
             + "updated_at = ?, completed_at = ? where id = ? and status in ('QUEUED','RUNNING')",

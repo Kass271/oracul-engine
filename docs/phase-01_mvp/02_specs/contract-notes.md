@@ -186,6 +186,16 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    only in this slice. `HttpResponsesClient` refuses any body carrying `tools` / `tool_choice` / `web_search*`
    (IllegalStateException, no request sent). `counts.sourcesUsed` = distinct Evidence IDs cited by `factsUsed` of the
    accepted cleaned scenario.
+14. Slice 09 (future-result.md "Slice 09_future-story"): stage 10 becomes real — STORY_WRITING (Closed Evidence Mode,
+   single data block `structured-scenario`, strict `future_story` schema), one STORY_CORRECTION retry; a futureDate
+   still outside the window after the retry falls back to the guard-checked `futureEvent.date`, any other invalid
+   second answer fails INVALID_SCENARIO at stage 10. ORACUL rebuilds the dateline (`ORACUL FUTURE — Month d, yyyy`,
+   English). `future_story` (Flyway V8); `getFutureResult` 200 only for COMPLETED runs with a story, otherwise 409
+   RESULT_NOT_READY. Contract tightened without new operations: `FutureStory` length/pattern constraints, `labels`
+   exactly 2, `WildcardDisplay.intensity` 1–10, descriptions on `getFutureResult` / `GenerationRun.headline`.
+   Metadata wildcards follow configuration order (catalogue, then custom). NFR-2 budget: the E2E stack paces stages
+   to ≥ 2 s for the FR-24 progress E2E, so "< 10 s with stubs" is asserted by a backend IT with pacing PT0S; the E2E
+   asserts `completedAt − createdAt` < 10 s + 10 × 2 s. To confirm at approval.
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

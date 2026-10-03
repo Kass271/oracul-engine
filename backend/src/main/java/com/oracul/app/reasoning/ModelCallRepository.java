@@ -19,13 +19,13 @@ public class ModelCallRepository {
         this.json = json;
     }
 
-    long insert(UUID runId, String purpose, int attempt, Map<String, Object> body, OffsetDateTime now) {
+    public long insert(UUID runId, String purpose, int attempt, Map<String, Object> body, OffsetDateTime now) {
         return jdbc.queryForObject("insert into model_call (run_id, purpose, attempt, request_body, created_at) "
                 + "values (?, ?, ?, cast(? as jsonb), ?) returning id", Long.class,
             runId, purpose, attempt, json.writeValueAsString(body), now);
     }
 
-    void setStatus(long id, Integer status) {
+    public void setStatus(long id, Integer status) {
         jdbc.update("update model_call set response_status = ? where id = ?", status, id);
     }
 }

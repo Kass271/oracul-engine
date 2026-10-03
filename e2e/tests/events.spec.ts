@@ -110,6 +110,9 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(3);
     // slice 08: the pack is not empty, so exactly one SCENARIO_GENERATION request follows
     expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(1);
+    // slice 09: the accepted scenario is followed by exactly one STORY_WRITING request, last
+    expect(purposes.filter((p) => p === 'STORY_WRITING')).toHaveLength(1);
+    expect(purposes[purposes.length - 1]).toBe('STORY_WRITING');
     expect(requests.some((r) => JSON.stringify(r).includes('"tools"'))).toBe(false);
   });
 

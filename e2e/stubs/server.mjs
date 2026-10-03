@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', scenario: 'ok', scenarioCalls: 0, requests: { responses: [], gdelt: [] } };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', scenario: 'ok', scenarioCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [] } };
 
 function reset() {
   state.mode = 'ok';
@@ -18,6 +18,8 @@ function reset() {
   state.events = 'ok';
   state.scenario = 'ok';
   state.scenarioCalls = 0;
+  state.story = 'ok';
+  state.storyCalls = 0;
   state.requests.responses.length = 0;
   state.requests.gdelt.length = 0;
 }
@@ -46,6 +48,17 @@ const dataBlock = (text, name) => {
   const end = text.indexOf('<<<END_ORACUL_UNTRUSTED_DATA>>>', start);
   return end < 0 ? '' : text.slice(start + open.length, end);
 };
+const STORY_MODES = ['ok', 'bad-date-once', 'bad-date', 'invalid-once', 'invalid', 'rate-limited'];
+
+// ST-DEFAULT(d) (future-result.md): BODY(3) = 3 paragraphs of 60 words, dateline is a placeholder the backend replaces.
+const storyDefault = (d) =>
+  JSON.stringify({
+    headline: 'Stub headline from the future',
+    dateline: 'STUB DATELINE',
+    futureDate: d,
+    body: [1, 2, 3].map((k) => `Stub paragraph ${k}` + ' lorem'.repeat(57)).join('\n\n'),
+  });
+
 const SCENARIO_MODES = ['ok', 'invalid-once', 'invalid', 'e099', 'guard-fail-once', 'guard-fail'];
 const q = (v) => JSON.stringify(v);
 
@@ -158,6 +171,17 @@ export const routes = {
     state.scenario = mode;
     empty(res, 204);
   },
+  'POST /__control/story': async (req, res, url, body) => {
+    let mode;
+    try {
+      mode = JSON.parse(body || '{}').mode;
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!STORY_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    state.story = mode;
+    empty(res, 204);
+  },
   'GET /__control/requests': async (req, res, url) => {
     const kind = url.searchParams.get('kind');
     if (!Object.hasOwn(state.requests, kind)) return json(res, 400, { error: 'unknown_kind' });
@@ -227,6 +251,14 @@ export const routes = {
       else if (m === 'e099') output = scenarioDefault(text, 'e099');
       else if (m === 'guard-fail' || (m === 'guard-fail-once' && call === 1)) output = scenarioDefault(text, 'bad');
       else output = scenarioDefault(text, 'ok');
+    } else if (purpose === 'STORY_WRITING') {
+      const call = ++state.storyCalls;
+      const m = state.story;
+      if (m === 'rate-limited') return json(res, 429, { error: 'rate_limited' });
+      const line = (name) => new RegExp(`^${name}: (\\d{4}-\\d{2}-\\d{2})$`, 'm').exec(text)?.[1];
+      if (m === 'invalid' || (m === 'invalid-once' && call === 1)) output = 'not json';
+      else if (m === 'bad-date' || (m === 'bad-date-once' && call === 1)) output = storyDefault(line('Cutoff date'));
+      else output = storyDefault(line('Future event date'));
     } else {
       return json(res, 400, { error: 'unsupported_purpose', purpose: purpose ?? null });
     }

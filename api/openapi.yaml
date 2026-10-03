@@ -404,6 +404,11 @@ paths:
       tags: [result]
       operationId: getFutureResult
       summary: Everything the result view renders — story, labels, metadata, causal chain, sources, research summary
+      description: |
+        200 only for a COMPLETED run that has a stored future story (stage WRITING_STORY done). Run QUEUED / RUNNING,
+        FAILED, INSUFFICIENT_EVIDENCE, or COMPLETED without a story (interim: empty Evidence Pack) → 409
+        RESULT_NOT_READY "This future is not ready yet". Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND
+        "Future not found". All values come from the run snapshot, never from the current panel configuration.
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -863,7 +868,9 @@ components:
           description: Set when status is INSUFFICIENT_EVIDENCE and realism > 1 (realism − 2, at least 1)
         headline:
           type: string
-          description: Set when COMPLETED
+          minLength: 1
+          maxLength: 160
+          description: Headline of the future story; set only when COMPLETED with a story (absent while active, for FAILED / INSUFFICIENT_EVIDENCE and for interim COMPLETED runs without a story)
         hasOpenCriticIssues:
           type: boolean
         createdAt:
@@ -1763,15 +1770,23 @@ components:
       properties:
         headline:
           type: string
+          minLength: 1
+          maxLength: 160
+          description: Single line, trimmed, whitespace collapsed
         dateline:
           type: string
+          pattern: '^ORACUL FUTURE — (January|February|March|April|May|June|July|August|September|October|November|December) [1-9][0-9]?, [0-9]{4}$'
+          description: Built by ORACUL from futureDate (the model's dateline is ignored)
           example: ORACUL FUTURE — March 14, 2031
         futureDate:
           type: string
           format: date
+          description: After the Evidence Pack cutoff date and no later than cutoff date + horizon (never the cutoff day itself)
+          example: '2031-03-14'
         body:
           type: string
-          description: Plain text paragraphs separated by blank lines (no HTML)
+          minLength: 1
+          description: Plain text, 150–900 words, paragraphs separated by exactly one blank line ("\n\n"), no HTML or Markdown
 
     WildcardDisplay:
       type: object
@@ -1779,9 +1794,14 @@ components:
       properties:
         label:
           type: string
+          description: Catalogue label (e.g. "New pandemic") or the custom wildcard label
+          example: New pandemic
         intensity:
           type: integer
           format: int32
+          minimum: 1
+          maximum: 10
+          example: 8
         custom:
           type: boolean
 
@@ -1793,9 +1813,11 @@ components:
           $ref: '#/components/schemas/ScenarioConfiguration'
         horizonLabel:
           type: string
+          description: Tomorrow · 1 week · 1 month · 1 year · 5 years · 10 years · 20 years
           example: 5 years
         wildcards:
           type: array
+          description: Catalogue wildcards of the configuration in configuration order, then custom wildcards in configuration order; [] when none
           items:
             $ref: '#/components/schemas/WildcardDisplay'
         counts:
@@ -1846,7 +1868,9 @@ components:
           type: string
         labels:
           type: array
-          description: Always ["AI-GENERATED FUTURE SCENARIO", "POSSIBLE FUTURE — NOT CURRENT NEWS"]
+          description: Always exactly ["AI-GENERATED FUTURE SCENARIO", "POSSIBLE FUTURE — NOT CURRENT NEWS"] in this order
+          minItems: 2
+          maxItems: 2
           items:
             type: string
         story:
@@ -1855,15 +1879,18 @@ components:
           $ref: '#/components/schemas/ScenarioMetadata'
         causalChain:
           type: array
+          description: Causal chain of the accepted (guard-cleaned) structured scenario, equal to getStructuredScenario.structuredScenario.causalChain
           items:
             $ref: '#/components/schemas/CausalStep'
         sources:
           type: array
+          description: One entry per Evidence Pack item (core, supporting, counter-signals) in Evidence ID order
           items:
             $ref: '#/components/schemas/ResultSource'
         research:
           $ref: '#/components/schemas/ResearchExplanation'
         openCriticIssues:
           type: array
+          description: Issues of the last failing critic report when the run completed despite it; [] otherwise (always [] before slice 10)
           items:
             $ref: '#/components/schemas/CriticIssue'

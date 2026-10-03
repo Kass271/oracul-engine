@@ -157,6 +157,6 @@ public abstract class AbstractReasoningIT extends AbstractEvidenceIT {
     protected static void assertCompleted(Map<String, Object> run) {
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(run.get("stageIndex")).isEqualTo(10);
-        assertThat(absent(run, "headline")).isTrue();
+        assertThat(run.get("headline")).as("slice 09: story headline").isEqualTo("Stub headline from the future");
     }
 }

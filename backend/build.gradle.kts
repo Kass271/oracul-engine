@@ -75,6 +75,8 @@ tasks.jar { enabled = false }
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // each fork gets its own Postgres container (see TestcontainersConfiguration); jacoco appends all forks into one test.exec
+    maxParallelForks = 2
     finalizedBy(tasks.jacocoTestReport)
 }
 

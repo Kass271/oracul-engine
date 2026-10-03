@@ -170,28 +170,27 @@ test.describe('FR-11 Research Profile', () => {
 
 // @trace FR-24
 test.describe('FR-24 Generation progress', () => {
-  test('progress walks through every stage label and ends with all steps done', async ({ page }) => {
+  test('progress walks through every stage label and ends with the result view', async ({ page }) => {
     test.setTimeout(60_000);
     await startAcceptanceRun(page);
     for (const [stage, label] of STAGES.slice(1)) {
       await expect(page.getByTestId('progress-stage')).toHaveText(label, { timeout: 5000 });
       await expect(page.getByTestId(`progress-step-${stage}`)).toHaveAttribute('data-state', 'current');
+      // @trace FR-24 no technical details in the progress view
+      const progressView = page.getByTestId('progress-view');
+      if (await progressView.isVisible()) {
+        expect(await progressView.innerText()).not.toMatch(/https?:\/\/|[{}]|Exception/);
+      }
       if (stage === 'SEARCHING') await evidence(page, 'FR-24', 'progress-searching');
     }
-    for (const [stage] of STAGES) {
-      await expect(page.getByTestId(`progress-step-${stage}`)).toHaveAttribute('data-state', 'done', { timeout: 5000 });
-    }
-    await expect(page.getByTestId('progress-bar')).toHaveAttribute('aria-valuenow', '100');
-    const inner = await page.getByTestId('progress-view').innerText();
-    expect(inner).not.toMatch(/https?:\/\/|[{}]|Exception/);
+    // slice 09: after "Writing from the future…" the center shows the result view
+    await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('progress-view')).toHaveCount(0);
     await evidence(page, 'FR-24', 'progress-finished');
 
     await page.reload();
-    await expect(page.getByTestId('progress-view')).toBeVisible();
-    await expect(page.getByTestId('progress-bar')).toHaveAttribute('aria-valuenow', '100');
-    for (const [stage] of STAGES) {
-      await expect(page.getByTestId(`progress-step-${stage}`)).toHaveAttribute('data-state', 'done');
-    }
+    await expect(page.getByTestId('result-view')).toBeVisible();
+    await expect(page.getByTestId('progress-view')).toHaveCount(0);
   });
 
   test('an unknown run shows "Future not found" and Try again returns to the welcome view', async ({ page }) => {

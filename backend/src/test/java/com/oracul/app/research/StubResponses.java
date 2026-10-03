@@ -2,6 +2,7 @@ package com.oracul.app.research;
 
 import com.jayway.jsonpath.JsonPath;
 import com.oracul.app.reasoning.ScenarioFixtures;
+import com.oracul.app.result.StoryFixtures;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -312,6 +313,11 @@ public final class StubResponses {
         return ScenarioFixtures.attemptReason(inputText);
     }
 
+    /** ST-* / TODAY / LATE / BADDATE answer text for a STORY_WRITING request text (see StoryFixtures.fixture). */
+    public static String storyFixture(String name, String inputText) {
+        return StoryFixtures.fixture(name, inputText);
+    }
+
     public static Reply status(int status, String body) {
         return new Reply(status, body, 0);
     }
@@ -328,6 +334,7 @@ public final class StubResponses {
             if ("EVENT_NORMALIZATION".equals(purpose)) return completed(defaultNormalization(text));
             if ("EVENT_CLASSIFICATION".equals(purpose)) return completed(defaultClassification(text));
             if ("SCENARIO_GENERATION".equals(purpose)) return completed(ScenarioFixtures.scenarioDefault(text));
+            if ("STORY_WRITING".equals(purpose)) return completed(StoryFixtures.stDefault(StoryFixtures.futureEventDate(text)));
             return status(400, "{\"error\":\"unexpected request\"}");
         };
     }

@@ -78,7 +78,7 @@ class ScenarioGenerationIT extends AbstractReasoningIT {
         Ran r = runV4(A);
         assertCompleted(r.run());
         List<Map<String, Object>> rows = jdbc.queryForList(
-            "select purpose, attempt, response_status, cast(request_body as text) as body from model_call where run_id = cast(? as uuid)",
+            "select purpose, attempt, response_status, cast(request_body as text) as body from model_call where run_id = cast(? as uuid) and purpose = 'SCENARIO_GENERATION'",
             r.id());
         assertThat(rows).hasSize(1);
         Map<String, Object> row = rows.get(0);
@@ -155,7 +155,7 @@ class ScenarioGenerationIT extends AbstractReasoningIT {
         assertThat(gen).hasSize(2);
         assertThat(gen.get(1).body()).isEqualTo(gen.get(0).body());
         assertThat(attemptRows(r.id())).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from model_call where run_id = cast(? as uuid)", Integer.class, r.id()))
+        assertThat(jdbc.queryForObject("select count(*) from model_call where run_id = cast(? as uuid) and purpose = 'SCENARIO_GENERATION'", Integer.class, r.id()))
             .as("transport retries add no model_call row").isEqualTo(1);
     }
 }

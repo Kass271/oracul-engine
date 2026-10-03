@@ -3,6 +3,7 @@ package com.oracul.app.runs;
 import com.oracul.app.api.model.RunStage;
 import com.oracul.app.reasoning.ReasoningPipeline;
 import com.oracul.app.research.ResearchProfileFactory;
+import com.oracul.app.result.StoryWriter;
 import jakarta.annotation.PreDestroy;
 import java.time.Clock;
 import java.time.Duration;
@@ -30,18 +31,20 @@ public class PipelineExecutor {
     private final ResearchProfileFactory profiles;
     private final ResearchPipeline research;
     private final ReasoningPipeline reasoning;
+    private final StoryWriter story;
     private final Clock clock;
     private final Duration stageDelay;
     private final ThreadPoolExecutor pool;
 
     PipelineExecutor(GenerationRunRepository runs, ResearchProfileFactory profiles, ResearchPipeline research,
-                     ReasoningPipeline reasoning, Clock clock,
+                     ReasoningPipeline reasoning, StoryWriter story, Clock clock,
                      @Value("${oracul.run.placeholder-stage-delay:PT1S}") Duration stageDelay,
                      @Value("${oracul.run.executor-threads:4}") int threads) {
         this.runs = runs;
         this.profiles = profiles;
         this.research = research;
         this.reasoning = reasoning;
+        this.story = story;
         this.clock = clock;
         this.stageDelay = stageDelay;
         AtomicInteger n = new AtomicInteger();
@@ -70,9 +73,12 @@ public class PipelineExecutor {
             if (result == ReasoningPipeline.Result.STOPPED) {
                 return;
             }
+            if (result == ReasoningPipeline.Result.ACCEPTED) {
+                story.run(runId, sessionId);
+                return;
+            }
             RunStage[] stages = RunStage.values();
-            int from = result == ReasoningPipeline.Result.ACCEPTED ? 9 : 6;
-            for (int i = from; i < stages.length; i++) {
+            for (int i = 6; i < stages.length; i++) {
                 if (!runs.markStageIfRunning(runId, stages[i], now())) {
                     return; // ended by another writer: the task ends silently
                 }

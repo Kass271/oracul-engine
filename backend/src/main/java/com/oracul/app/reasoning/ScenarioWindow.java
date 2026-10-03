@@ -7,14 +7,14 @@ import java.time.Period;
 import java.time.ZoneOffset;
 
 /** Cutoff date and future event window of an Evidence Pack. */
-record ScenarioWindow(LocalDate cutoff, LocalDate end) {
+public record ScenarioWindow(LocalDate cutoff, LocalDate end) {
 
-    static ScenarioWindow of(EvidencePack pack) {
+    public static ScenarioWindow of(EvidencePack pack) {
         LocalDate cutoff = pack.getCutoff().withOffsetSameInstant(ZoneOffset.UTC).toLocalDate();
         return new ScenarioWindow(cutoff, cutoff.plus(period(pack.getConfiguration().getHorizon())));
     }
 
-    static Period period(HorizonCode h) {
+    public static Period period(HorizonCode h) {
         return switch (h) {
             case _1D -> Period.ofDays(1);
             case _1W -> Period.ofDays(7);
@@ -26,7 +26,7 @@ record ScenarioWindow(LocalDate cutoff, LocalDate end) {
         };
     }
 
-    static String label(HorizonCode h) {
+    public static String label(HorizonCode h) {
         return switch (h) {
             case _1D -> "Tomorrow";
             case _1W -> "1 week";

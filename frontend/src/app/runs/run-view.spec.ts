@@ -4,6 +4,7 @@ import { HttpTestingController, provideHttpClientTesting, type TestRequest } fro
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { Router, provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 
 import { App } from '../app';
 import { routes } from '../app.routes';
@@ -209,5 +210,91 @@ describe('slice 04_run-start', () => {
     await tick(0);
     expect(router.url).toBe('/');
     expect(byId('welcome-view')).not.toBeNull();
+  });
+});
+
+describe('slice 09_future-story: run view switches to the result', () => {
+  const ID = '11111111-2222-3333-4444-555555555555';
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  const isRunGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}`);
+  const isResultGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}/result`);
+  const el = (): HTMLElement => harness.routeNativeElement as HTMLElement;
+  const has = (selector: string): boolean => el().querySelector(selector) !== null;
+
+  function run(status: string, stageIndex: number, headline?: string): GenerationRun {
+    const [stage, stageLabel] = STAGES[stageIndex - 1];
+    return {
+      ...queued(),
+      id: ID,
+      status,
+      stage,
+      stageLabel,
+      stageIndex,
+      ...(headline ? { headline, completedAt: '2026-10-02T18:43:10Z' } : {}),
+    } as GenerationRun;
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+    vi.useRealTimers();
+  });
+
+  // @trace FR-23
+  it('COMPLETED with a headline shows the future result and no progress view', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(run('COMPLETED', 10, 'Stub headline from the future'));
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+    expect(has('app-future-result')).toBe(true);
+    expect(has('[data-testid="progress-view"]')).toBe(false);
+    http.expectOne(isResultGet);
+  });
+
+  // @trace FR-23
+  it('COMPLETED without a headline keeps the progress view', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(run('COMPLETED', 10));
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+    expect(has('[data-testid="progress-view"]')).toBe(true);
+    expect(has('app-future-result')).toBe(false);
+    expect(http.match(isResultGet)).toHaveLength(0);
+  });
+
+  // @trace FR-23
+  it('a RUNNING run shows the progress view and no result call is made', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(run('RUNNING', 10));
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+    expect(has('[data-testid="progress-view"]')).toBe(true);
+    expect(has('app-future-result')).toBe(false);
+    expect(http.match(isResultGet)).toHaveLength(0);
+  });
+
+  // @trace FR-23
+  it('polling that sees COMPLETED with a headline replaces the progress view by the result within 2 s', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    http.expectOne(isRunGet).flush(run('RUNNING', 10));
+    harness.detectChanges();
+    expect(has('[data-testid="progress-view"]')).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    http.expectOne(isRunGet).flush(run('COMPLETED', 10, 'Stub headline from the future'));
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(has('app-future-result')).toBe(true);
+    expect(has('[data-testid="progress-view"]')).toBe(false);
+    http.expectOne(isResultGet);
   });
 });
