@@ -21,7 +21,7 @@ const GENERIC_ERROR = 'Something went wrong — try again';
       <div class="result" data-testid="result-view">
         <app-future-story [story]="r.story" [labels]="r.labels" />
         <app-scenario-metadata [metadata]="r.metadata" [issues]="r.openCriticIssues ?? []" />
-        <app-why-sources [causalChain]="r.causalChain ?? []" [sources]="r.sources ?? []" [futureDate]="r.story.futureDate" />
+        <app-why-sources [causalChain]="r.causalChain ?? []" [sources]="r.sources ?? []" [futureDate]="r.story.futureDate" [research]="r.research" />
       </div>
     } @else {
       <div class="loading" data-testid="result-loading">

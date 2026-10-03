@@ -10,7 +10,9 @@ import {
 } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 
+import { WhyNewsPanelComponent } from './why-news-panel';
 import type { CausalStep } from '../api/models/causal-step';
+import type { ResearchExplanation } from '../api/models/research-explanation';
 import type { ResultSource } from '../api/models/result-source';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -18,11 +20,12 @@ const HIGHLIGHT_MS = 3000;
 
 @Component({
   selector: 'app-why-sources',
-  imports: [MatButtonModule],
+  imports: [MatButtonModule, WhyNewsPanelComponent],
   template: `
     <div class="actions" data-testid="result-actions">
       <button mat-stroked-button type="button" data-testid="open-why" [attr.aria-expanded]="whyOpen()" (click)="whyOpen.set(!whyOpen())">WHY COULD THIS HAPPEN?</button>
       <button mat-stroked-button type="button" data-testid="open-sources" [attr.aria-expanded]="sourcesOpen()" (click)="sourcesOpen.set(!sourcesOpen())">SOURCES</button>
+      <button mat-stroked-button type="button" data-testid="open-why-news" [attr.aria-expanded]="whyNewsOpen()" (click)="whyNewsOpen.set(!whyNewsOpen())">WHY THESE NEWS?</button>
     </div>
     @if (whyOpen()) {
       <section class="panel" data-testid="why-panel">
@@ -71,6 +74,11 @@ const HIGHLIGHT_MS = 3000;
           </div>
         }
       </section>
+    }
+    @if (whyNewsOpen()) {
+      @if (research(); as r) {
+        <app-why-news-panel [research]="r" />
+      }
     }
   `,
   styles: `
@@ -140,6 +148,8 @@ export class WhySourcesComponent implements OnDestroy {
   readonly causalChain = input.required<CausalStep[]>();
   readonly sources = input.required<ResultSource[]>();
   readonly futureDate = input.required<string>();
+  readonly research = input<ResearchExplanation | null>(null);
+  protected readonly whyNewsOpen = signal(false);
 
   protected readonly whyOpen = signal(false);
   protected readonly sourcesOpen = signal(false);

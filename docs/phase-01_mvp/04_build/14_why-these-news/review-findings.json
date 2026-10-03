@@ -1,0 +1,29 @@
+{
+  "slice": "14_why-these-news",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/result/why-sources.ts",
+      "line": 77,
+      "fr": "FR-28",
+      "problem": "The slice contract (future-result.md 'Slice 14 ... Frontend files' and 'WHY THESE NEWS? panel') requires a separate component `src/app/result/why-news-panel.ts` (selector `app-why-news-panel`, input `research: ResearchExplanation`), a host signal named `whyNewsOpen`, and the panel rendered as a `mat-card` with Material chips (`mat-chip-set` is listed in the UI section). The implementation inlines the panel into `WhySourcesComponent` as a plain `<section class=\"panel\">`, the chips are `<span class=\"chip\">` with no `mat-chip-set`/aria-label, the signal is `newsOpen`, and no `why-news-panel.ts` exists. Behaviour is correct, but the file/selector/Material contract is not met.",
+      "fix": "Extract the panel markup into `why-news-panel.ts` (`app-why-news-panel`, `research = input.required<ResearchExplanation>()`), render the root as `<mat-card data-testid=\"why-news-panel\">` and the drivers as `<mat-chip-set aria-label=\"Driven by\" [attr.data-testid]=...><mat-chip ...>`; in `WhySourcesComponent` rename `newsOpen` to `whyNewsOpen` and render `<app-why-news-panel [research]=\"research()\" />` while open. Keep the existing data-testids so the tests stay green.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "frontend/src/app/result/why-sources.ts",
+      "line": 78,
+      "fr": "FR-28",
+      "problem": "`research` is declared `input<ResearchExplanation | null>(null)` although FutureResult.research is required in the contract; if it were ever missing, `open-why-news` would show aria-expanded=\"true\" while no `why-news-panel` renders (silent no-op).",
+      "fix": "Make it `input.required<ResearchExplanation>()` (the contract guarantees it) or render the panel with an empty research fallback.",
+      "status": "open"
+    }
+  ]
+}

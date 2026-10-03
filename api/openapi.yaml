@@ -1895,10 +1895,12 @@ components:
 
     ResearchExplanation:
       type: object
+      description: Data of the WHY THESE NEWS? panel (FR-28); the result view never calls getRunResearch for it
       required: [intents, counts]
       properties:
         intents:
           type: array
+          description: The run's search-plan intents in plan order, identical to getRunResearch searchPlan.intents (incl. drivenBy); [] when the run has no search plan
           items:
             $ref: '#/components/schemas/SearchIntent'
         counts:

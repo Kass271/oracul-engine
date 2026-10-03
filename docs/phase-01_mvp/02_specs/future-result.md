@@ -96,8 +96,11 @@ search plan:
   (`summary-sources-used`).
 - Rules: numbers are the run's counts (searches, articlesConsidered, uniqueEvents, eventsSelected, counterSignals,
   sourcesUsed) — identical to `GET /api/runs/{runId}` counts. For ALTERNATIVE runs intents and counts are the
-  parent's (same pack).
-- Errors: as FR-23 (result endpoint).
+  parent's (same pack; slice 17).
+- Errors: as FR-23 (result endpoint); no extra HTTP call — the panel uses `research` of `getFutureResult` (never
+  `getRunResearch`).
+- Changes earlier behaviour: none — backend `research` assembly (slice 09, `FutureResultService`; `FutureResultIT` #3 already pins `research.intents` = `getRunResearch.searchPlan.intents` and `research.counts` = `getRun.counts`) is unchanged; the result view only gains the `open-why-news` button as the third button of `result-actions` (after `open-sources`) and the WHY THESE NEWS? panel; checked `why-panel.spec.ts` (W11 asserts only metadata → actions → why-panel order and `open-why` before `open-sources`), `sources-panel.spec.ts`, `future-result.spec.ts`, `scenario-metadata.spec.ts`, `run-view.spec.ts` (fixtures already carry `research: {intents: [], counts}`), `e2e/tests/why-and-sources.spec.ts`, `future-story.spec.ts`, `critic.spec.ts`, `run-failures.spec.ts`, `insufficient-evidence.spec.ts`, `run-start.spec.ts`, `search-sources.spec.ts` — none counts buttons/children of `result-actions` / `result-view` or selects by the text `WHY` (tests: none)
+- Ranges & invariants: one `why-news-intent-<id>` per `research.intents` entry in API order (0, 1 and 6 intents tested; 0 → `why-news-empty` "No research intents recorded" and no `why-news-intent-*`); per intent one chip `why-news-driver-<id>-<k>` per `drivenBy[k]` in array order, text exactly the string (1, 3 and 0 drivers tested; 0 → no `why-news-drivers-<id>` container); every count n ∈ {searches, articlesConsidered, uniqueEvents, eventsSelected, counterSignals, sourcesUsed} shown as a plain base-10 integer without separators, 3 classes each tested for all six lines: n = 0 → plural (`0 searches performed`), n = 1 → singular (`1 search performed`), n ≥ 2 → plural (`2 searches performed`, `1234 searches performed`); the six numbers come only from `research.counts` (a result whose `metadata.counts` differ shows `research.counts`); `articlesRetrieved` is never shown; for every real run (E2E): summary numbers = `GET /api/runs/{id}` counts, `summary-selected` n = `sources.length`, `summary-counter-signals` n = number of `sources` with `counterSignal`, `summary-sources-used` n = number of `sources` with `usedInScenario`, intents (ids, descriptions, drivenBy) = `GET /api/runs/{id}/research` `searchPlan.intents`; descriptions and drivers rendered as text (never `innerHTML`; a custom-wildcard label `<b>x</b> 7/10` shows literally).
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |
@@ -119,8 +122,10 @@ search plan:
   `sources-panel`, `sources-empty`, `source-item-<evidenceId>`, `source-id-<evidenceId>`, `source-title-<evidenceId>`,
   `source-publisher-<evidenceId>`, `source-date-<evidenceId>`, `source-link-<evidenceId>`,
   `source-no-link-<evidenceId>`, `source-used-<evidenceId>`, `source-counter-<evidenceId>` (slice 13 section below), `open-why-news`,
-  `why-news-panel`, `why-news-intent-<intentId>`, `research-summary`, `summary-searches`, `summary-articles`,
-  `summary-events`, `summary-selected`, `summary-counter-signals`, `summary-sources-used`.
+  `why-news-panel`, `why-news-title`, `why-news-empty`, `why-news-intent-<intentId>`, `why-news-description-<intentId>`,
+  `why-news-drivers-<intentId>`, `why-news-driver-<intentId>-<k>`, `research-summary`, `research-summary-title`,
+  `summary-searches`, `summary-articles`, `summary-events`, `summary-selected`, `summary-counter-signals`,
+  `summary-sources-used` (slice 14 section below).
 
 ## Slice 09_future-story — FR-23, FR-25 test contract
 
@@ -532,3 +537,91 @@ context, `POST /__control/reset`); stub modes `ok` (no stub change in this slice
   `http://stub:4010/…` — links are not followed); `source-used-<id>` present ⇔ `usedInScenario` (`source-used-<e1>`
   present; count = `GET /api/runs/<id>` `counts.sourcesUsed`); `source-counter-<id>` present ⇔ `section` =
   `COUNTER_SIGNAL` (count = `counts.counterSignals`).
+
+## Slice 14_why-these-news — FR-28 test contract
+
+Delivers the WHY THESE NEWS? panel with the research summary. Frontend + E2E only: the data comes unchanged from
+`getFutureResult.research` (`intents` = the run's search-plan intents with `drivenBy`, built in slice 05 by
+`SearchPlanner`; `counts` = run counts incl. `sourcesUsed` set at scenario acceptance) — **no backend code, no
+contract shape change, no new backend tests** (`FutureResultIT` #3 already pins `research.intents` and
+`research.counts`). Not in this slice: ALTERNATIVE runs (17), quick actions (16). Where this section is more precise
+than "Behaviour" or "UI" above, this section wins.
+
+### Frontend files (`src/app/result/`)
+| File | Selector | Inputs |
+|---|---|---|
+| `why-news-panel.ts` | `app-why-news-panel` | input `research: ResearchExplanation` (generated model) |
+The component that renders `result-actions` (today `app-why-sources`) adds the signal `whyNewsOpen` (false), the
+third button `open-why-news` after `open-sources` inside `result-actions`, and renders `app-why-news-panel` only while
+`whyNewsOpen`, inside `result-view`, after `why-panel` / `sources-panel` (DOM order: `result-actions`, `why-panel`,
+`sources-panel`, `why-news-panel`, each only when open). `FutureResultComponent` passes `r.research`. No new HTTP
+call: `getFutureResult` still exactly once per runId; `getRunResearch` is never called by the result view.
+
+### Button
+`open-why-news`: `mat-stroked-button`, `type="button"`, text exactly `WHY THESE NEWS?`, `aria-expanded` `"false"` /
+`"true"`; click toggles `why-news-panel` (present ⇔ open). Starts closed; independent of `open-why` / `open-sources`
+(opening or closing one never changes the others).
+
+### WHY THESE NEWS? panel (`why-news-panel`, a `mat-card`)
+- Title `why-news-title` text exactly `WHY THESE NEWS?`.
+- `research.intents` empty → `why-news-empty` text exactly `No research intents recorded` and no intent element.
+- One `why-news-intent-<id>` per intent in API order, containing `why-news-description-<id>` (text exactly
+  `description`) and, when `drivenBy` is non-empty, the container `why-news-drivers-<id>` with one chip per entry in
+  array order: `why-news-driver-<id>-<k>` (k 0-based), text exactly `drivenBy[k]` (e.g. `New pandemic 8/10`,
+  `Darkness 9/10`, `Horizon 5 years`). `drivenBy` empty → no container. Bucket, topicKey and category are not shown.
+- Then `research-summary` (inside the panel, after the last intent / `why-news-empty`), title
+  `research-summary-title` text exactly `Research summary`, then the six lines in this order, n = the field of
+  `research.counts` as a plain integer (no thousands separator); singular when n = 1, plural otherwise (incl. 0):
+  | data-testid | field | n = 1 | n ≠ 1 |
+  |---|---|---|---|
+  | `summary-searches` | `searches` | `1 search performed` | `<n> searches performed` |
+  | `summary-articles` | `articlesConsidered` | `1 article considered` | `<n> articles considered` |
+  | `summary-events` | `uniqueEvents` | `1 unique event identified` | `<n> unique events identified` |
+  | `summary-selected` | `eventsSelected` | `1 event selected` | `<n> events selected` |
+  | `summary-counter-signals` | `counterSignals` | `1 counter-signal retained` | `<n> counter-signals retained` |
+  | `summary-sources-used` | `sourcesUsed` | `1 source directly influenced the scenario` | `<n> sources directly influenced the scenario` |
+- Values only from `research.counts` (never `metadata.counts`, `getRun` or the `ScenarioStore`); `articlesRetrieved`
+  is not shown. All texts interpolated (never `innerHTML`).
+
+### Frontend fixture R14 (unit tests; result = `futureResult()` as in `future-result.spec.ts` with these fields)
+`research.intents` (configuration `A` plan of research-pipeline.md):
+| id | bucket | description | drivenBy |
+|---|---|---|---|
+| I01 | WILDCARD | `Current developments related to New pandemic — risks, threats, failures and warnings` | `["New pandemic 8/10","Darkness 9/10","Horizon 5 years"]` |
+| I02 | WILDCARD | `Current developments related to Humanoid robot boom — risks, threats, failures and warnings` | `["Humanoid robot boom 6/10","Darkness 9/10","Horizon 5 years"]` |
+| I03 | MAJOR | `Major current world events — risks, threats, failures and warnings` | `["Darkness 9/10","Horizon 5 years"]` |
+| I04 | ADJACENT | `Adjacent developments in Biology — risks, threats, failures and warnings` | `["Darkness 9/10","Horizon 5 years"]` |
+| I05 | ADJACENT | `Adjacent developments in Robotics — risks, threats, failures and warnings` | `["Darkness 9/10","Horizon 5 years"]` |
+| I06 | UNEXPECTED | `Unusual early signals and research — risks, threats, failures and warnings` | `["Darkness 9/10","Horizon 5 years"]` |
+`research.counts` C14 = `{searches 20, articlesRetrieved 100, articlesConsidered 81, uniqueEvents 12, eventsSelected 6,
+counterSignals 2, sourcesUsed 3}`; `metadata.counts` = COUNTS of the spec file (different values).
+
+### Frontend unit tests (Vitest, `// @trace FR-28`, through the `/futures/:runId` route as in `future-result.spec.ts`)
+`frontend/src/app/result/why-news-panel.spec.ts` (`describe('slice 14_why-these-news: WHY THESE NEWS? panel')`):
+| # | Setup | Expected |
+|---|---|---|
+| N1 | R14 | `open-why-news` inside `result-actions`, after `open-sources` in DOM order, text `WHY THESE NEWS?`, `type` `button`, `aria-expanded` `false`; no `why-news-panel` |
+| N2 | R14, click `open-why-news` | `why-news-panel` present inside `result-view`, after `result-actions`; `aria-expanded` `true`; title `WHY THESE NEWS?`; intents (`^why-news-intent-I\d+$`) exactly I01…I06 in DOM order; `why-news-description-I01` = I01 description |
+| N3 | R14, open | I01 chips `why-news-driver-I01-0/1/2` texts `New pandemic 8/10`, `Darkness 9/10`, `Horizon 5 years` in DOM order and no `why-news-driver-I01-3`; I03 exactly 2 chips `Darkness 9/10`, `Horizon 5 years`; every chip inside `why-news-drivers-<id>` |
+| N4 | R14, open | `research-summary` inside `why-news-panel`, after `why-news-intent-I06`; title `Research summary`; texts `20 searches performed`, `81 articles considered`, `12 unique events identified`, `6 events selected`, `2 counter-signals retained`, `3 sources directly influenced the scenario` in that DOM order; no text `100` in the panel |
+| N5 | all six counts 0 (parameterized table over the six lines) | `0 searches performed` … `0 sources directly influenced the scenario` |
+| N6 | all six counts 1 | `1 search performed`, `1 article considered`, `1 unique event identified`, `1 event selected`, `1 counter-signal retained`, `1 source directly influenced the scenario` |
+| N7 | all six counts 1234 | `1234 searches performed` … (no separator) |
+| N8 | `research.intents` `[]` | `why-news-empty` text `No research intents recorded`, no `why-news-intent-*`, summary still present |
+| N9 | one intent I01 with `drivenBy` `[]` | `why-news-intent-I01` present, no `why-news-drivers-I01`, no `why-news-driver-I01-*` |
+| N10 | one intent I01 with `drivenBy` `["<b>x</b> 7/10","Horizon 1 year"]` and description `<img src=x onerror=alert(1)>` | shown literally; no `b` / `img` element in the panel |
+| N11 | R14, open `open-why` and `open-sources`, then click `open-why-news` twice | after first click all three panels present; after second `why-news-panel` gone, `why-panel` and `sources-panel` still present, `aria-expanded` `false` |
+| N12 | R14, open `why-news` then click `open-why` | `why-news-panel` still present; DOM order `why-panel` before `why-news-panel`; `getFutureResult` requested exactly once; no request to `/api/runs/<id>/research` |
+
+### E2E (`e2e/tests/why-these-news.spec.ts`; `// @trace FR-28`)
+Same setup as `why-and-sources.spec.ts` (connect through the stub, acceptance configuration `A` in the panel,
+`generate-button`, fresh context, `POST /__control/reset`); stub mode `ok`, no stub change in this slice. `R` = `GET
+/api/runs/<id>/result`, `G` = `GET /api/runs/<id>`, `P` = `GET /api/runs/<id>/research`.
+- `result-view` visible (timeout 60 s); no `why-news-panel`; click `open-why-news` → `why-news-panel` visible.
+- Intents (`^why-news-intent-I\d+$`) = `P.searchPlan.intents` ids in order (6, I01…I06); for each: description and
+  chips (texts, order) equal the API entry. Acceptance: `why-news-intent-I01` chips include `New pandemic 8/10` and
+  `Darkness 9/10`; `why-news-intent-I02` includes `Humanoid robot boom 6/10`.
+- The six summary texts equal the table above with n from `G.counts` (`searches` 20 with the stub); additionally
+  `summary-selected` n = `R.sources.length`, `summary-counter-signals` n = count of `R.sources` with
+  `counterSignal`, `summary-sources-used` n = count of `R.sources` with `usedInScenario` (≥ 1).
+- Reload → `why-news-panel` closed again (state is not persisted).
