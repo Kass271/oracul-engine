@@ -36,6 +36,12 @@ import org.springframework.test.web.servlet.ResultActions;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
+// slice 12: threshold 0 disables the sufficiency check so the fixtures of slices 04-11 keep their asserted behaviour
+@org.springframework.test.context.TestPropertySource(properties = {
+    "oracul.evidence.min-core.high=0",
+    "oracul.evidence.min-core.medium=0",
+    "oracul.evidence.min-core.low=0",
+})
 public abstract class AbstractRunIT {
 
     /** Base valid body B. */

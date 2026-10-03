@@ -11,4 +11,7 @@ abstract class GenerationRunMixin {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     abstract UUID getEvidencePackId();
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    abstract Integer getSuggestedRealism();
 }

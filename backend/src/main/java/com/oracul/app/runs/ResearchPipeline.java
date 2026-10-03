@@ -16,6 +16,8 @@ import com.oracul.app.research.EventRanker;
 import com.oracul.app.research.EvidencePackRepository;
 import com.oracul.app.research.EvidencePackService;
 import com.oracul.app.research.EvidenceSelector;
+import com.oracul.app.research.EvidenceSufficiency;
+import com.oracul.app.research.MinCoreThresholds;
 import com.oracul.app.research.EventNormalizer;
 import com.oracul.app.research.EventRepository;
 import com.oracul.app.research.QueryExpander;
@@ -54,6 +56,7 @@ public class ResearchPipeline {
     private final EventRepository events;
     private final EventRanker ranker;
     private final EvidenceSelector selector;
+    private final MinCoreThresholds minCore;
     private final EvidencePackService packService;
     private final EvidencePackRepository packs;
     private final RunGuard guard;
@@ -65,7 +68,7 @@ public class ResearchPipeline {
     ResearchPipeline(GenerationRunRepository runs, SourceRepository sources, SearchPlanner planner,
                      QueryExpander expander, SourceRetrieval retrieval, EventNormalizer normalizer,
                      EventClassifier classifier, EventRepository events, EventRanker ranker, EvidenceSelector selector,
-                     EvidencePackService packService, EvidencePackRepository packs, RunGuard guard, TransactionTemplate tx,
+                     MinCoreThresholds minCore, EvidencePackService packService, EvidencePackRepository packs, RunGuard guard, TransactionTemplate tx,
                      Clock clock,
                      @Value("${oracul.research.query-budget:20}") int queryBudget,
                      @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration) {
@@ -82,6 +85,7 @@ public class ResearchPipeline {
         this.events = events;
         this.ranker = ranker;
         this.selector = selector;
+        this.minCore = minCore;
         this.packService = packService;
         this.packs = packs;
         this.guard = guard;
@@ -223,6 +227,8 @@ public class ResearchPipeline {
         ResearchCounts withPack = new ResearchCounts(withEvents.getSearches(), withEvents.getArticlesRetrieved(),
             withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), selected.size(),
             selection.counterSignals().size(), 0);
+        int realism = cfg.getRealism();
+        java.util.concurrent.atomic.AtomicBoolean insufficient = new java.util.concurrent.atomic.AtomicBoolean();
         Boolean packed = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
                 s.setRollbackOnly();
@@ -231,10 +237,18 @@ public class ResearchPipeline {
             events.updateRanking(runId, finalEvents);
             packs.insert(runId, pack, now());
             runs.storePack(runId, packId, withPack, now());
+            if (!EvidenceSufficiency.sufficient(selection.core().size(), realism, minCore)) {
+                insufficient.set(true);
+                runs.markInsufficientEvidence(runId, RunFailures.insufficientEvidence(realism),
+                    EvidenceSufficiency.suggestedRealism(realism).stream().boxed().findFirst().orElse(null), now());
+            }
             return true;
         });
         if (!Boolean.TRUE.equals(packed)) {
             abandon(runId);
+            return false;
+        }
+        if (insufficient.get()) {
             return false;
         }
         remainder(started);

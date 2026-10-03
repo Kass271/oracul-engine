@@ -163,7 +163,7 @@ export const routes = {
     } catch {
       return json(res, 400, { error: 'invalid_json' });
     }
-    if (!['ok', 'malformed-classification', 'rate-limited', 'evidence', 'injection'].includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    if (!['ok', 'malformed-classification', 'rate-limited', 'evidence', 'injection', 'sparse'].includes(mode)) return json(res, 400, { error: 'unknown_mode' });
     state.events = mode;
     empty(res, 204);
   },
@@ -251,6 +251,7 @@ export const routes = {
         // mode evidence: EV<n>, n mod 3 = 1 -> risk 1.0 / opp 0.0; 2 -> 0.5 / 0.4; 0 -> 0.1 / 0.8
         const evidence = state.events === 'evidence';
         const scores = (eventId) => {
+          if (state.events === 'sparse') return eventId === 'EV001' || eventId === 'EV002' ? { risk: 1.0, opportunity: 0.0 } : { risk: 0.1, opportunity: 0.8 };
           if (!evidence) return { risk: 0.4, opportunity: 0.6 };
           const m = Number(eventId.slice(2)) % 3;
           return m === 1 ? { risk: 1.0, opportunity: 0.0 } : m === 2 ? { risk: 0.5, opportunity: 0.4 } : { risk: 0.1, opportunity: 0.8 };

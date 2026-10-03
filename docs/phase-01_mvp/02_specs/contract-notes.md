@@ -210,6 +210,18 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    `CriticReport.issues` ≤ 10, `attempt` ≤ 5, descriptions on `hasOpenCriticIssues`, `criticReports`,
    `openCriticIssues`. No Flyway migration (`scenario_attempt.critic_report` exists since V7); `hasOpenCriticIssues`
    is derived from the accepted attempt's critic report. To confirm at approval.
+16. Slice 12 (generation-runs.md "Slice 12_insufficient-evidence"): the sufficiency check counts only CORE items of
+   the Evidence Pack against `oracul.evidence.min-core.high/medium/low` (defaults 5 / 3 / 1 for realism 9–10 / 6–8 /
+   1–5, each 0 … `oracul.evidence.core`) inside the stage-6 pack transaction; an insufficient run ends
+   INSUFFICIENT_EVIDENCE at RANKING / 6 with `suggestedRealism` = max(1, realism − 2) (absent at realism 1) and makes
+   no SCENARIO_* / STORY_* call. Threshold 0 disables a band; it is used only as test configuration so the fixtures of
+   slices 04–11 (V4 = 1 core, stub default = 0 core under the dark acceptance body) keep their asserted behaviour:
+   `AbstractRunIT` sets all three to 0, the E2E override sets medium and low to 0 (high stays 5, so FR-31's
+   Realism-10 acceptance runs end to end). LOWER REALISM loads the insufficient run's configuration with the lowered
+   realism into the panel and starts a new run with exactly that body. Reviewer note from slice 07: under a dark
+   profile, mildly positive real news makes many events counter-signals, so real runs at high realism may often be
+   insufficient; the thresholds are configuration and can be tuned. No contract operation changes (descriptions
+   only). To confirm at approval.
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

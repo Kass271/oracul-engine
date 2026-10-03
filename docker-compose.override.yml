@@ -13,6 +13,8 @@ services:
       ORACUL_NEWS_GDELT_BASE_URL: http://stub:4010
       ORACUL_RUN_PLACEHOLDER_STAGE_DELAY: PT2S
       ORACUL_RUN_MIN_STAGE_DURATION: PT2S
+      ORACUL_EVIDENCE_MIN_CORE_MEDIUM: "0"
+      ORACUL_EVIDENCE_MIN_CORE_LOW: "0"
     depends_on:
       db:
         condition: service_healthy

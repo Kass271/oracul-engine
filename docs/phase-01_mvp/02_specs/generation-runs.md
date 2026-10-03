@@ -143,6 +143,11 @@ ALTERNATIVE runs skip stages 1–6 (they jump from QUEUED to stage 7).
   (`lower-realism`). Click → panel realism = suggestedRealism, then `POST /api/runs` (FR-10 flow).
 - Rules: LOWER REALISM is hidden when realism is 1 (no suggestedRealism); no story, no invented evidence.
 - Errors: `startRun` errors as in FR-10, shown in the snackbar.
+- Precise test contract: "Slice 12_insufficient-evidence — FR-31 test contract" below (wins where more precise).
+- Changes earlier behaviour: a run whose Evidence Pack has 0 items ended COMPLETED without headline at stage WRITING_STORY (interim of slices 07–09; asserted by `StructuredScenarioIT` #16, `CriticIT` #13, `EvidencePackIT`, `FutureResultIT` #12, `GetRunTerminalIT`, `SourceRetrievalIT` #13 and every IT extending `AbstractRunIT` on the default GDELT `{}`) → it ends INSUFFICIENT_EVIDENCE at stage RANKING / 6 under the default thresholds; those ITs keep their assertions unchanged because `AbstractRunIT` sets the test-only thresholds 0 ("Threshold 0 in earlier tests"), so only the base class is updated (tests: backend/src/test/java/com/oracul/app/runs/AbstractRunIT.java)
+- Changes earlier behaviour: a pack with fewer CORE items than the threshold (e.g. fixture V4 = 1 core, E2E stub mode `ok` = 0 core under body `A`, realism 8) went on to scenario, critic and story → it ends INSUFFICIENT_EVIDENCE under the default thresholds; the slice 07–11 ITs (`AbstractEvidenceIT`, `AbstractReasoningIT`, `AbstractStoryIT`, `AbstractDeadlineIT` subclasses, `SourceRetrievalIT`) stay on the old path through the `AbstractRunIT` thresholds 0, and the existing E2E specs (realism 8) through `docker-compose.override.yml` (`ORACUL_EVIDENCE_MIN_CORE_MEDIUM` / `_LOW` = 0, not a test file), so no E2E spec changes (tests: backend/src/test/java/com/oracul/app/runs/AbstractRunIT.java)
+- Changes earlier behaviour: the run view showed `progress-view` for INSUFFICIENT_EVIDENCE runs (slice 11 run-view rule 5) → `insufficient-view`; no existing assertion covers the old state, `run-view.spec.ts` only gains the new `describe('slice 12_insufficient-evidence')` (tests: none)
+- Ranges & invariants: realism 1..10 (outside → `IllegalArgumentException` in `forRealism` / `insufficientEvidence`; API validation unchanged from FR-10) in three bands with default thresholds 1–5 → 1, 6–8 → 3, 9–10 → 5 CORE items (`forRealism` for r = 1…10 = 1,1,1,1,1,3,3,3,5,5); per band the classes core = threshold − 1 → INSUFFICIENT_EVIDENCE and core = threshold → continues to COMPLETED, checked at every band edge (realism 10/9 with 4/5 core, 8/6 with 2/3, 5 with 0/1, 2 with 0); only CORE items count (SUPPORTING / COUNTER_SIGNAL never; empty pack = 0 core); `suggestedRealism(r)` = empty for r = 1, otherwise max(1, r − 2) (2 → 1, 3 → 1, 4 → 2, 8 → 6, 10 → 8) and LOWER REALISM is rendered iff it is set; message ends exactly `Realism <r>.` for every r = 1…10; `oracul.evidence.min-core.high|medium|low` integer 0 … `oracul.evidence.core` (−1 or > core → startup fails naming the property; 0 → every pack sufficient for that band); invariants: an INSUFFICIENT_EVIDENCE run has `stageIndex` 6, `sourcesUsed` 0, no headline, 0 SCENARIO_GENERATION / SCENARIO_CRITIC / STORY_WRITING requests and 0 `scenario_attempt` / `future_story` rows; a run past its deadline never becomes INSUFFICIENT_EVIDENCE.
 
 ### FR-32 — Run failure handling
 - Happy path (of the failure path): any failure ends the run with status FAILED, a RunFailureCode and its fixed
@@ -489,6 +494,8 @@ the frontend/E2E (below).
      again'" [configuration]="run.configuration">`; no `progress-view`, no `app-future-result`, no result request;
   4. COMPLETED with `headline` → `app-future-result` (unchanged);
   5. otherwise (QUEUED, RUNNING, COMPLETED without headline, INSUFFICIENT_EVIDENCE until slice 12) → `progress-view`.
+  (Slice 12 inserts `INSUFFICIENT_EVIDENCE` → `app-insufficient-evidence` between 3 and 4 — see "Slice
+  12_insufficient-evidence".)
 - The failure view shows only `failure.message` and "Try again": never `failure.code`, ids, URLs, JSON or stack text.
 - `RunStore`: when a `getRun` response (poll or `open`) has `status` FAILED and `failure.code`
   `CHATGPT_SESSION_EXPIRED`, call `ConnectionStore.load()` once for that run (header shows "Session expired").
@@ -546,3 +553,165 @@ Superseded assertions of earlier slices (FAILED runs now show the failure view):
 ### data-testid (this slice)
 Reused: `failure-view`, `failure-message`, `try-again`, `run-error-message`, `progress-view`, `result-view`,
 `slider-darkness-input`, `value-darkness`, `horizon-option-<code>`, `generate-button`, `chatgpt-status`. No new ids.
+
+## Slice 12_insufficient-evidence — FR-31 test contract
+
+Delivers the sufficiency check at the end of stage 6 RANKING, the terminal status INSUFFICIENT_EVIDENCE with its
+realism-dependent message and `suggestedRealism`, and the insufficient view with LOWER REALISM. No new operation and
+no Flyway migration (`generation_run.suggested_realism` exists since V3); `api/openapi.yaml` changes descriptions only
+(`GenerationRun.suggestedRealism` / `failure` / `stage`, `RunFailureCode`, `getEvidencePack`, `getStructuredScenario`,
+`getFutureResult`). Not in this slice: Recent futures (15; INSUFFICIENT_EVIDENCE runs are never listed), quick
+actions (16), alternatives (17; ALTERNATIVE runs skip stage 6 and are never checked).
+
+### Configuration (new; `EvidenceConfig`, `@Value`; invalid values fail startup naming the property)
+| Property | Env (Compose) | Default | Applies to realism | Rule |
+|---|---|---|---|---|
+| `oracul.evidence.min-core.high` | `ORACUL_EVIDENCE_MIN_CORE_HIGH` | 5 | 9–10 | integer 0 … `oracul.evidence.core` |
+| `oracul.evidence.min-core.medium` | `ORACUL_EVIDENCE_MIN_CORE_MEDIUM` | 3 | 6–8 | integer 0 … `oracul.evidence.core` |
+| `oracul.evidence.min-core.low` | `ORACUL_EVIDENCE_MIN_CORE_LOW` | 1 | 1–5 | integer 0 … `oracul.evidence.core` |
+Startup failure message contains the property name (as `EvidenceConfigurationTest` asserts for slice 07), e.g.
+`oracul.evidence.min-core.high=-1` or `=11` (default `oracul.evidence.core` 10). The value 0 disables the check for
+that band (test configuration only, see "Threshold 0 in earlier tests").
+
+### Pure classes (`com.oracul.app.research`, no Spring)
+- `record MinCoreThresholds(int high, int medium, int low)` with `static MinCoreThresholds defaults()` = `(5, 3, 1)`
+  and `int forRealism(int realism)`: 9–10 → high, 6–8 → medium, 1–5 → low; realism outside 1–10 →
+  `IllegalArgumentException`. Exposed as a Spring bean by `EvidenceConfig`.
+- `final class EvidenceSufficiency` with
+  - `static boolean sufficient(int coreItems, int realism, MinCoreThresholds t)` = `coreItems >= t.forRealism(realism)`;
+  - `static OptionalInt suggestedRealism(int realism)` = empty for realism 1, otherwise `max(1, realism − 2)`.
+  Only CORE items count (SUPPORTING and COUNTER_SIGNAL never do; an empty pack has 0 core items).
+- `RunFailures.insufficientEvidence(int realism)` (`com.oracul.app.runs`) returns exactly
+  `ORACUL found insufficient current evidence to construct this scenario at Realism <realism>.` (ASCII full stop at the
+  end, realism as plain integer); realism outside 1–10 → `IllegalArgumentException`. `RunFailures.message
+  (INSUFFICIENT_EVIDENCE)` keeps throwing (slice 11).
+
+### Pipeline (`ResearchPipeline`, end of stage 6)
+1. Stage 6 steps 1–3 unchanged (slice 07). In the same guarded transaction as step 4 (after `SELECT … FOR UPDATE` and
+   `RunGuard.check`, conditional on `status = 'RUNNING'`): write rankings, insert `evidence_pack`, set
+   `evidence_pack_id` and counts as before; then evaluate `EvidenceSufficiency.sufficient(pack.core.size(),
+   configuration.realism, thresholds)`.
+2. Insufficient → in that same transaction: `status = INSUFFICIENT_EVIDENCE`, `failure_code = INSUFFICIENT_EVIDENCE`,
+   `failure_message = RunFailures.insufficientEvidence(realism)`, `suggested_realism` = `suggestedRealism(realism)`
+   (null for realism 1), `updated_at = completed_at = now`; `stage` stays RANKING, `stageIndex` 6. The task then ends
+   immediately: no `min-stage-duration` wait, no EXPLORING_FUTURES transition, no SCENARIO_GENERATION /
+   SCENARIO_CRITIC / STORY_WRITING request, no `scenario_attempt` / `future_story` row. The active-run slot is released.
+3. Sufficient → unchanged (wait remainder, stage 7 …).
+4. Guard fails → nothing of the transaction is written; RUN_TIMEOUT handling exactly as slice 06/11 (a run past its
+   deadline never becomes INSUFFICIENT_EVIDENCE). The deadline scheduler and startup sweep never touch
+   INSUFFICIENT_EVIDENCE rows (terminal).
+5. `counts` of an insufficient run: `searches` … `counterSignals` as computed, `sourcesUsed` 0. `headline` absent,
+   `hasOpenCriticIssues` false, `evidencePackId` set.
+
+### API of an INSUFFICIENT_EVIDENCE run
+| Operation | Status | Body |
+|---|---|---|
+| `GET /api/runs/{runId}` | 200 | `status` `INSUFFICIENT_EVIDENCE`, `stage` `RANKING`, `stageIndex` 6, `stageLabel` `Ranking evidence…`, `failure` `{"code":"INSUFFICIENT_EVIDENCE","message":"ORACUL found insufficient current evidence to construct this scenario at Realism <n>."}`, `suggestedRealism` (absent for realism 1), `completedAt` set, `headline` absent, `hasOpenCriticIssues` false |
+| `GET /api/runs/{runId}/evidence-pack` | 200 | the stored pack (CORE items < threshold) |
+| `GET /api/runs/{runId}/events`, `/sources`, `/research` | 200 | as for any run past stage 6 |
+| `GET /api/runs/{runId}/structured-scenario` | 409 | `{"code":"SCENARIO_NOT_READY","message":"The scenario is not ready yet"}` |
+| `GET /api/runs/{runId}/result` | 409 | `{"code":"RESULT_NOT_READY","message":"This future is not ready yet"}` |
+| `POST /api/runs` (same session, valid body) | 202 | new run (slot released) |
+
+### Threshold 0 in earlier tests (test configuration, no product behaviour)
+- Backend: `AbstractRunIT` gets `@TestPropertySource(properties = {"oracul.evidence.min-core.high=0",
+  "oracul.evidence.min-core.medium=0", "oracul.evidence.min-core.low=0"})`. With threshold 0 every pack is sufficient,
+  so all ITs of slices 04–11 keep their asserted behaviour (an empty pack still skips generation and ends COMPLETED
+  without headline, the slice-08 path). FR-31 ITs override with the default values explicitly.
+- E2E: `docker-compose.override.yml` backend env adds `ORACUL_EVIDENCE_MIN_CORE_MEDIUM: "0"` and
+  `ORACUL_EVIDENCE_MIN_CORE_LOW: "0"`; `high` keeps the default 5. Existing E2E specs use realism 8 and stay
+  unchanged; FR-31 is exercised in E2E at Realism 10. The production `docker-compose.yml` sets none of them.
+
+### Backend tests
+Fixture **K(c, s)** (helper in `InsufficientEvidenceIT` or `AbstractEvidenceIT`): the first GDELT request returns
+c + s articles named `k-1` … `k-<c+s>` (domain `reuters.com`, titles `K article <i>`, seendate testNow − 1 day,
+English), every other request `{}`; each page `k-<i>` has its own site name `Publisher <i>` (`gdelt.site(...)`, so the
+per-publisher cap never applies). Default normalisation (one event per source, entity `Entity S<nnn>`) gives EV001 …
+EV<c+s> ↔ S001 … in article order. Classification answers `StubResponses.defaultClassificationEntry` with risk 0.9 /
+opportunity 0.1 for EV001 … EV<c> and risk 0.1 / opportunity 0.8 for the rest. Under a dark body (darkness 9,
+optimism 2) the pack is c CORE (c ≤ 10), 0 SUPPORTING, min(s, 5) COUNTER_SIGNAL. `A(n)` = body `A` with `realism` n.
+Every test asserts the pack's core size equals c before asserting the outcome.
+
+`InsufficientEvidenceIT` (`// @trace FR-31`; extends `AbstractStoryIT`; `@TestPropertySource`
+`oracul.evidence.min-core.high=5`, `medium=3`, `low=1`):
+| # | Setup | Expected |
+|---|---|---|
+| 1 | K(2, 3), body A(10) (FR-31 acceptance 1) | `getRun` as the table above with message `…at Realism 10.`, `suggestedRealism` 8; `counts.eventsSelected` 5, `counterSignals` 3, `sourcesUsed` 0; 0 requests of SCENARIO_GENERATION, SCENARIO_CRITIC, STORY_WRITING; 0 `scenario_attempt` and 0 `future_story` rows for the run; `getEvidencePack` 200 with 2 core / 3 counter-signals; `getStructuredScenario` 409 SCENARIO_NOT_READY; `getFutureResult` 409 RESULT_NOT_READY; a new `startRun` of the session → 202 |
+| 2 | parameterized (realism, c, expected): (10,4,INSUFFICIENT/8) (10,5,COMPLETED) (9,4,INSUFFICIENT/7) (9,5,COMPLETED) (8,2,INSUFFICIENT/6) (8,3,COMPLETED) (6,2,INSUFFICIENT/4) (6,3,COMPLETED) (5,0,INSUFFICIENT/3) (5,1,COMPLETED) (2,0,INSUFFICIENT/1); K(c, 3), body A(realism) | INSUFFICIENT rows: status, `failure.message` with that realism, `suggestedRealism` as given, `stageIndex` 6, no SCENARIO_GENERATION request. COMPLETED rows: status COMPLETED with `headline`, `suggestedRealism` and `failure` absent, exactly 1 STORY_WRITING request |
+| 3 | K(0, 3), body A(1) | INSUFFICIENT_EVIDENCE, message `…at Realism 1.`, `suggestedRealism` absent (key not present) |
+| 4 | default GDELT `{}` (0 sources, empty pack), body `A` | INSUFFICIENT_EVIDENCE, message `…at Realism 8.`, `suggestedRealism` 6, `stageIndex` 6, `counts.eventsSelected` 0, `getEvidencePack` 200 with `core` / `supporting` / `counterSignals` all `[]`; 0 SCENARIO_GENERATION, SCENARIO_CRITIC and STORY_WRITING requests |
+| 5 | K(2, 3), body A(10); raw `getRun` body | contains none of `http`, `Exception`, `com.oracul`, `{"core` (the message is the fixed text only) |
+
+`EvidenceSufficiencyTest` (unit, `// @trace FR-31`): `MinCoreThresholds.defaults().forRealism(r)` for r = 1…10 is
+1,1,1,1,1,3,3,3,5,5; `forRealism(0)` / `(11)` throw; `sufficient(c, r, defaults)` true iff c ≥ threshold for the
+boundary pairs of IT #2 (both sides); `sufficient(0, r, new MinCoreThresholds(0,0,0))` true for every r;
+`suggestedRealism`: 1 → empty, 2 → 1, 3 → 1, 4 → 2, 8 → 6, 10 → 8.
+`RunFailuresTest` (extend, `// @trace FR-31`): `insufficientEvidence(10)` equals exactly "ORACUL found insufficient
+current evidence to construct this scenario at Realism 10."; for r = 1…10 ends with `Realism <r>.`; 0 and 11 throw.
+`EvidenceConfigurationTest` (extend, `// @trace FR-31`): `oracul.evidence.min-core.high=-1`, `high=11`,
+`medium=-1`, `medium=11`, `low=-1`, `low=11` each fail startup naming the property; a context with
+`oracul.evidence.core=4` and `min-core.high=5` fails; a context without overrides exposes `MinCoreThresholds(5,3,1)`.
+
+### Frontend (`src/app/runs/`)
+- `insufficient-evidence.ts` (`app-insufficient-evidence`), input `run: GenerationRun` (required). Template:
+  - `insufficient-view` (container) containing `insufficient-message`: exactly `run.failure.message`, or when
+    `failure` is missing `ORACUL found insufficient current evidence to construct this scenario at Realism
+    <run.configuration.realism>.`;
+  - `lower-realism`: `mat-flat-button`, text exactly "LOWER REALISM", rendered iff `run.suggestedRealism` is set;
+    disabled while `RunStore.starting()` or `RunStore.active()` or `!ConnectionStore.canGenerate()`.
+  - Nothing else: no failure code, run id, generationId, counts, URLs or JSON; no "Try again".
+- Click `lower-realism`: `ScenarioStore.load({ ...run.configuration, realism: run.suggestedRealism })` (panel shows
+  the run's configuration with the lowered realism, `value-realism` = suggestedRealism), then
+  `RunStore.start(ScenarioStore.configuration())` → `POST /api/runs` whose body deep-equals `run.configuration` with
+  `realism` = `suggestedRealism`. 202 → navigate `/futures/<newId>` with `replaceUrl: true` (FR-10 flow, the new run's
+  `progress-view` replaces the insufficient view). Error → snackbar `run-error-message` with `ApiError.message` or
+  "Something went wrong — try again"; the insufficient view stays, the panel keeps the lowered realism, the button is
+  enabled again.
+- `run-view.ts` order becomes: 1 `notFound()` → failure view; 2 `unavailable()` → `backend-unavailable`; 3 FAILED →
+  `app-run-failure`; **4 INSUFFICIENT_EVIDENCE → `app-insufficient-evidence [run]="run"`** (no `progress-view`,
+  `failure-view` or `app-future-result`, no `GET …/result`); 5 COMPLETED with `headline` → `app-future-result`;
+  6 otherwise → `progress-view`. `RunStore` polling already stops on INSUFFICIENT_EVIDENCE (unchanged).
+- UI route: `/futures/:runId` (unchanged).
+
+### Frontend unit tests (Vitest; `// @trace FR-31`)
+- `insufficient-evidence.spec.ts`: run realism 10 / suggestedRealism 8 / failure message M → `insufficient-message`
+  exactly M, `lower-realism` text "LOWER REALISM" enabled (connected, no active run); click → `ScenarioStore.realism`
+  8 and exactly one `POST /api/runs` whose body deep-equals the run configuration with realism 8; pending → button
+  disabled; 202 → navigate `['/futures', newId]` with `replaceUrl: true`; 409 `RUN_ALREADY_ACTIVE` → `run-error-message`
+  "A generation is already running", view still rendered, realism stays 8; run realism 1 without suggestedRealism →
+  no `lower-realism` element, message `…at Realism 1.`; `failure` missing → fallback text with the configuration's
+  realism; not connected → button disabled; textContent never contains `INSUFFICIENT_EVIDENCE`, the run id, `ORC-`,
+  `http`, `{`.
+- `run-view.spec.ts` (`describe('slice 12_insufficient-evidence')`): INSUFFICIENT_EVIDENCE run → only
+  `insufficient-view` among `progress-view` / `failure-view` / `backend-unavailable` / `app-future-result` /
+  `insufficient-view` is rendered; no `GET /api/runs/{id}/result`; polling RUNNING → INSUFFICIENT_EVIDENCE switches to the
+  insufficient view within one tick (1000 ms) and polling stops.
+
+### E2E (`e2e/tests/insufficient-evidence.spec.ts`; `// @trace FR-31`; serial, fresh context per test, stub reset as
+in `future-story.spec.ts`)
+Stub extension (`e2e/stubs/server.mjs`): `POST /__control/events {"mode":"sparse"}` (204; added to the accepted
+modes, reset to `ok` by `/__control/reset`). In mode `sparse` EVENT_CLASSIFICATION answers like `ok` except risk /
+opportunity: EV001 and EV002 → risk 1.0 / opportunity 0.0; every other event → risk 0.1 / opportunity 0.8. With
+`A10` = acceptance body `A` with realism 10 this gives exactly 2 CORE items (all others are counter-signal
+candidates).
+1. Acceptance 1: events `sparse`; connect; configure `A10` through the panel (`slider-realism-input` 10, darkness 9,
+   optimism 2, horizon `5y`, `biology-new-pandemic` 8, `robotics-humanoid-boom` 6); click `generate-button` →
+   `insufficient-view` visible (timeout 90 s); `insufficient-message` exactly "ORACUL found insufficient current
+   evidence to construct this scenario at Realism 10."; `lower-realism` visible, enabled, text "LOWER REALISM";
+   `progress-view`, `failure-view`, `result-view` count 0; `GET /api/runs/<id>` → `status` INSUFFICIENT_EVIDENCE,
+   `failure.code` INSUFFICIENT_EVIDENCE, `suggestedRealism` 8; `GET /api/runs/<id>/evidence-pack` → `core` length 2;
+   `GET /api/runs/<id>/result` → 409 `RESULT_NOT_READY`; `/__control/requests?kind=responses` contains no
+   SCENARIO_GENERATION, SCENARIO_CRITIC or STORY_WRITING request (no story generated).
+2. Acceptance 2 (same test): click `lower-realism` with `page.waitForRequest` on `POST /api/runs` → `postDataJSON()`
+   deep-equals `A10` with realism 8 (= `A`); `value-realism` "8"; URL becomes `/futures/<newId>` (≠ old id);
+   `GET /api/runs/<newId>` → `configuration.realism` 8; wait until `result-view` visible (timeout 90 s; E2E threshold
+   for realism 8 is 0) so no run leaks into the next test.
+3. Realism 1 (UI only): `page.route('**/api/runs/22222222-2222-2222-2222-222222222222', …)` fulfils 200 with a
+   GenerationRun `{"id":"22222222-2222-2222-2222-222222222222","generationId":"ORC-2026-10-02-1842","kind":"STANDARD","status":"INSUFFICIENT_EVIDENCE","stage":"RANKING","stageLabel":"Ranking evidence…","stageIndex":6,"stageCount":10,"configuration":<B with realism 1>,"counts":<zero counts>,"failure":{"code":"INSUFFICIENT_EVIDENCE","message":"ORACUL found insufficient current evidence to construct this scenario at Realism 1."},"createdAt":"2026-10-02T18:42:31Z","updatedAt":"2026-10-02T18:43:31Z","completedAt":"2026-10-02T18:43:31Z","hasOpenCriticIssues":false}`
+   (no `suggestedRealism`); `goto('/futures/22222222-2222-2222-2222-222222222222')` → `insufficient-message` exactly
+   "…at Realism 1.", `lower-realism` count 0.
+
+### data-testid (this slice)
+New in use: `insufficient-view`, `insufficient-message`, `lower-realism`. Reused: `generate-button`,
+`slider-realism-input`, `value-realism`, `slider-darkness-input`, `slider-optimism-input`, `horizon-option-<code>`,
+`wildcard-toggle-<wildcardId>`, `wildcard-intensity-<wildcardId>-input`, `run-error-message`, `progress-view`, `failure-view`, `result-view`.

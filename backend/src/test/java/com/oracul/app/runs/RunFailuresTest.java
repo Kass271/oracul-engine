@@ -62,6 +62,47 @@ class RunFailuresTest {
         assertThat(message).doesNotContainPattern(Pattern.compile("https?:|[{}<>]|Exception|Error:|Bearer"));
     }
 
+    private static String insufficient(int realism) throws Throwable {
+        Class<?> failures;
+        try {
+            failures = Class.forName("com.oracul.app.runs.RunFailures");
+        } catch (ClassNotFoundException e) {
+            throw new AssertionError("com.oracul.app.runs.RunFailures is missing");
+        }
+        Method m;
+        try {
+            m = failures.getMethod("insufficientEvidence", int.class);
+        } catch (NoSuchMethodException e) {
+            throw new AssertionError("RunFailures.insufficientEvidence(int) is missing");
+        }
+        try {
+            return (String) m.invoke(null, realism);
+        } catch (InvocationTargetException e) {
+            throw e.getCause();
+        }
+    }
+
+    // @trace FR-31
+    @Test
+    void insufficientEvidenceMessageAtRealismTen() throws Throwable {
+        assertThat(insufficient(10)).isEqualTo("ORACUL found insufficient current evidence to construct this scenario at Realism 10.");
+    }
+
+    // @trace FR-31
+    @ParameterizedTest(name = "realism {0}")
+    @ValueSource(ints = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+    void insufficientEvidenceMessageEndsWithTheRealism(int realism) throws Throwable {
+        assertThat(insufficient(realism))
+            .isEqualTo("ORACUL found insufficient current evidence to construct this scenario at Realism " + realism + ".");
+    }
+
+    // @trace FR-31
+    @ParameterizedTest(name = "realism {0} is rejected")
+    @ValueSource(ints = {0, 11})
+    void insufficientEvidenceRealismOutsideOneToTenIsRejected(int realism) {
+        assertThatThrownBy(() -> insufficient(realism)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
     void insufficientEvidenceHasNoFixedMessage() {
         assertThatThrownBy(() -> message("INSUFFICIENT_EVIDENCE")).isInstanceOf(IllegalArgumentException.class);

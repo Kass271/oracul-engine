@@ -24,4 +24,11 @@ public final class RunFailures {
                 throw new IllegalArgumentException("INSUFFICIENT_EVIDENCE message depends on the realism");
         };
     }
+
+    public static String insufficientEvidence(int realism) {
+        if (realism < 1 || realism > 10) {
+            throw new IllegalArgumentException("realism must be between 1 and 10");
+        }
+        return "ORACUL found insufficient current evidence to construct this scenario at Realism " + realism + ".";
+    }
 }

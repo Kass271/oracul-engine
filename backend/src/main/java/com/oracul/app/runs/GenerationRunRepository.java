@@ -126,6 +126,13 @@ public class GenerationRunRepository {
             + "completed_at = ? where id = ? and status = 'RUNNING'", stage.getValue(), headline, now, now, id) == 1;
     }
 
+    /** Ends the run INSUFFICIENT_EVIDENCE at its current stage; false when it is no longer RUNNING. */
+    public boolean markInsufficientEvidence(UUID id, String message, Integer suggestedRealism, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'INSUFFICIENT_EVIDENCE', "
+            + "failure_code = 'INSUFFICIENT_EVIDENCE', failure_message = ?, suggested_realism = ?, updated_at = ?, "
+            + "completed_at = ? where id = ? and status = 'RUNNING'", message, suggestedRealism, now, now, id) == 1;
+    }
+
     public void markFailed(UUID id, String code, String message, OffsetDateTime now) {
         jdbc.update("update generation_run set status = 'FAILED', failure_code = ?, failure_message = ?, "
             + "updated_at = ?, completed_at = ? where id = ? and status in ('QUEUED','RUNNING')",

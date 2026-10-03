@@ -412,3 +412,72 @@ describe('slice 11_run-failures', () => {
     expect(post.request.body).toEqual({ ...CATALOGUE.defaults, darkness: 9 });
   });
 });
+
+describe('slice 12_insufficient-evidence', () => {
+  const ID = '11111111-2222-3333-4444-555555555555';
+  const MESSAGE = 'ORACUL found insufficient current evidence to construct this scenario at Realism 8.';
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  const isRunGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}`);
+  const isResultGet = (r: { url: string; method: string }): boolean => r.url.includes(`/api/runs/${ID}/result`);
+  const el = (): HTMLElement => harness.routeNativeElement as HTMLElement;
+  const has = (selector: string): boolean => el().querySelector(selector) !== null;
+
+  function insufficient(): GenerationRun {
+    return {
+      ...queued(),
+      id: ID,
+      status: 'INSUFFICIENT_EVIDENCE',
+      stage: 'RANKING',
+      stageLabel: 'Ranking evidence…',
+      stageIndex: 6,
+      suggestedRealism: 6,
+      completedAt: '2026-10-02T18:45:31Z',
+      failure: { code: 'INSUFFICIENT_EVIDENCE', message: MESSAGE },
+    } as GenerationRun;
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+    vi.useRealTimers();
+  });
+
+  // @trace FR-31
+  it('an INSUFFICIENT_EVIDENCE run shows only the insufficient view and makes no result call', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(isRunGet).flush(insufficient());
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+    const present = ['progress-view', 'failure-view', 'backend-unavailable', 'insufficient-view'].filter((id) =>
+      has(`[data-testid="${id}"]`),
+    );
+    expect(present).toEqual(['insufficient-view']);
+    expect(has('app-future-result')).toBe(false);
+    expect((el().querySelector('[data-testid="insufficient-message"]')?.textContent ?? '').trim()).toBe(MESSAGE);
+    expect(http.match(isResultGet)).toHaveLength(0);
+  });
+
+  // @trace FR-31
+  it('polling RUNNING then INSUFFICIENT_EVIDENCE switches to the insufficient view within one tick and stops polling', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    http.expectOne(isRunGet).flush(runAt(6));
+    harness.detectChanges();
+    expect(has('[data-testid="progress-view"]')).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    http.expectOne(isRunGet).flush(insufficient());
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(has('[data-testid="insufficient-view"]')).toBe(true);
+    expect(has('[data-testid="progress-view"]')).toBe(false);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(http.match(isRunGet)).toHaveLength(0);
+  });
+});

@@ -351,7 +351,8 @@ paths:
       summary: The Evidence Pack of the run — exactly the current-world context given to ChatGPT
       description: |
         200 once stage RANKING has committed the pack (`GenerationRun.evidencePackId` set); the pack is immutable, so
-        repeated calls return identical bodies. Also returned for a run whose pack is empty (0 eligible events).
+        repeated calls return identical bodies. Also returned for a run whose pack is empty (0 eligible events) and
+        for INSUFFICIENT_EVIDENCE runs (the pack is stored before the sufficiency check).
         Run QUEUED / RUNNING before that commit, or ended before stage RANKING → 409 EVIDENCE_PACK_NOT_READY
         "The Evidence Pack is not ready yet". Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
@@ -380,7 +381,8 @@ paths:
         SCENARIO_REJECTED). `structuredScenario` is the latest parsed attempt's scenario — the cleaned version when
         its Evidence Guard outcome was PASS / PASS_WITH_REMOVALS, otherwise as parsed; `accepted` tells whether that
         attempt is the run's final scenario. Run QUEUED / RUNNING before the first parsed attempt, FAILED before
-        stage EXPLORING_FUTURES, FAILED INVALID_SCENARIO, or COMPLETED without a scenario (empty Evidence Pack) →
+        stage EXPLORING_FUTURES, FAILED INVALID_SCENARIO, INSUFFICIENT_EVIDENCE, or COMPLETED without a scenario
+        (empty Evidence Pack with the sufficiency check disabled) →
         409 SCENARIO_NOT_READY "The scenario is not ready yet". Unknown, malformed or foreign runId → 404
         RUN_NOT_FOUND "Future not found". `criticReports` lists one report per critiqued attempt (the critic runs
         only on attempts whose Evidence Guard outcome is PASS / PASS_WITH_REMOVALS), attempt ascending; a critic
@@ -408,7 +410,8 @@ paths:
       summary: Everything the result view renders — story, labels, metadata, causal chain, sources, research summary
       description: |
         200 only for a COMPLETED run that has a stored future story (stage WRITING_STORY done). Run QUEUED / RUNNING,
-        FAILED, INSUFFICIENT_EVIDENCE, or COMPLETED without a story (interim: empty Evidence Pack) → 409
+        FAILED, INSUFFICIENT_EVIDENCE, or COMPLETED without a story (empty Evidence Pack with the sufficiency check
+        disabled by configuration) → 409
         RESULT_NOT_READY "This future is not ready yet". Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND
         "Future not found". All values come from the run snapshot, never from the current panel configuration.
       parameters:
@@ -760,7 +763,9 @@ components:
         INVALID_SCENARIO "ORACUL could not construct a valid scenario" · SCENARIO_REJECTED "ORACUL could not construct
         a scenario supported by current evidence" · ALTERNATIVE_NOT_DISTINCT "ORACUL could not find a different
         future — try changing a setting" · INSUFFICIENT_EVIDENCE "ORACUL found insufficient current evidence to
-        construct this scenario at Realism <n>." · RUN_INTERRUPTED "Generation was interrupted — try again" (active
+        construct this scenario at Realism <n>." (n = configuration.realism; only with status INSUFFICIENT_EVIDENCE,
+        set at stage RANKING when the Evidence Pack has fewer CORE items than oracul.evidence.min-core for that
+        realism — 9–10 → 5, 6–8 → 3, 1–5 → 1) · RUN_INTERRUPTED "Generation was interrupted — try again" (active
         at backend start) · INTERNAL_ERROR "Something went wrong — try again".
       enum:
         - NEWS_UNAVAILABLE
@@ -860,7 +865,7 @@ components:
           format: int32
           minimum: 0
           maximum: 10
-          description: 1-based index of the current stage, 0 while QUEUED, 10 when terminal after WRITING_STORY
+          description: 1-based index of the current stage, 0 while QUEUED, 10 when terminal after WRITING_STORY, 6 (stage RANKING) for INSUFFICIENT_EVIDENCE
         stageCount:
           type: integer
           format: int32
@@ -882,7 +887,10 @@ components:
           format: int32
           minimum: 1
           maximum: 10
-          description: Set when status is INSUFFICIENT_EVIDENCE and realism > 1 (realism − 2, at least 1)
+          description: |
+            Set iff status is INSUFFICIENT_EVIDENCE and configuration.realism > 1: max(1, realism − 2) (e.g. 10 → 8,
+            2 → 1). Absent otherwise (also for INSUFFICIENT_EVIDENCE at realism 1). The UI's LOWER REALISM sets the
+            panel realism to this value and starts a new run (FR-31).
         headline:
           type: string
           minLength: 1

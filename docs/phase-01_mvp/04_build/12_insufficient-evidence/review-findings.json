@@ -1,0 +1,106 @@
+{
+  "slice": "12_insufficient-evidence",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/EvidenceConfig.java",
+      "line": 77,
+      "fr": "FR-31",
+      "problem": "The min-core validation does not follow the spec range '0 … oracul.evidence.core; -1 or > core -> startup fails naming the property'. (a) Each threshold is checked against the literal 10 (range(..., 0, 10)), not against oracul.evidence.core, which may be configured from 0 to 100 (line 54). For example, core=20 with min-core.high=15 is valid by spec but startup fails with 'must be between 0.0 and 10.0'. (b) When a threshold is above core (for example core=4, min-core.high=5), the error is the generic 'oracul.evidence.min-core must not exceed oracul.evidence.core'. It does not say which property (high, medium or low) is wrong. This covers the whole min-core range: every band has the same two problems. [round 2: fixed. EvidenceConfig.java:77-79 now validates range(\"oracul.evidence.min-core.<band>\", v, 0, core) for each band. The literal 10 and the combined max() check are gone, so the message names the exact property.]",
+      "fix": "Validate each property on its own against core: range(\"oracul.evidence.min-core.high\", high, 0, core) and the same for medium and low. Drop the literal 10 and the combined max() check, so the message names the exact property.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/EvidenceConfigurationTest.java",
+      "line": 81,
+      "fr": "FR-31",
+      "problem": "Missing exhaustive test for the min-core range relative to oracul.evidence.core (0 … core, for each of high, medium and low). All cases run with the default core=10, so the hardcoded upper bound of 10 is indistinguishable from 'core'. aThresholdAboveTheCoreSectionSizeFailsStartup only checks high, and only asserts the prefix 'oracul.evidence.min-core', so it passes even though the message does not name the property. [round 2: fixed. minCoreThresholdRangeIsZeroToCore covers core in {4,10,20} x {high,medium,low}: 0 and core start; -1 and core+1 fail; the message contains that band's full property name and none of the others. aThresholdAboveTenIsAcceptedWhenCoreIsTwenty covers core=20/high=15. The older tests remain (not weakened). I ran EvidenceConfigurationTest locally: 43 tests, 0 failures. Residual nit: the core=20/15 case asserts only that startup succeeds, not the value in MinCoreThresholds, which is acceptable.]",
+      "fix": "Parameterize over high, medium and low: with core=4, a value of 5 fails startup and the message contains the full property name. With core=4, a value of 4 starts. With core=20, a value of 15 starts and is exposed in MinCoreThresholds.",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/runs/insufficient-view.ts",
+      "line": 10,
+      "fr": "FR-31",
+      "problem": "The spec names the component insufficient-evidence.ts, selector app-insufficient-evidence, with one required input 'run: GenerationRun'. The implementation is insufficient-view.ts, selector app-insufficient-view, with separate message, configuration and suggestedRealism inputs. It behaves the same (the test ids and fallback text match) but does not match the documented structure.",
+      "fix": "Rename to match the spec, or record the naming in contract-notes.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/runs/insufficient-view.ts",
+      "line": 19,
+      "fr": "FR-31",
+      "problem": "The spec disables lower-realism while RunStore.starting(), RunStore.active() or !ConnectionStore.canGenerate(). The active() term is missing. This is harmless today: active() comes from the displayed run, which is terminal whenever this view renders.",
+      "fix": "Add || runs.active() to [disabled] and to the guard in lower(), so the view follows the spec.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/insufficient-view.ts",
+      "line": 13,
+      "fr": "FR-31",
+      "problem": "When a polled run switches from progress-view to the insufficient view, screen readers are not told: the message is a plain <p> with no role=\"status\" or aria-live and no heading. The LOWER REALISM button does not say what the new realism will be (it is only visible later in the panel).",
+      "fix": "Wrap the message in a role=\"status\" (aria-live=polite) region. Optionally add aria-label=\"Lower realism to <n> and generate again\" to the button.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "docker-compose.override.yml",
+      "line": 16,
+      "fr": "FR-31",
+      "problem": "Judgement on the E2E override: setting MEDIUM and LOW to 0 means E2E never sees FR-31 at the default realism 8 (bands 6–8 and 1–5), and never sees the empty-pack -> INSUFFICIENT_EVIDENCE path. Those are covered only by backend InsufficientEvidenceIT #2 and #4. This is acceptable: the override is E2E-only (it already points GDELT and ChatGPT at the stub, and docker-compose.yml sets none of these), high keeps the real default of 5, and insufficient-evidence.spec.ts runs at Realism 10 against that real threshold (2 core < 5, with core length 2 asserted). It does not hide FR-31; listed for transparency.",
+      "fix": "None required. Optionally add a comment in the override stating that these two variables are test-only and why.",
+      "status": "open"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/result/InsufficientEvidenceIT.java",
+      "line": 37,
+      "fr": "FR-31",
+      "problem": "The invariant 'only CORE items count' is proven against COUNTER_SIGNAL items only. Fixture K always yields 0 SUPPORTING items, so no test has a pack where core < threshold <= core + supporting. The code (selection.core().size()) is correct.",
+      "fix": "Optionally add a case with SUPPORTING items (for example 2 core + 3 supporting at realism 10 -> INSUFFICIENT_EVIDENCE).",
+      "status": "open"
+    },
+    {
+      "id": "R8",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/runs/ResearchPipeline.java",
+      "line": 231,
+      "fr": "FR-31",
+      "problem": "Style issues. java.util.concurrent.atomic.AtomicBoolean is written out in full inline instead of imported. The boolean returned by runs.markInsufficientEvidence is ignored. Ignoring it is safe because the row is locked FOR UPDATE and checked RUNNING in the same transaction.",
+      "fix": "Import AtomicBoolean. Optionally set the flag from the update's return value.",
+      "status": "open"
+    },
+    {
+      "id": "R9",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/AbstractEventIT.java",
+      "line": 147,
+      "fr": "FR-14",
+      "problem": "EventNormalizationIT.twoInvalidAnswersFallBackToDeterministicGrouping is flaky (seen once: expected EV001 category biology-new-pandemic, got robotics-humanoid-boom). This is a race in the test, not a slice-12 regression. gdeltArticles() answers only GDELT request number()==1 with the articles; every other request gets {}. SourceRetrieval runs queries in parallel (virtual threads, oracul.news.query-concurrency=4), so which plan query arrives first varies from run to run. Source.topic comes from that query's intent (SourceRetrieval.topicOf, line 157). The deterministic fallback (EventNormalizer.java:348) uses first.getTopic() as the event category. So the category depends on thread arrival order. It came from slices 06/07.",
+      "fix": "Make the fixture deterministic. Either answer the articles only for the query whose text or intent maps to the expected topic, or set oracul.news.query-concurrency=1 in this test class, or assert the category against the topic of the source's first queryId instead of a literal.",
+      "status": "open"
+    }
+  ]
+}

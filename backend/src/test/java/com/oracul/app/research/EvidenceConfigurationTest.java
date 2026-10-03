@@ -62,6 +62,92 @@ class EvidenceConfigurationTest {
         assertThat(failureOf(property + "=" + value)).contains(property.substring(0, property.lastIndexOf('.')));
     }
 
+    // @trace FR-31
+    @ParameterizedTest(name = "{0}={1} fails startup naming the property")
+    @CsvSource({
+        "oracul.evidence.min-core.high,-1",
+        "oracul.evidence.min-core.high,11",
+        "oracul.evidence.min-core.medium,-1",
+        "oracul.evidence.min-core.medium,11",
+        "oracul.evidence.min-core.low,-1",
+        "oracul.evidence.min-core.low,11",
+    })
+    void anInvalidMinCoreThresholdFailsStartup(String property, String value) {
+        assertThat(failureOf(property + "=" + value)).contains(property);
+    }
+
+    private static String[] thresholdProps(int core, String band, int value) {
+        java.util.List<String> props = new java.util.ArrayList<>();
+        props.add("oracul.evidence.max-items=100");
+        props.add("oracul.evidence.core=" + core);
+        for (String other : new String[] {"high", "medium", "low"}) {
+            props.add("oracul.evidence.min-core." + other + "=" + (other.equals(band) ? value : 0));
+        }
+        return props.toArray(String[]::new);
+    }
+
+    private static void assertStarts(String... properties) {
+        try (ConfigurableApplicationContext c = new SpringApplicationBuilder(BackendApplication.class, TestcontainersConfiguration.class)
+            .web(WebApplicationType.NONE).properties(properties).run()) {
+            assertThat(c).isNotNull();
+        }
+    }
+
+    // @trace FR-31
+    @ParameterizedTest(name = "core={0} min-core.{1} range is 0..core")
+    @org.junit.jupiter.params.provider.MethodSource("coreAndBand")
+    void minCoreThresholdRangeIsZeroToCore(int core, String band) {
+        String property = "oracul.evidence.min-core." + band;
+        assertStarts(thresholdProps(core, band, core));
+        assertStarts(thresholdProps(core, band, 0));
+        for (int bad : new int[] {core + 1, -1}) {
+            String failure = failureOf(thresholdProps(core, band, bad));
+            assertThat(failure).as("value %d", bad).contains(property);
+            for (String other : new String[] {"high", "medium", "low"}) {
+                if (!other.equals(band)) assertThat(failure).doesNotContain("oracul.evidence.min-core." + other);
+            }
+        }
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> coreAndBand() {
+        java.util.List<org.junit.jupiter.params.provider.Arguments> args = new java.util.ArrayList<>();
+        for (int core : new int[] {4, 10, 20}) {
+            for (String band : new String[] {"high", "medium", "low"}) {
+                args.add(org.junit.jupiter.params.provider.Arguments.of(core, band));
+            }
+        }
+        return args.stream();
+    }
+
+    // @trace FR-31
+    @Test
+    void aThresholdAboveTenIsAcceptedWhenCoreIsTwenty() {
+        assertStarts("oracul.evidence.max-items=100", "oracul.evidence.core=20", "oracul.evidence.min-core.high=15");
+    }
+
+    // @trace FR-31
+    @Test
+    void aThresholdAboveTheCoreSectionSizeFailsStartup() {
+        assertThat(failureOf("oracul.evidence.core=4", "oracul.evidence.min-core.high=5")).contains("oracul.evidence.min-core");
+    }
+
+    // @trace FR-31
+    @Test
+    void withoutOverridesTheThresholdsAreFiveThreeOne() throws Exception {
+        Class<?> type;
+        try {
+            type = Class.forName("com.oracul.app.research.MinCoreThresholds");
+        } catch (ClassNotFoundException e) {
+            throw new AssertionError("com.oracul.app.research.MinCoreThresholds is missing");
+        }
+        try (ConfigurableApplicationContext c = new SpringApplicationBuilder(BackendApplication.class, TestcontainersConfiguration.class)
+            .web(WebApplicationType.NONE).run()) {
+            Object bean = c.getBean(type);
+            assertThat(bean).isEqualTo(type.getMethod("defaults").invoke(null));
+            assertThat(bean).isEqualTo(type.getConstructor(int.class, int.class, int.class).newInstance(5, 3, 1));
+        }
+    }
+
     @Test
     void allWeightsZeroFailsStartup() {
         String[] props = new String[10];

@@ -69,6 +69,18 @@ public class EvidenceConfig {
     }
 
     @Bean
+    MinCoreThresholds minCoreThresholds(
+        @Value("${oracul.evidence.min-core.high:5}") int high,
+        @Value("${oracul.evidence.min-core.medium:3}") int medium,
+        @Value("${oracul.evidence.min-core.low:1}") int low,
+        @Value("${oracul.evidence.core:10}") int core) {
+        range("oracul.evidence.min-core.high", high, 0, core);
+        range("oracul.evidence.min-core.medium", medium, 0, core);
+        range("oracul.evidence.min-core.low", low, 0, core);
+        return new MinCoreThresholds(high, medium, low);
+    }
+
+    @Bean
     EventRanker eventRanker(RankingWeights weights, EvidenceProperties properties) {
         return new EventRanker(weights, properties.minSourceQuality());
     }
