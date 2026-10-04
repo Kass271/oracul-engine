@@ -1,0 +1,74 @@
+{
+  "slice": "release",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "e2e/tests/scenario-controls.spec.ts",
+      "line": 96,
+      "fr": "NFR-5",
+      "problem": "NFR-5 acceptance ('E2E keyboard-only flow sets sliders and starts generation; axe check of the main page reports no serious/critical violations') has no test. No E2E file or unit test runs an axe/accessibility scan (e2e/package.json has no @axe-core/playwright dependency), and no test reaches GENERATE THE FUTURE by keyboard only. The only keyboard test (scenario-controls.spec.ts:96) moves one slider with Arrow/Home/End keys. Nothing proves accessible names, visible focus or dark-theme contrast for the release.",
+      "fix": "Add @axe-core/playwright to e2e and a spec tagged `@trace NFR-5` that (a) runs AxeBuilder on the main page (welcome state, connected) and on a result view and asserts there are no 'serious'/'critical' violations, and (b) runs a keyboard-only flow: Tab to the sliders, change Realism/Darkness/Optimism with arrow keys, Tab to GENERATE THE FUTURE, press Enter, and assert that the progress view appears with the changed settings in the started run's configuration.",
+      "status": "fixed",
+      "note": "Round 2: scenario-controls.spec.ts now has an `@trace NFR-5` block using @axe-core/playwright: axe runs on the welcome page (both disconnected and connected), on the progress view and on the result view, and asserts no serious/critical violations. A keyboard-only flow (Tab plus Arrow keys on Darkness/Optimism/Realism, Tab to GENERATE THE FUTURE, Enter) asserts the POST body and the stored run configuration. A fresh browser context gets a new session with the defaults, so the expected 7/2/7 values hold. Not executed yet: the last e2e report (94 passed) predates the spec, and the reviewer cannot start the stack. The workflow E2E step must run it."
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "frontend/src/app/runs/run.store.ts",
+      "line": 91,
+      "fr": "FR-10",
+      "problem": "Opening an older future from Recent futures while a run is active calls RunStore.open(), which reset()s and stops tracking the active run. `active()` then reflects the old COMPLETED run, so GENERATE THE FUTURE and the quick actions are enabled again even though the backend still has an active run. The click only gets a 409 snackbar, but a quick action has already changed the panel value (+2/-3) before the request fails. The active run's progress is no longer shown anywhere until it appears in Recent futures.",
+      "fix": "Remember the id/status of the session's active run apart from the viewed run, and derive the disable state from it. A simpler option is to have quick actions apply the panel change only after startRun succeeds.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "frontend/src/app/runs/run.store.ts",
+      "line": 148,
+      "fr": "FR-33",
+      "problem": "Race when /futures/<older id> is reloaded. App starts ScenarioLoader.load(), which writes the newest run's configuration into the panel. In parallel, RunStore.open() writes the reopened run's configuration (panelPending). Whichever response arrives last wins. If the loader response is later, the panel shows another run's settings and DARKER/MORE REALISTIC compute from them (FR-29).",
+      "fix": "Apply the run's configuration after the loader has finished (e.g. wait for loader state 'ready'), or have the loader skip store.load when a run view has already loaded its configuration.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleMetadataFetcher.java",
+      "line": 71,
+      "fr": "FR-13",
+      "problem": "Article URLs come from a third party (GDELT) and are fetched with no host check, and redirect Locations are followed up to 3 hops with no host check either. A crafted article URL or redirect can make the backend send GETs to loopback/private/link-local addresses (e.g. http://localhost:8080/api/..., http://169.254.169.254/, the db container). Page meta text then ends up in stored source summaries and prompts.",
+      "fix": "Before each hop, resolve the host and reject loopback, site-local, link-local, any-local and multicast addresses. Do this in tests only behind a property that allows the stub host.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/common/RequestLogFilter.java",
+      "line": 30,
+      "fr": "FR-9",
+      "problem": "Every /api request log line includes the raw Authorization header. SecretRedactor only masks the 'Bearer <x>' form, so an 'Authorization: Basic \u2026' or a scheme-less token value is written to the log in clear text (NFR-1: no credential in logs).",
+      "fix": "Log only whether the header is present and its scheme (e.g. authorization=Bearer [REDACTED] / Basic [REDACTED] / [REDACTED]), never the value.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/ReasoningPipeline.java",
+      "line": 114,
+      "fr": "FR-31",
+      "problem": "The EMPTY_PACK interim path (slices 05-11) still exists after slice 12. With min-core 0, which the shipped docker-compose.override.yml sets for the medium/low bands, an empty pack ends the run COMPLETED without a headline or story. RunView only shows the result for COMPLETED && headline, so polling stops and the progress view stays forever. The run is also never listed in Recent futures.",
+      "fix": "Treat an empty pack as INSUFFICIENT_EVIDENCE regardless of the threshold, or let RunView show a terminal message for COMPLETED without headline.",
+      "status": "open"
+    }
+  ]
+}

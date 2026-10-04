@@ -47,7 +47,7 @@
     @switch (loader.state()) {
       @case ('loading') {
         <div class="center" data-testid="app-loading">
-          <mat-spinner diameter="40" />
+          <mat-spinner diameter="40" aria-label="Loading" />
         </div>
       }
       @case ('error') {

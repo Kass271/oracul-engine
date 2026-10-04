@@ -30,7 +30,7 @@ const FALLBACK_LABELS: Record<string, string> = {
       @switch (state()) {
         @case ('loading') {
           <div class="state" data-testid="recent-futures-loading" (click)="$event.stopPropagation()">
-            <mat-spinner diameter="24" />
+            <mat-spinner diameter="24" aria-label="Loading recent futures" />
           </div>
         }
         @case ('error') {

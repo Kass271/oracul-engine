@@ -24,7 +24,7 @@ const STEPS: { stage: RunStage; label: string }[] = [
   template: `
     <div class="progress" data-testid="progress-view">
       <p class="stage" data-testid="progress-stage">{{ label() }}</p>
-      <mat-progress-bar data-testid="progress-bar" mode="determinate" [value]="value()" />
+      <mat-progress-bar data-testid="progress-bar" aria-label="Generation progress" mode="determinate" [value]="value()" />
       <mat-list>
         @for (s of steps(); track s.stage) {
           <mat-list-item [attr.data-testid]="'progress-step-' + s.stage" [attr.data-state]="s.state">{{ s.label }}</mat-list-item>

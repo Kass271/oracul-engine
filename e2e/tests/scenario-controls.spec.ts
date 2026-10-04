@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { evidence } from './evidence';
+
+const STUB = 'http://localhost:4010';
 
 const CODES = ['1d', '1w', '1m', '1y', '5y', '10y', '20y'];
 const LABELS = ['Tomorrow', '1 week', '1 month', '1 year', '5 years', '10 years', '20 years'];
@@ -148,5 +151,97 @@ test.describe('FR-3 time horizon', () => {
     const res = await request.post('/api/runs', { data: { ...BASE, horizon: '3y' } });
     expect(res.status()).toBe(400);
     expect(await res.json()).toEqual({ code: 'VALIDATION_FAILED', message: 'unknown horizon' });
+  });
+});
+
+async function connectChatGpt(page: Page): Promise<void> {
+  await page.goto('/');
+  await expect(page.getByTestId('chatgpt-status')).toHaveText('Not connected');
+  await page.getByTestId('chatgpt-connect').click();
+  await expect(page.getByTestId('chatgpt-status')).toHaveText('ChatGPT connected');
+}
+
+async function seriousViolations(page: Page) {
+  // Scan only a settled page: wait for any running animation (e.g. snackbar fade-in) to finish.
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'));
+  const results = await new AxeBuilder({ page }).analyze();
+  return results.violations
+    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+    .map((v) => `${v.impact}: ${v.id} (${v.nodes.length} nodes)`);
+}
+
+/** Tabs until the element with the given test id (or its inner input) has focus. */
+async function tabTo(page: Page, testId: string): Promise<void> {
+  for (let i = 0; i < 80; i++) {
+    await page.keyboard.press('Tab');
+    const focused = await page.evaluate((id) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return false;
+      return el.getAttribute('data-testid') === id || !!el.closest(`[data-testid="${id}"]`);
+    }, testId);
+    if (focused) return;
+  }
+  throw new Error(`could not reach ${testId} with Tab`);
+}
+
+// @trace NFR-5
+test.describe('NFR-5 accessibility', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test.beforeEach(async ({ request }) => {
+    const r = await request.post(`${STUB}/__control/reset`);
+    expect(r.status()).toBe(204);
+  });
+
+  test('axe reports no serious or critical violations on the main page', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('scenario-panel')).toBeVisible();
+    expect(await seriousViolations(page)).toEqual([]);
+    await connectChatGpt(page);
+    expect(await seriousViolations(page)).toEqual([]);
+  });
+
+  test('axe reports no serious or critical violations on a result view', async ({ page }) => {
+    test.setTimeout(60_000);
+    await connectChatGpt(page);
+    await page.getByTestId('generate-button').click();
+    await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
+    await expect(page.getByTestId('progress-view')).toBeVisible();
+    expect(await seriousViolations(page)).toEqual([]);
+    await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 30_000 });
+    expect(await seriousViolations(page)).toEqual([]);
+  });
+
+  test('keyboard-only flow sets sliders and starts generation', async ({ page }) => {
+    await connectChatGpt(page);
+
+    await tabTo(page, 'slider-darkness-input');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('value-darkness')).toHaveText('7');
+
+    await tabTo(page, 'slider-optimism-input');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('value-optimism')).toHaveText('2');
+
+    await tabTo(page, 'slider-realism-input');
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('value-realism')).toHaveText('7');
+
+    await tabTo(page, 'generate-button');
+    await expect(page.getByTestId('generate-button')).toBeFocused();
+    const requestPromise = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/runs');
+    await page.keyboard.press('Enter');
+    const req = await requestPromise;
+    expect(req.postDataJSON()).toMatchObject({ darkness: 7, optimism: 2, realism: 7 });
+
+    await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
+    await expect(page.getByTestId('progress-view')).toBeVisible();
+    const id = page.url().split('/').pop()!;
+    const run = await page.request.get(`/api/runs/${id}`);
+    expect(run.status()).toBe(200);
+    expect((await run.json()).configuration).toMatchObject({ darkness: 7, optimism: 2, realism: 7 });
   });
 });

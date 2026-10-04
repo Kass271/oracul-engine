@@ -28,7 +28,7 @@ const GENERIC_ERROR = 'Something went wrong — try again';
       </div>
     } @else {
       <div class="loading" data-testid="result-loading">
-        <mat-progress-bar mode="indeterminate" />
+        <mat-progress-bar mode="indeterminate" aria-label="Loading result" />
       </div>
     }
   `,
