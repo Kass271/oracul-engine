@@ -52,3 +52,9 @@ errors-and-recovery, models-and-inference, token-reference, preview-limitations.
 | # | Question | Answer |
 |---|---|---|
 | 1 | Correction of Round 4 #2 by the user: "if insufficent evedence it just do it!!! not stopped, just in the end make note about this" | FR-47 rewritten: a lack of evidence never stops a run — insufficient evidence for the Realism, zero evidence and no news at all (GDELT down) all still generate the future from what exists, with a note at the end. Corrects FR-31 and the NEWS_UNAVAILABLE run failure (FR-13/FR-44). |
+
+## Round 6 — 2026-10-04
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Real runs at Realism 1–2 ended "insufficient evidence": GDELT answered 429 to every request (15 FAILED + 5 never-sent queries wrongly marked EMPTY). User: "why we can not just run simple search and parse result". A real Google News RSS search answered 100 items in 0.6 s. Add FR-48: Google News RSS as the main source, GDELT as fallback, unsent queries FAILED? | "yes added and make as u recommended" |

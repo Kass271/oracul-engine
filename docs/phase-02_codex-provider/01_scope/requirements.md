@@ -147,6 +147,17 @@ tests) stay in force.
   - Given I click "LOWER REALISM" in the note, when it applies, then Realism decreases by 2 and a new run starts
   - Given the evidence meets the chosen Realism, when the result is shown, then no note appears
 
+### FR-48 — Google News RSS as the main news source, GDELT as fallback
+- UI: no
+- Corrects: FR-13 / FR-44 (news provider)
+- Description: Real GDELT refused most requests on 2026-10-04 (429 "one request every 5 seconds", 10–18 s per answer), so real runs found no news. ORACUL searches Google News RSS first (no key, no configuration; a real call answered 100 items in 0.6 s) and uses GDELT only as a fallback.
+- Acceptance:
+  - Given a run's search plan, when the search runs, then the planned queries are merged into at most 4 OR-group requests to https://news.google.com/rss/search (q with the OR-group plus a "when:" date limit, hl=en-US, gl=US, ceid=US:en), sent one at a time at least 1 second apart, each with a 10 second timeout
+  - Given an RSS item, when it becomes a source, then it keeps title, publisher (the item's source), publication date (pubDate) and link; when the article page is fetched, the redirect is followed to the publisher's URL, and if that fails the source keeps the Google link and the publisher's site URL
+  - Given a Google News request fails (non-200, timeout or unparsable XML), when the search continues, then that group is tried once against GDELT under the FR-44 rules, within the remaining search budget
+  - Given a query whose group was never sent (budget or run deadline), when the search ends, then its status is FAILED (never EMPTY), so the counts and the FR-47 note tell the truth
+  - Given the E2E stack, when tests run, then the stub serves a Google News RSS search endpoint with control modes (ok, empty, down, malformed) and no test calls the real Google
+
 ## Non-functional
 
 ### NFR-8 — Real-service check gates GREEN
