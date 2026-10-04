@@ -62,11 +62,21 @@ public class PipelineExecutor {
 
     private void execute(UUID runId, UUID sessionId) {
         try {
-            if (!runs.startRunning(runId, now())) {
+            var queued = runs.find(runId, sessionId).orElseThrow();
+            boolean alternative = queued.kind() == com.oracul.app.api.model.RunKind.ALTERNATIVE;
+            boolean started = alternative ? runs.startRunningAlternative(runId, now()) : runs.startRunning(runId, now());
+            if (!started) {
                 runs.failTimedOut(runId, now());
                 return;
             }
             var run = runs.find(runId, sessionId).orElseThrow();
+            if (alternative) {
+                ReasoningPipeline.Result altResult = reasoning.run(runId, sessionId);
+                if (altResult == ReasoningPipeline.Result.ACCEPTED) {
+                    story.run(runId, sessionId);
+                }
+                return;
+            }
             var profile = profiles.from(run.configuration());
             runs.storeProfile(runId, profile, now());
             if (!research.run(runId, sessionId, run.configuration(), profile)) {

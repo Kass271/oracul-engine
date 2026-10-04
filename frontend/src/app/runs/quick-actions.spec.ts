@@ -1,4 +1,5 @@
 // @trace FR-29
+// @trace FR-30
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
@@ -160,14 +161,14 @@ describe('slice 16_quick-regeneration: quick actions bar', () => {
   });
 
   // @trace FR-29
-  it('renders exactly the four buttons with the exact texts in table order and no alternative button', async () => {
+  // @trace FR-30
+  it('renders exactly the five buttons with the exact texts in table order, alternative last', async () => {
     await openCompleted(config());
     const bar = el().querySelector('[data-testid="result-view"] [data-testid="quick-actions"]');
     expect(bar).not.toBeNull();
     const buttons = Array.from((bar as HTMLElement).querySelectorAll('button'));
-    expect(buttons.map((b) => b.getAttribute('data-testid'))).toEqual(ACTIONS.map((a) => a.testid));
-    expect(buttons.map((b) => (b.textContent ?? '').trim())).toEqual(ACTIONS.map((a) => a.text));
-    expect(el().querySelector('[data-testid="quick-alternative"]')).toBeNull();
+    expect(buttons.map((b) => b.getAttribute('data-testid'))).toEqual([...ACTIONS.map((a) => a.testid), 'quick-alternative']);
+    expect(buttons.map((b) => (b.textContent ?? '').trim())).toEqual([...ACTIONS.map((a) => a.text), 'ALTERNATIVE FUTURE']);
   });
 
   // Ranges & invariants: 4 actions x v = 1..10 (40 cases) against the table, enabled state, body and panel invariants.
@@ -300,5 +301,172 @@ describe('slice 16_quick-regeneration: quick actions bar', () => {
     harness.detectChanges();
     expect(snackText()).toBe('Something went wrong — try again');
     expect(TestBed.inject(ScenarioStore).realism()).toBe(2);
+  });
+});
+
+// @trace FR-30
+describe('slice 17_alternative-future: ALTERNATIVE FUTURE button', () => {
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  type Req = { url: string; method: string };
+  const isRunsPost = (r: Req): boolean => r.method === 'POST' && r.url.endsWith('/api/runs');
+  const isAltPost = (r: Req): boolean => r.method === 'POST' && r.url.endsWith(`/api/runs/${RUN_ID}/alternatives`);
+  const isRunGet = (r: Req): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${RUN_ID}`);
+  const isResultGet = (r: Req): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${RUN_ID}/result`);
+  const isConnectionGet = (r: Req): boolean => r.method === 'GET' && r.url.endsWith('/api/auth/chatgpt/connection');
+  const el = (): HTMLElement => harness.routeNativeElement as HTMLElement;
+  const alt = (): HTMLButtonElement => {
+    const b = el().querySelector('[data-testid="quick-alternative"]');
+    expect(b, 'quick-alternative exists').not.toBeNull();
+    return b as HTMLButtonElement;
+  };
+  const snackText = (): string | null =>
+    (document.querySelector('[data-testid="run-error-message"]')?.textContent ?? null)?.trim() ?? null;
+
+  async function render(): Promise<void> {
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+  }
+
+  async function openCompleted(cfg: Cfg, canGenerate = true): Promise<void> {
+    harness = await RouterTestingHarness.create(`/futures/${RUN_ID}`);
+    http.expectOne(isRunGet).flush(completed(cfg));
+    await render();
+    http.expectOne(isResultGet).flush(result(cfg));
+    await render();
+    TestBed.inject(ScenarioStore).load(cfg as never);
+    TestBed.inject(ConnectionStore).canGenerate.set(canGenerate);
+    await render();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  }
+
+  async function click(): Promise<void> {
+    alt().click();
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+  }
+
+  const altRun = (cfg: Cfg): GenerationRun =>
+    ({ ...queued(cfg), kind: 'ALTERNATIVE', parentRunId: RUN_ID, evidencePackId: 'aaaaaaaa-2222-3333-4444-555555555555' }) as unknown as GenerationRun;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+    TestBed.inject(RunStore).stop();
+    TestBed.inject(MatSnackBar).dismiss();
+    document.querySelectorAll('.mat-mdc-snack-bar-container').forEach((e) => e.remove());
+    vi.useRealTimers();
+  });
+
+  // @trace FR-30
+  it('is enabled for a COMPLETED run with canGenerate', async () => {
+    await openCompleted(config());
+    expect(alt().disabled).toBe(false);
+  });
+
+  // @trace FR-30
+  it('canGenerate false: disabled and a click sends nothing', async () => {
+    await openCompleted(config(), false);
+    expect(alt().disabled).toBe(true);
+    await click();
+    http.expectNone(isAltPost);
+    http.expectNone(isRunsPost);
+  });
+
+  // @trace FR-30
+  it.each(['QUEUED', 'RUNNING'])('an active (%s) run never leaves an enabled alternative button', async (status) => {
+    await openCompleted(config());
+    TestBed.inject(RunStore).run.set({ ...queued(config()), id: RUN_ID, status } as unknown as GenerationRun);
+    await render();
+    const b = el().querySelector('[data-testid="quick-alternative"]') as HTMLButtonElement | null;
+    expect(b === null || b.disabled).toBe(true);
+  });
+
+  // @trace FR-30
+  it('starting(): disabled and a click sends nothing more', async () => {
+    await openCompleted(config());
+    TestBed.inject(RunStore).starting.set(true);
+    await render();
+    expect(alt().disabled).toBe(true);
+    await click();
+    http.expectNone(isAltPost);
+  });
+
+  // @trace FR-30
+  it('click sends exactly one POST /alternatives with a null body and no POST /api/runs; a second click while pending adds none', async () => {
+    await openCompleted(config());
+    await click();
+    const reqs = http.match(isAltPost);
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0].request.body).toBeNull();
+    http.expectNone(isRunsPost);
+    expect(alt().disabled).toBe(true);
+    await click();
+    http.expectNone(isAltPost);
+    http.expectNone(isRunsPost);
+    reqs[0].flush(altRun(config()), { status: 202, statusText: 'Accepted' });
+  });
+
+  // @trace FR-30
+  it('202: navigates to the new run and the panel shows the parent configuration even after a panel edit', async () => {
+    await openCompleted(config());
+    TestBed.inject(ScenarioStore).setDarkness(3);
+    await render();
+    await click();
+    expect(TestBed.inject(ScenarioStore).darkness()).toBe(3);
+    http.expectOne(isAltPost).flush(altRun(config()), { status: 202, statusText: 'Accepted' });
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(TestBed.inject(Router).url).toBe(`/futures/${NEW_ID}`);
+    expect(TestBed.inject(RunStore).run()?.id).toBe(NEW_ID);
+    expect(TestBed.inject(ScenarioStore).configuration()).toEqual(config());
+  });
+
+  // @trace FR-30
+  it.each([
+    [409, 'RUN_NOT_COMPLETED', 'Only a completed future can have an alternative'],
+    [409, 'RUN_ALREADY_ACTIVE', 'A generation is already running'],
+    [404, 'RUN_NOT_FOUND', 'Future not found'],
+    [500, 'INTERNAL_ERROR', 'Something went wrong — try again'],
+  ])('%i %s: message shown, URL and result view unchanged, button enabled again', async (status, code, message) => {
+    await openCompleted(config());
+    await click();
+    http.expectOne(isAltPost).flush({ code, message }, { status, statusText: 'Error' });
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(snackText()).toBe(message);
+    expect(TestBed.inject(Router).url).toBe(`/futures/${RUN_ID}`);
+    expect(el().querySelector('[data-testid="result-view"]')).not.toBeNull();
+    expect(alt().disabled).toBe(false);
+  });
+
+  // @trace FR-30
+  it('401 CHATGPT_NOT_CONNECTED: message shown and the connection state is reloaded', async () => {
+    await openCompleted(config());
+    await click();
+    http
+      .expectOne(isAltPost)
+      .flush({ code: 'CHATGPT_NOT_CONNECTED', message: 'Connect ChatGPT to generate' }, { status: 401, statusText: 'Unauthorized' });
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(snackText()).toBe('Connect ChatGPT to generate');
+    expect(http.match(isConnectionGet).length).toBeGreaterThanOrEqual(1);
+  });
+
+  // @trace FR-30
+  it('network error (status 0): generic message', async () => {
+    await openCompleted(config());
+    await click();
+    http.expectOne(isAltPost).error(new ProgressEvent('error'));
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(snackText()).toBe('Something went wrong — try again');
+    expect(alt().disabled).toBe(false);
   });
 });

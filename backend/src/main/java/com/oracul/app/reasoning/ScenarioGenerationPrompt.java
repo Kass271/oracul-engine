@@ -36,7 +36,35 @@ public final class ScenarioGenerationPrompt {
     private ScenarioGenerationPrompt() {
     }
 
+    /** Alternative-run context: futures to avoid and, for a duplicate retry, the rejected title and findings. */
+    public record Alternative(List<AvoidedFutures.AvoidedFuture> futuresToAvoid, String rejectedTitle,
+                              List<String> duplicateFindings) {
+        public static final Alternative NONE = new Alternative(List.of(), null, List.of());
+    }
+
+    private static final int MAX_FUTURES = 10;
+    private static final int MAX_STEPS = 12;
+    private static final int MAX_TEXT = 300;
+
+    private static String cut(String s) {
+        String clean = UntrustedText.sanitize(s);
+        if (clean.codePointCount(0, clean.length()) > MAX_TEXT) {
+            return clean.substring(0, clean.offsetByCodePoints(0, MAX_TEXT)) + "…";
+        }
+        return clean;
+    }
+
+    private static void rawBlock(List<String> out, String name, List<String> content) {
+        out.add(UntrustedText.BEGIN + name + "\">>>");
+        out.addAll(content);
+        out.add(UntrustedText.END);
+    }
+
     public static String inputText(EvidencePack pack, GenerationRequest req) {
+        return inputText(pack, req, Alternative.NONE);
+    }
+
+    public static String inputText(EvidencePack pack, GenerationRequest req, Alternative alt) {
         ScenarioWindow window = ScenarioWindow.of(pack);
         var cfg = pack.getConfiguration();
         List<String> wildcards = new ArrayList<>();
@@ -67,6 +95,17 @@ public final class ScenarioGenerationPrompt {
         boolean corrected = req.reason() == com.oracul.app.api.model.ScenarioAttemptReason.SCHEMA_CORRECTION;
         boolean critiqued = !req.criticIssues().isEmpty()
             || req.reason() == com.oracul.app.api.model.ScenarioAttemptReason.CRITIC_REGENERATION;
+        boolean avoiding = !alt.futuresToAvoid().isEmpty();
+        boolean duplicate = avoiding && (req.reason() == com.oracul.app.api.model.ScenarioAttemptReason.ALTERNATIVE_DISTINCT
+            || !alt.duplicateFindings().isEmpty());
+        if (avoiding) {
+            lines.add("Follow a different causal path than every future listed in futures-to-avoid; do not paraphrase them.");
+        }
+        if (duplicate) {
+            lines.add("Your previous scenario repeated a future listed in futures-to-avoid. Return a new complete "
+                + "scenario with a different future event and at least one different causal step; the problems are "
+                + "listed in duplicate-future.");
+        }
         if (critiqued) {
             lines.add("Your previous scenario failed ORACUL's critic. Return a new complete scenario that resolves "
                 + "the issues listed in critique.");
@@ -81,6 +120,30 @@ public final class ScenarioGenerationPrompt {
         }
         UntrustedText.block(lines, "evidence-pack", List.of(pack.getPromptText()));
         UntrustedText.block(lines, "custom-wildcards", custom.isEmpty() ? List.of("none") : custom);
+        if (avoiding) {
+            List<String> f = new ArrayList<>();
+            int n = Math.min(alt.futuresToAvoid().size(), MAX_FUTURES);
+            for (int i = 0; i < n; i++) {
+                var future = alt.futuresToAvoid().get(i);
+                f.add("Future " + (i + 1) + ": " + cut(future.title()));
+                List<String> steps = future.steps();
+                for (int k = 0; k < Math.min(steps.size(), MAX_STEPS); k++) {
+                    f.add("- " + cut(steps.get(k)));
+                }
+                if (steps.size() > MAX_STEPS) {
+                    f.add("- … and " + (steps.size() - MAX_STEPS) + " more steps");
+                }
+            }
+            rawBlock(lines, "futures-to-avoid", f);
+        }
+        if (duplicate) {
+            List<String> d = new ArrayList<>();
+            d.add("Rejected future: " + cut(alt.rejectedTitle()));
+            for (String finding : alt.duplicateFindings()) {
+                d.add(cut(finding));
+            }
+            rawBlock(lines, "duplicate-future", d);
+        }
         if (critiqued) {
             List<String> c = new ArrayList<>();
             for (var issue : req.criticIssues()) {
@@ -106,11 +169,15 @@ public final class ScenarioGenerationPrompt {
     }
 
     public static Map<String, Object> body(String model, EvidencePack pack, GenerationRequest req) {
+        return body(model, pack, req, Alternative.NONE);
+    }
+
+    public static Map<String, Object> body(String model, EvidencePack pack, GenerationRequest req, Alternative alt) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("instructions", INSTRUCTIONS);
         body.put("input", List.of(Map.of("role", "user",
-            "content", List.of(Map.of("type", "input_text", "text", inputText(pack, req))))));
+            "content", List.of(Map.of("type", "input_text", "text", inputText(pack, req, alt))))));
         body.put("text", TEXT);
         body.put("store", false);
         return body;

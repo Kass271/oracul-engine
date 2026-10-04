@@ -318,6 +318,11 @@ public final class StubResponses {
         return StoryFixtures.fixture(name, inputText);
     }
 
+    /** SC-ALT(k) when the request has a futures-to-avoid block, SC-DEFAULT otherwise (slice 17). */
+    public static String alternativeFixture(String inputText) {
+        return ScenarioFixtures.alternativeFixture(inputText);
+    }
+
     /** CR-PASS / CR-ICS / CR-CERT output text (scenario-reasoning.md "Slice 10_critic"). */
     public static String criticFixture(String name) {
         return com.oracul.app.reasoning.CriticFixtures.fixture(name);
@@ -338,7 +343,7 @@ public final class StubResponses {
             if ("QUERY_EXPANSION".equals(purpose)) return completed(queriesJson(defaultQueries(text)));
             if ("EVENT_NORMALIZATION".equals(purpose)) return completed(defaultNormalization(text));
             if ("EVENT_CLASSIFICATION".equals(purpose)) return completed(defaultClassification(text));
-            if ("SCENARIO_GENERATION".equals(purpose)) return completed(ScenarioFixtures.scenarioDefault(text));
+            if ("SCENARIO_GENERATION".equals(purpose)) return completed(alternativeFixture(text));
             if ("SCENARIO_CRITIC".equals(purpose)) return completed(criticFixture("CR-PASS"));
             if ("STORY_WRITING".equals(purpose)) return completed(StoryFixtures.stDefault(StoryFixtures.futureEventDate(text)));
             return status(400, "{\"error\":\"unexpected request\"}");

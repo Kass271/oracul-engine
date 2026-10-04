@@ -19,8 +19,8 @@ state: a result, "insufficient evidence" with LOWER REALISM, or a friendly failu
 | generation_run | status | QUEUED / RUNNING / COMPLETED / INSUFFICIENT_EVIDENCE / FAILED | QUEUED, RUNNING = active |
 | generation_run | stage | RunStage null | null while QUEUED |
 | generation_run | configuration | jsonb | exact ScenarioConfiguration snapshot (custom labels trimmed) |
-| generation_run | research_profile | jsonb null | research-pipeline.md FR-11 |
-| generation_run | search_plan | jsonb null | research-pipeline.md FR-12 |
+| generation_run | research_profile | jsonb null | research-pipeline.md FR-11; ALTERNATIVE copies the parent's |
+| generation_run | search_plan | jsonb null | research-pipeline.md FR-12; ALTERNATIVE copies the parent's |
 | generation_run | evidence_pack_id | uuid null | FK evidence_pack; ALTERNATIVE runs reference the parent's pack |
 | generation_run | counts | jsonb | ResearchCounts, zeros at start; ALTERNATIVE copies the parent's |
 | generation_run | failure_code / failure_message | varchar null | RunFailureCode + fixed message |
@@ -134,6 +134,14 @@ ALTERNATIVE runs skip stages 1–6 (they jump from QUEUED to stage 7).
   - an active run exists → 409 `RUN_ALREADY_ACTIVE` → "A generation is already running"
   - not connected / expired / not eligible → 401 / 401 / 403 as in FR-10
   - unexpected failure → 500 `INTERNAL_ERROR` → "Something went wrong — try again"
+  - check order: run lookup (404) → ChatGPT connection (401/403) → parent completed (409 `RUN_NOT_COMPLETED`) →
+    active run of this session (409 `RUN_ALREADY_ACTIVE`); nothing is stored when a check fails.
+  - The UI shows any of these messages in the snackbar (`run-error-message`) and stays on the parent's result view.
+- Precise test contract: "Slice 17_alternative-future — FR-30 test contract" below (wins where more precise).
+- Changes earlier behaviour: the result view's `quick-actions` bar had exactly 4 buttons and no `quick-alternative` (slice 16) → it has 5 buttons, `quick-alternative` "ALTERNATIVE FUTURE" last; the slice 16 rendering test that asserts the exact 4-button list and the absence of `quick-alternative` must expect the 5-button list (tests: frontend/src/app/runs/quick-actions.spec.ts)
+- Changes earlier behaviour: `POST /api/runs/{runId}/alternatives` answered 501 without body (slice 04 interim) → 202 GenerationRun / 401 / 403 / 404 / 409 / 500 ApiError as above; no existing test calls the path (grep of `backend/src/test`, `frontend/src/**/*.spec.ts`, `e2e/tests` for `alternatives`, `startAlternativeRun`, `501`: no hit) (tests: none)
+- Changes earlier behaviour: none for STANDARD runs — their SCENARIO_GENERATION / SCENARIO_CRITIC / STORY_WRITING request texts, stage sequence, counts, Evidence Pack, `getRunResearch`, `listRunSources`, `listRunEvents`, `getEvidencePack` and `getFutureResult` stay byte-identical (the `futures-to-avoid` / `duplicate-future` blocks and TASK lines exist only in ALTERNATIVE runs; the internal Evidence Pack lookup by pack id returns the same pack for a STANDARD run); `RunFailuresTest` already expects the ALTERNATIVE_NOT_DISTINCT message; `ReasoningHarness` keeps working because `GenerationRequest` keeps its 5 components and the 2-arg `inputText` / 3-arg `body` stay (tests: none)
+- Ranges & invariants: avoided futures n (runs of the session with the parent's Evidence Pack, COMPLETED with an accepted scenario, created before the alternative): classes n = 1 (only the parent), 2, 10 → all listed; n = 11 → 10 listed (parent as Future 1 + the 9 newest others, oldest first; the oldest other is dropped); steps per avoided future: 2…12 → all listed, 13 → first 12 + `- … and 1 more steps`; a title or statement of ≤ 300 code points → verbatim (after the data-line rule), 301 → first 300 + `…`; distinctness (`normalize` = trim, whitespace runs → one space, lower case `Locale.ROOT`): candidate title equal to any avoided title exactly / differing only in case / only in leading, trailing or repeated whitespace → finding `same future event title as future <i>`, any other title → none; candidate chain whose every normalized step statement occurs in the parent's (Future 1) chain (identical chain, reordered, subset) → finding `same causal steps as future 1`, ≥ 1 statement not in the parent's chain (even if it occurs in another avoided future) → none; distinct ⇔ no finding; invariants: an alternative's `configuration` deep-equals the parent's, `evidencePackId` = parent's, `parentRunId` = parent id, `kind` ALTERNATIVE; an ALTERNATIVE run sends 0 QUERY_EXPANSION / EVENT_NORMALIZATION / EVENT_CLASSIFICATION and 0 news / metadata requests and is never observed at `stageIndex` 1–6 (only 0, 7, 8, 9, 10); its `counts` equal the parent's except `sourcesUsed` (set from its own accepted scenario); every SCENARIO_GENERATION request of an ALTERNATIVE run contains exactly one `futures-to-avoid` block and the alternative TASK line, no STANDARD request contains either; each attempt reason at most once per run (≤ 5 SCENARIO_GENERATION requests, attempts 1..5); a COMPLETED alternative's accepted futureEvent title differs (normalized) from every avoided title and its chain has ≥ 1 statement not in the parent's chain; the parent row is never modified; a rejected request (any 4xx) creates no row.
 
 ### FR-31 — Insufficient evidence
 - Happy path: after selection (stage RANKING) the backend compares the number of CORE evidence items with the
@@ -810,3 +818,227 @@ New in use: `quick-actions`, `quick-more-realistic`, `quick-darker`, `quick-more
 Reused: `result-view`, `generate-button`, `slider-darkness-input`, `progress-view`, `run-error-message`,
 `recent-futures-button`, `recent-future-<runId>`, `recent-future-settings-<runId>`, `meta-darkness`,
 `chatgpt-status`, `chatgpt-connect`.
+
+## Slice 17_alternative-future — FR-30 test contract
+
+Delivers `startAlternativeRun`, ALTERNATIVE runs that reuse the parent's Evidence Pack (stages 1–6 skipped, no
+search), the `futures-to-avoid` prompt block, the distinctness check with one ALTERNATIVE_DISTINCT regeneration and
+the failure ALTERNATIVE_NOT_DISTINCT, and the ALTERNATIVE FUTURE button. No Flyway migration (`kind`,
+`parent_run_id`, `evidence_pack_id` exist since V3/V6; reason ALTERNATIVE_DISTINCT exists in V7's varchar), no new
+`ApiError.code` (`RUN_NOT_COMPLETED` is in the contract since step 2), no change to STANDARD runs. Where this section
+is more precise than "Behaviour" FR-30, "UI" or scenario-reasoning.md "Alternative runs", this section wins.
+
+### API — `POST /api/runs/{runId}/alternatives` (`startAlternativeRun`, no request body; a body is ignored)
+Checks in this order; every error body has exactly the keys `code`, `message`; "no row" = `select count(*) from
+generation_run` unchanged:
+| # | Situation | Status | Body |
+|---|---|---|---|
+| 1 | connected; parent P = own run, status COMPLETED, `final_attempt` set, `evidence_pack_id` set; no active run | 202 | GenerationRun: new `id` ≠ P; `generationId` new (`^ORC-\d{4}-\d{2}-\d{2}-\d{4}(-\d+)?$`, rules of FR-10); `kind` `ALTERNATIVE`; `parentRunId` = P; `status` `QUEUED`; `stageIndex` 0; `stageCount` 10; `stage`, `stageLabel`, `failure`, `suggestedRealism`, `headline`, `completedAt` absent; `configuration` deep-equals P's `configuration`; `evidencePackId` = P's; `counts` deep-equals P's `counts`; `hasOpenCriticIssues` false; `createdAt` = `updatedAt`. Built from the committed QUEUED row. |
+| 2 | P is itself ALTERNATIVE and COMPLETED (alternative of an alternative) | 202 | as #1 with `parentRunId` = P, `evidencePackId` = P's (= the root STANDARD run's pack) |
+| 3 | `runId` = `00000000-0000-0000-0000-000000000000`, malformed `abc`, or a run of another session (also without cookie) | 404 | `{"code":"RUN_NOT_FOUND","message":"Future not found"}`; no row (404 wins over 401: a fresh, unconnected session asking for a foreign run gets 404) |
+| 4 | own run P not connected (fresh session never connected cannot own runs; use: P COMPLETED, then `DELETE /api/auth/chatgpt/connection`) | 401 | `CHATGPT_NOT_CONNECTED` "Connect ChatGPT to generate"; no row |
+| 5 | as #1 but access token within refresh-skew and the stub token server answers the refresh 400 (setup as `StartRunIT` #10) | 401 | `CHATGPT_SESSION_EXPIRED` "ChatGPT session expired — please reconnect"; no row |
+| 6 | session flagged PLAN_NOT_ELIGIBLE (setup as `StartRunIT` #11) with an own COMPLETED P | 403 | `CHATGPT_PLAN_NOT_ELIGIBLE` "Your ChatGPT plan is not eligible for ORACUL"; no row |
+| 7 | own P with status FAILED, INSUFFICIENT_EVIDENCE, QUEUED or RUNNING (parameterized), or COMPLETED without `final_attempt` / without `evidence_pack_id` (row inserted with `jdbc` as `RecentRunsIT.seed`) | 409 | `{"code":"RUN_NOT_COMPLETED","message":"Only a completed future can have an alternative"}`; no row (an active P answers RUN_NOT_COMPLETED, not RUN_ALREADY_ACTIVE) |
+| 8 | own COMPLETED P (#1) and another run of the session is QUEUED (inserted with `jdbc`, deadline + 1 day) | 409 | `{"code":"RUN_ALREADY_ACTIVE","message":"A generation is already running"}`; no row |
+| 9 | two `startAlternativeRun` for the same P sent concurrently (no active run) | one 202 + one 409 | the 409 is `RUN_ALREADY_ACTIVE`; exactly one active row for the session (unique-violation of `one_active_run_per_session` mapped as in FR-10) |
+| 10 | two alternatives in sequence for the same P (the first awaited to terminal) | 202 ×2 | both with `parentRunId` = P and P's `evidencePackId` |
+Stored row after #1 (DB assertions allowed): `kind` ALTERNATIVE, `parent_run_id` P, `session_id` caller's,
+`configuration`, `research_profile`, `search_plan`, `counts` jsonb deep-equal P's, `evidence_pack_id` = P's,
+`deadline_at` = `created_at` + `oracul.run.timeout`. P's row is unchanged (status, headline, configuration,
+counts, final_attempt, updated_at, completed_at).
+
+### Backend (`com.oracul.app.runs`, `com.oracul.app.reasoning`, `com.oracul.app.research`, `com.oracul.app.result`)
+- `RunsController.startAlternativeRun(runId)`: `RunService.get`-style lookup filtered by the caller's session (404) →
+  `ChatGptAuthService.requireUsableCredentials` (401/403) → `RunService.startAlternative(sessionId, parentRow)`.
+- `RunService.startAlternative`: in one transaction: P still COMPLETED with `final_attempt` and `evidence_pack_id`
+  (else 409 RUN_NOT_COMPLETED) → no active run (else 409 RUN_ALREADY_ACTIVE) → insert the QUEUED row (columns as
+  "Stored row" above; `GenerationRunRepository.insertAlternativeQueued(...)`); `generation_id` collision handling and
+  the unique-violation mapping exactly as `start`. Then `PipelineExecutor.submit`.
+- `PipelineExecutor`: for `kind` ALTERNATIVE the task starts with the conditional transition `QUEUED → RUNNING,
+  stage EXPLORING_FUTURES` (`WHERE status = 'QUEUED' AND deadline_at > now`; no row → `failTimedOut` as for
+  STANDARD), builds no Research Profile, calls no `ResearchPipeline` (no sufficiency check, no news, metadata or
+  EVENT_* request), then `ReasoningPipeline.run` and on ACCEPTED `StoryWriter.run` — the same catch-all and guards as
+  STANDARD. STANDARD runs are unchanged.
+- Evidence Pack lookup: new `EvidencePackRepository.findById(UUID packId)` (pack + its sources, sources read by the
+  pack's own `evidence_pack.run_id`). `ReasoningPipeline`, `StoryWriter`, `FutureResultService` and
+  `ResearchController.getEvidencePack` load the pack with `findById(row.evidencePackId())` after the session-filtered
+  run lookup. For an ALTERNATIVE run: `getEvidencePack` deep-equals the parent's; `getRunResearch` returns the copied
+  `researchProfile`, `searchPlan` and the run's `counts` (`runId` = the alternative); `listRunSources` /
+  `listRunEvents` return the lists of the pack's owner run (`evidence_pack.run_id`); `getFutureResult` /
+  `getStructuredScenario` use the alternative's own attempts and story with the shared pack (FR-26/27/28 views work).
+- Futures to avoid (`AvoidedFutures.load(runId)` in `com.oracul.app.reasoning`, read once at the start of stage 7 of
+  an ALTERNATIVE run): runs of the same session with `evidence_pack_id` = the run's pack, `status` COMPLETED,
+  `final_attempt` set, `created_at` < the run's `created_at`, `id` ≠ the run. Order: the parent first (Future 1),
+  then the others by `created_at` ascending, `id` ascending; at most 10 (the parent + the 9 newest others, still
+  listed oldest first). Each = `record AvoidedFuture(String title, List<String> steps)` from that run's accepted
+  attempt's **cleaned** scenario: `futureEvent.title` and `causalChain[].statement` in `order`.
+- Distinctness (pure `AlternativeDistinctness.findings(StructuredScenario candidate, List<AvoidedFuture> avoided)` →
+  `List<String>`, `avoided.get(0)` = parent): `normalize(s)` = trim, whitespace runs → one space, `toLowerCase
+  (Locale.ROOT)`. For each avoided future i (1-based) with `normalize(title)` = `normalize(candidate.futureEvent.title)`
+  → `same future event title as future <i>` (in i order); then, when every `normalize(step.statement)` of the
+  candidate chain occurs among the normalized statements of future 1 → `same causal steps as future 1`. Distinct ⇔
+  empty list.
+- `ReasoningPipeline` for ALTERNATIVE runs (slice 10 steps unchanged except): every SCENARIO_GENERATION request
+  carries the `Alternative` context below; in step 2, before **accept `a`** (2c critic PASS or 2e open critic issues),
+  `findings` on `a`'s cleaned scenario:
+  - empty → accept `a` (unchanged step 3; story follows).
+  - non-empty and ALTERNATIVE_DISTINCT not yet used (`D`) → ALTERNATIVE_DISTINCT request with `duplicateFindings` =
+    findings and `rejectedTitle` = `a`'s `futureEvent.title` (no critique, no guard violations) → parse; invalid and
+    not `S` → one SCHEMA_CORRECTION repeating it; still invalid → FAILED `INVALID_SCENARIO`. Guard the new attempt
+    with `finalAttempt = G`, store; it becomes `a`; continue at 2a (critic runs on it; a critic FAIL with `K` unused
+    leads to CRITIC_REGENERATION as in slice 10).
+  - non-empty and `D` → commit `status=FAILED`, `failure={ALTERNATIVE_NOT_DISTINCT, "ORACUL could not find a
+    different future — try changing a setting"}`, `completedAt`; stage stays CONSTRUCTING_SCENARIO / 9;
+    `final_attempt` null; no STORY_WRITING request; slot released.
+  The check never runs for STANDARD runs. Bounds: ≤ 5 SCENARIO_GENERATION requests (INITIAL, SCHEMA_CORRECTION,
+  GUARD_REGENERATION, CRITIC_REGENERATION, ALTERNATIVE_DISTINCT; attempts 1..5 in call order), ≤ 3 critiqued
+  attempts.
+- Run failures of an ALTERNATIVE run (transport, INVALID_SCENARIO, SCENARIO_REJECTED, RUN_TIMEOUT, startup sweep)
+  behave exactly as for STANDARD runs at stages 7–10.
+
+### Prompt — SCENARIO_GENERATION of an ALTERNATIVE run (`ScenarioGenerationPrompt`)
+- New overloads `inputText(EvidencePack pack, GenerationRequest req, Alternative alt)` and `body(String model,
+  EvidencePack pack, GenerationRequest req, Alternative alt)`; `record Alternative(List<AvoidedFuture>
+  futuresToAvoid, String rejectedTitle, List<String> duplicateFindings)` with `Alternative.NONE` (empty lists, null
+  title). The existing 2-arg `inputText` / 3-arg `body` delegate with `NONE` and stay byte-identical for every
+  STANDARD request. `GenerationRequest` keeps exactly its 5 components. `instructions` stays
+  `ScenarioGenerationPrompt.INSTRUCTIONS`; SETTINGS unchanged (`Attempt: <n> | Reason: <R>`, the first attempt of an
+  alternative is `INITIAL`).
+- With non-empty `futuresToAvoid`: TASK gains, directly after the two base lines, `Follow a different causal path than
+  every future listed in futures-to-avoid; do not paraphrase them.` and, after `custom-wildcards`, the block:
+  ```
+  <<<ORACUL_UNTRUSTED_DATA name="futures-to-avoid">>>
+  Future 1: <title>
+  - <step 1 statement>
+  - <step 2 statement>
+  Future 2: <title>
+  - …
+  <<<END_ORACUL_UNTRUSTED_DATA>>>
+  ```
+  Every title / statement is sanitized with the slice 06 data-line rule, then cut to 300 code points + `…` when
+  longer; at most 12 step lines per future, a 13th+ step is replaced by one line `- … and <k> more steps`.
+- With reason ALTERNATIVE_DISTINCT (or non-empty `duplicateFindings`): TASK gains, after the futures-to-avoid line,
+  `Your previous scenario repeated a future listed in futures-to-avoid. Return a new complete scenario with a different
+  future event and at least one different causal step; the problems are listed in duplicate-future.` and, after
+  `futures-to-avoid`, the block `<<<ORACUL_UNTRUSTED_DATA name="duplicate-future">>>` with the line
+  `Rejected future: <rejectedTitle>` then one line per finding in order, then `<<<END_ORACUL_UNTRUSTED_DATA>>>`
+  (same sanitizing and cut). A SCHEMA_CORRECTION of an ALTERNATIVE_DISTINCT repeats this line and block.
+  GUARD_REGENERATION and CRITIC_REGENERATION of an alternative carry `futures-to-avoid` but never `duplicate-future`.
+- Fixed order of extra TASK lines: alternative, duplicate, critique, guard, schema. Fixed order of blocks:
+  `evidence-pack`, `custom-wildcards`, `futures-to-avoid`, `duplicate-future`, `critique`, `guard-violations`,
+  `schema-errors`. Each block appears at most once (one start and one end marker each).
+- SCENARIO_CRITIC and STORY_WRITING requests of an ALTERNATIVE run are built exactly as for STANDARD runs.
+- Example (SC-DEFAULT parent on pack V4, `e1` = E001, INITIAL): `futures-to-avoid` content =
+  `Future 1: Stub future A\n- Stub fact citing E001.\n- Stub inference.\n- Stub speculation.\n- Stub future event.`
+
+### Backend test stubs (test support)
+- **SC-ALT(k)** = SC-DEFAULT (same ids, D, Y) with `candidateFutures[0].title` and `futureEvent.title` = `Stub
+  alternative future <k>`, `candidateFutures[1].title` `Stub alternative future <k> B`, speculation P1 and chain step
+  3 statement `Stub alternative speculation <k>.`, chain step 4 statement and `futureEvent.summary` `Stub alternative
+  future event <k>.`; k = number of lines starting `Future ` in the request's `futures-to-avoid` block.
+- `StubResponses` default responder: a SCENARIO_GENERATION request containing a `futures-to-avoid` block → SC-ALT(k);
+  otherwise unchanged (SC-DEFAULT). Helper `StubResponses.alternativeFixture(inputText)`.
+
+### Backend tests
+- Unit `backend/src/test/java/com/oracul/app/reasoning/AlternativeDistinctnessTest.java` (`// @trace FR-30`),
+  parameterized; parent chain `[Stub fact citing E001., Stub inference., Stub speculation., Stub future event.]`
+  title `Stub future A`:
+  | # | candidate | avoided | findings |
+  |---|---|---|---|
+  | D1 | SC-ALT(1) | [parent] | `[]` |
+  | D2 | title `Stub future A`, steps of SC-ALT(1) | [parent] | `[same future event title as future 1]` |
+  | D3 | title `  stub   FUTURE a ` | [parent] | title finding |
+  | D4 | title `Stub future A2`, parent's steps | [parent] | `[same causal steps as future 1]` |
+  | D5 | SC-DEFAULT (identical) | [parent] | `[same future event title as future 1, same causal steps as future 1]` |
+  | D6 | parent's steps reordered / only steps 1, 2, 4 / `  STUB inference. ` variants, new title | [parent] | steps finding |
+  | D7 | new title, one new step `Something new.` | [parent] | `[]` |
+  | D8 | title of future 2, a new step | [parent, other] | `[same future event title as future 2]` |
+  | D9 | new title, steps all from future 2 but one not in the parent's chain | [parent, other] | `[]` |
+- Unit additions `ScenarioGenerationPromptTest.java` (`// @trace FR-30`): GP pack, INITIAL with
+  `Alternative([parent], null, [])` → TASK line after the base lines, block `futures-to-avoid` directly after
+  `custom-wildcards` with exactly the example content, 3 start / 3 end markers; the same request with `NONE` equals
+  the 2-arg `inputText` byte for byte; ALTERNATIVE_DISTINCT attempt 2 with findings `[same future event title as
+  future 1]`, rejected `Stub future A` → both TASK lines in order, block `duplicate-future` = `Rejected future: Stub
+  future A\nsame future event title as future 1` after `futures-to-avoid`; its SCHEMA_CORRECTION (attempt 3) → TASK
+  lines alternative, duplicate, schema and blocks `futures-to-avoid`, `duplicate-future`, `schema-errors` (last);
+  CRITIC_REGENERATION with CR-ICS issues → blocks `futures-to-avoid`, `critique`, no `duplicate-future`;
+  GUARD_REGENERATION → `futures-to-avoid`, `guard-violations`; avoided title `Mars <<<x>>> | y` → `Future 1: Mars
+  ‹‹‹x››› / y` and no extra marker; 11 avoided futures given → only the first 10 rendered (`Future 10:` present, no
+  `Future 11:`); a future with 13 steps → 12 step lines + `- … and 1 more steps`; a 301-code-point statement → 300 +
+  `…`, a 300-code-point statement verbatim; `body(..., alt)` keys exactly `model, instructions, input, text, store`,
+  `instructions` = `INSTRUCTIONS`.
+- IT `backend/src/test/java/com/oracul/app/runs/AlternativeRunIT.java` (extends `AbstractStoryIT`;
+  `// @trace FR-30`; V4 fixtures, body `A`, pacing PT0S, `oracul.openai.retry-delay=PT0S`; P = `runV4(A)` awaited
+  COMPLETED with headline; `alt(sid, id)` = `POST /api/runs/<id>/alternatives` with the session cookie; requests
+  "after" = recorded after the alternative POST):
+  | # | Setup | Expected |
+  |---|---|---|
+  | 1 | defaults (acceptance 1 + 2) | API rows #1 + stored row; alternative awaited COMPLETED with headline, `kind` ALTERNATIVE, `stageIndex` 10; Responses purposes after = SCENARIO_GENERATION, SCENARIO_CRITIC, STORY_WRITING (no QUERY_EXPANSION / EVENT_*), GDELT and metadata request counts unchanged; `G` (its SG text) has `Attempt: 1 \| Reason: INITIAL`, the alternative TASK line, `evidence-pack` block = P's `getEvidencePack.promptText`, `futures-to-avoid` block = the example content; `getEvidencePack(alt)` deep-equals `getEvidencePack(P)`; `getStructuredScenario(alt).structuredScenario.futureEvent.title` `Stub alternative future 1` ≠ P's `Stub future A`; the alternative chain contains `Stub alternative speculation 1.`, absent from P's chain; `getRun(alt).counts` = P's counts except `sourcesUsed` (= 1 here); `getRunResearch(alt)` `researchProfile` / `searchPlan` deep-equal P's; `getFutureResult(alt)` 200 with `sources` deep-equal P's `sources`; P's row unchanged |
+  | 2 | #1 with `oracul.run.min-stage-duration=PT2S`, `getRun` polled every 200 ms | observed `stageIndex` values ⊆ {0, 7, 8, 9, 10}, non-decreasing, 7 observed |
+  | 3 | alternative A1 of P, then alternative A2 of A1 | A2's `futures-to-avoid`: `Future 1: Stub alternative future 1` (parent A1) then `Future 2: Stub future A`; A2 COMPLETED with title `Stub alternative future 2`; A2 `evidencePackId` = P's |
+  | 4 | SG answers for the alternative: 1 → SC-DEFAULT (repeat), then default (acceptance 2, regenerate once) | COMPLETED; SG reasons `[INITIAL, ALTERNATIVE_DISTINCT]`; `G(2)` has the duplicate TASK line and `duplicate-future` = `Rejected future: Stub future A\nsame future event title as future 1\nsame causal steps as future 1`, and still `futures-to-avoid`; 2 SCENARIO_CRITIC requests (attempts 1, 2); accepted attempt 2 |
+  | 5 | SG for the alternative always SC-DEFAULT | FAILED `{"code":"ALTERNATIVE_NOT_DISTINCT","message":"ORACUL could not find a different future — try changing a setting"}`, `stage` CONSTRUCTING_SCENARIO, `stageIndex` 9, no headline, `completedAt` set; 2 SG requests; 0 STORY_WRITING after; `final_attempt` null; `getFutureResult` 409 `RESULT_NOT_READY`; slot released (`startRun` → 202) |
+  | 6 | SG for the alternative: 1 → SC-DEFAULT with title `  stub FUTURE a ` and SC-ALT(1) steps, then default | as #4 with findings `[same future event title as future 1]` only |
+  | 7 | SG for the alternative: 1 → SC-ALT(1) with title `Stub alternative future 1` but P's 4 step statements, then default | as #4 with findings `[same causal steps as future 1]` only |
+  | 8 | SG for the alternative: 1 → `not json`, 2 → SC-DEFAULT, 3 → `not json` | FAILED `INVALID_SCENARIO`, `stageIndex` 9; reasons `[INITIAL, SCHEMA_CORRECTION, ALTERNATIVE_DISTINCT]` (no second schema correction) |
+  | 9 | alternative's first SG answers 429 | FAILED `CHATGPT_RATE_LIMITED`, `stage` EXPLORING_FUTURES, `stageIndex` 7; P unchanged |
+  | 10 | API rows #3–#10 | as the table |
+  | 11 | after #1: `GET /api/runs` (same cookie) | contains the alternative (first, headline set) and P |
+  | 12 | a STANDARD run after the alternative (`startRun(A)`) | its SG text has no `futures-to-avoid` / `duplicate-future` block and no alternative TASK line; its research runs (QUERY_EXPANSION present) |
+
+### Frontend (`src/app/runs/`)
+- `RunStore.startAlternative(parentRunId: string): void`: ignored while `starting()`; sets `starting` true;
+  `RunsService.startAlternativeRun({ runId: parentRunId })` (`POST /api/runs/<parentRunId>/alternatives`, no body).
+  202 → exactly the `start` success flow (reset, `run` = response, polling 1000 ms, `router.navigate(['/futures',
+  id], { replaceUrl: true })`) plus `ScenarioStore.load(run.configuration)` (= the parent's configuration). Error →
+  the `start` error flow (snackbar `run-error-message` with `ApiError.message` or "Something went wrong — try
+  again"; `ConnectionStore.load()` on the 3 connection codes); URL, `result-view` and panel unchanged.
+- `QuickActions` (`app-quick-actions`) gains a 5th `mat-stroked-button` last in `quick-actions`:
+  `data-testid="quick-alternative"`, text exactly `ALTERNATIVE FUTURE`. Disabled (native `disabled`) iff
+  `!ConnectionStore.canGenerate()` or `RunStore.starting()` or `RunStore.active()` or `RunStore.run()?.status !==
+  'COMPLETED'`. Click on an enabled button → `RunStore.startAlternative(RunStore.run()!.id)`; no `ScenarioStore`
+  change before the response, no `POST /api/runs`. The 4 slice-16 buttons are unchanged.
+
+### Frontend unit tests (Vitest; `// @trace FR-30`)
+- `src/app/runs/quick-actions.spec.ts`: the slice-16 rendering test now expects 5 buttons
+  `[quick-more-realistic, quick-darker, quick-more-optimistic, quick-more-extreme, quick-alternative]` with texts
+  `[MORE REALISTIC, DARKER, MORE OPTIMISTIC, MORE EXTREME, ALTERNATIVE FUTURE]` (its `// @trace FR-29` stays, add
+  FR-30). New: enabled for a COMPLETED run with `canGenerate`; disabled when `canGenerate` false / `starting()` /
+  `active()` — click then → 0 requests; click → exactly 1 `POST /api/runs/<runId>/alternatives` with body `null` and 0
+  `POST /api/runs`; while pending a second click → still 1 request; 202 (QUEUED ALTERNATIVE run, configuration = the
+  parent's) → URL `/futures/<newId>`, `ScenarioStore.configuration()` deep-equals the parent's configuration even
+  after a panel edit (darkness 3) made before the click; 409 `RUN_NOT_COMPLETED` → `run-error-message` "Only a
+  completed future can have an alternative", URL unchanged, button enabled again; 409 `RUN_ALREADY_ACTIVE` → "A
+  generation is already running"; 401 `CHATGPT_NOT_CONNECTED` → message + `ConnectionStore.load()`; status 0 →
+  "Something went wrong — try again".
+- `src/app/runs/run.store.spec.ts` (new `describe('slice 17_alternative-future')`): `startAlternative('P')` → one
+  POST to `/api/runs/P/alternatives`; 202 → `run()` = response, polls `GET /api/runs/<newId>` after 1000 ms; a call
+  while `starting()` sends nothing.
+
+### E2E (`e2e/tests/alternative-future.spec.ts`; `// @trace FR-30`; serial; `resetStub` (also `/__control/scenario` `ok`) and `connect` as `quick-regeneration.spec.ts`; fresh context per test; `test.setTimeout(120_000)`)
+E2E stub (`e2e/stubs/server.mjs`): SCENARIO_GENERATION requests containing `name="futures-to-avoid"` answer SC-ALT(k)
+(as the backend stub, built from `scenarioDefault`); `/__control/scenario` gains modes `alt-repeat-once` (first
+alternative SG request → SC-DEFAULT, later ones SC-ALT(k)) and `alt-repeat` (every alternative SG request →
+SC-DEFAULT); STANDARD requests ignore these two modes (SC-DEFAULT); a separate counter `alternativeCalls`, reset by
+`/__control/reset`.
+1. Acceptance 1 + 2: connect; panel defaults (body `B`); `generate-button` → `result-view` (60 s), run 1 id from the
+   URL; `quick-alternative` visible, text `ALTERNATIVE FUTURE`, enabled; remember the GDELT request count
+   (`GET /__control/requests?kind=gdelt`); click with `page.waitForRequest` on `POST
+   /api/runs/<run1>/alternatives`; URL becomes `/futures/<run2>` (≠ run 1); `slider-darkness-input` value `5`;
+   `GET /api/runs/<run2>` → `kind` ALTERNATIVE, `parentRunId` run 1, `evidencePackId` = run 1's; wait for
+   `result-view` (60 s); GDELT request count unchanged; the last SCENARIO_GENERATION request's input text contains
+   `<<<ORACUL_UNTRUSTED_DATA name="futures-to-avoid">>>` and `Future 1: Stub future A`;
+   `GET /api/runs/<run2>/structured-scenario` → `structuredScenario.futureEvent.title` `Stub alternative future 1`
+   ≠ run 1's; some `causalChain[].statement` of run 2 is absent from run 1's chain. Evidence `FR-30
+   alternative-result`. Open `recent-futures-button` → `recent-future-<run2>` and `recent-future-<run1>` present.
+2. Not distinct: mode `alt-repeat`; generate, `result-view`; `quick-alternative` → `failure-view` with
+   `failure-message` "ORACUL could not find a different future — try changing a setting" (60 s); `GET
+   /api/runs/<run2>` `failure.code` ALTERNATIVE_NOT_DISTINCT. Evidence `FR-30 alternative-not-distinct`.
+3. Mode `alt-repeat-once`: alternative reaches `result-view`; 2 SCENARIO_GENERATION requests after the click, the
+   second contains `Reason: ALTERNATIVE_DISTINCT` and `name="duplicate-future"`.
+
+### data-testid (this slice)
+New in use: `quick-alternative`. Reused: `quick-actions`, `result-view`, `progress-view`, `failure-view`,
+`failure-message`, `generate-button`, `run-error-message`, `slider-darkness-input`, `recent-futures-button`,
+`recent-future-<runId>`, `chatgpt-status`, `chatgpt-connect`.

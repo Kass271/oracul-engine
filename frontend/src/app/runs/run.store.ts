@@ -64,6 +64,30 @@ export class RunStore {
     });
   }
 
+  startAlternative(parentRunId: string): void {
+    if (this.starting()) return;
+    this.starting.set(true);
+    this.api.startAlternativeRun({ runId: parentRunId }).subscribe({
+      next: (run) => {
+        this.starting.set(false);
+        this.reset();
+        this.run.set(run);
+        this.runId = run.id;
+        this.panel.load(run.configuration);
+        this.schedule();
+        void this.router.navigate(['/futures', run.id], { replaceUrl: true });
+      },
+      error: (err: unknown) => {
+        this.starting.set(false);
+        const body = err instanceof HttpErrorResponse ? err.error : null;
+        const isApiError =
+          body && typeof body === 'object' && typeof body.code === 'string' && typeof body.message === 'string';
+        this.showError(isApiError ? body.message : GENERIC_ERROR);
+        if (isApiError && CONNECTION_CODES.includes(body.code)) this.connection.load();
+      },
+    });
+  }
+
   open(runId: string): void {
     if (this.runId === runId && this.run() && !this.notFound()) {
       // Already tracking this run; keep polling if still active.

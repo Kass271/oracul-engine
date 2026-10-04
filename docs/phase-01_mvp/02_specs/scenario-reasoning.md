@@ -145,6 +145,8 @@ in SETTINGS), causal coherence and counter-signals; Darkness never permits inven
 SCENARIO_GENERATION for ALTERNATIVE runs adds the data block `futures-to-avoid` (title + chain statements of earlier
 futures on this pack) and the TASK line "Follow a different causal path than every future listed in
 futures-to-avoid; do not paraphrase them." The distinctness check of generation-runs.md FR-30 runs after the critic.
+Exact block layout, the `duplicate-future` block of ALTERNATIVE_DISTINCT, block/TASK-line order and bounds:
+generation-runs.md "Slice 17_alternative-future — FR-30 test contract" (wins where more precise).
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |

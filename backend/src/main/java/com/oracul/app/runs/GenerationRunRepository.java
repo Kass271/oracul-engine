@@ -58,6 +58,29 @@ public class GenerationRunRepository {
             id, generationId, sessionId, write(cfg), write(new ResearchCounts(0, 0, 0, 0, 0, 0, 0)), deadline, now, now);
     }
 
+    /** True when the run is COMPLETED with an accepted attempt and an Evidence Pack. */
+    boolean isCompletedWithScenario(UUID id) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists (select 1 from generation_run where id = ? "
+            + "and status = 'COMPLETED' and final_attempt is not null and evidence_pack_id is not null)",
+            Boolean.class, id));
+    }
+
+    /** Inserts a QUEUED ALTERNATIVE run that copies the parent's configuration, research data and pack. */
+    void insertAlternativeQueued(UUID id, String generationId, UUID sessionId, UUID parentId,
+                                 OffsetDateTime now, OffsetDateTime deadline) {
+        jdbc.update("insert into generation_run (id, generation_id, session_id, kind, parent_run_id, status, "
+                + "configuration, research_profile, search_plan, counts, evidence_pack_id, deadline_at, created_at, "
+                + "updated_at) select ?, ?, ?, 'ALTERNATIVE', p.id, 'QUEUED', p.configuration, p.research_profile, "
+                + "p.search_plan, p.counts, p.evidence_pack_id, ?, ?, ? from generation_run p where p.id = ?",
+            id, generationId, sessionId, deadline, now, now, parentId);
+    }
+
+    /** QUEUED to RUNNING at stage EXPLORING_FUTURES for ALTERNATIVE runs, only before the deadline. */
+    boolean startRunningAlternative(UUID id, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'RUNNING', stage = 'EXPLORING_FUTURES', updated_at = ? "
+            + "where id = ? and status = 'QUEUED' and deadline_at > ?", now, id, now) == 1;
+    }
+
     /** Stage transition of an active run. */
     void markStage(UUID id, RunStage stage, OffsetDateTime now) {
         jdbc.update("update generation_run set stage = ?, updated_at = ? where id = ? and status = 'RUNNING'",

@@ -275,6 +275,192 @@ class ScenarioGenerationPromptTest {
         assertThat(text).contains(START + "guard-violations\">>>");
     }
 
+    // ---- slice 17_alternative-future additions ------------------------------------------------------------------------
+
+    private static final String ALT_TASK =
+        "Follow a different causal path than every future listed in futures-to-avoid; do not paraphrase them.";
+    private static final String DUP_TASK = "Your previous scenario repeated a future listed in futures-to-avoid. Return a new complete "
+        + "scenario with a different future event and at least one different causal step; the problems are listed in duplicate-future.";
+    private static final String SCHEMA_TASK =
+        "Your previous answer was invalid. Fix the errors listed in schema-errors and return the complete scenario again.";
+
+    private static Object parentFuture() {
+        return ReasoningHarness.avoided("Stub future A", "Stub fact citing E001.", "Stub inference.", "Stub speculation.", "Stub future event.");
+    }
+
+    private static final List<String> PARENT_BLOCK = List.of("Future 1: Stub future A", "- Stub fact citing E001.", "- Stub inference.",
+        "- Stub speculation.", "- Stub future event.");
+
+    private static List<String> blockOf(String name, List<String> content) {
+        return block(name, content.toArray(new String[0]));
+    }
+
+    private static String altText(EvidencePack pack, Object request, Object alt, List<String> tasks, List<String> blocks, String attemptLine) {
+        return expected(pack, attemptLine, "5 years", "2031-10-02", "New pandemic 8 | Humanoid robot boom 6", tasks, "none", blocks);
+    }
+
+    private static String futuresBlockContent(String text) {
+        String open = START + "futures-to-avoid\">>>\n";
+        int from = text.indexOf(open) + open.length();
+        return text.substring(from, text.indexOf("\n" + END, from));
+    }
+
+    // @trace FR-30
+    @Test
+    void anInitialAlternativeRequestAddsTheTaskLineAndTheFuturesToAvoidBlockAfterCustomWildcards() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        Object alt = ReasoningHarness.alternative(List.of(parentFuture()), null, List.of());
+        String text = ReasoningHarness.inputText(pack, initial(), alt);
+        assertThat(text).isEqualTo(altText(pack, initial(), alt, List.of(ALT_TASK), blockOf("futures-to-avoid", PARENT_BLOCK),
+            "Attempt: 1 | Reason: INITIAL"));
+        assertThat(futuresBlockContent(text)).isEqualTo(String.join("\n", PARENT_BLOCK));
+        assertThat(text.split("<<<END_ORACUL_UNTRUSTED_DATA>>>", -1)).hasSize(4);
+        assertThat(text.split("<<<ORACUL_UNTRUSTED_DATA name=", -1)).hasSize(4);
+    }
+
+    // @trace FR-30
+    @Test
+    void theNoneAlternativeEqualsTheTwoArgumentInputTextByteForByte() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        assertThat(ReasoningHarness.inputText(pack, initial(), ReasoningHarness.alternativeNone())).isEqualTo(inputText(pack, initial()));
+        Object guard = generationRequest(2, "GUARD_REGENERATION", List.of(), List.of(
+            violation(GuardViolationType.CAUSAL_CHAIN_INVALID, null, null, "causal chain: no FACT step remains", GuardAction.REGENERATION_REQUESTED)));
+        assertThat(ReasoningHarness.inputText(pack, guard, ReasoningHarness.alternativeNone())).isEqualTo(inputText(pack, guard));
+        assertThat(inputText(pack, initial())).doesNotContain("futures-to-avoid").doesNotContain("duplicate-future");
+    }
+
+    // @trace FR-30
+    @Test
+    void anAlternativeDistinctAttemptAddsBothTaskLinesAndTheDuplicateFutureBlockAfterFuturesToAvoid() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        List<String> findings = List.of("same future event title as future 1");
+        Object alt = ReasoningHarness.alternative(List.of(parentFuture()), "Stub future A", findings);
+        Object req = generationRequest(2, "ALTERNATIVE_DISTINCT", List.of(), List.of());
+        String text = ReasoningHarness.inputText(pack, req, alt);
+        List<String> blocks = new ArrayList<>(blockOf("futures-to-avoid", PARENT_BLOCK));
+        blocks.addAll(block("duplicate-future", "Rejected future: Stub future A", "same future event title as future 1"));
+        assertThat(text).isEqualTo(altText(pack, req, alt, List.of(ALT_TASK, DUP_TASK), blocks, "Attempt: 2 | Reason: ALTERNATIVE_DISTINCT"));
+    }
+
+    // @trace FR-30
+    @Test
+    void aSchemaCorrectionOfAnAlternativeDistinctRepeatsTheDuplicateLineAndBlock() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        Object alt = ReasoningHarness.alternative(List.of(parentFuture()), "Stub future A", List.of("same future event title as future 1"));
+        Object req = generationRequest(3, "SCHEMA_CORRECTION", List.of("output is not valid JSON"), List.of());
+        String text = ReasoningHarness.inputText(pack, req, alt);
+        List<String> blocks = new ArrayList<>(blockOf("futures-to-avoid", PARENT_BLOCK));
+        blocks.addAll(block("duplicate-future", "Rejected future: Stub future A", "same future event title as future 1"));
+        blocks.addAll(block("schema-errors", "output is not valid JSON"));
+        assertThat(text).isEqualTo(altText(pack, req, alt, List.of(ALT_TASK, DUP_TASK, SCHEMA_TASK), blocks, "Attempt: 3 | Reason: SCHEMA_CORRECTION"));
+        assertThat(text.lastIndexOf(START)).isEqualTo(text.indexOf(START + "schema-errors\">>>"));
+    }
+
+    // @trace FR-30
+    @Test
+    void aCriticRegenerationOfAnAlternativeCarriesFuturesToAvoidAndCritiqueButNoDuplicateFuture() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        Object alt = ReasoningHarness.alternative(List.of(parentFuture()), null, List.of());
+        Object req = generationRequest(2, "CRITIC_REGENERATION", List.of(), List.of(), CERT);
+        String text = ReasoningHarness.inputText(pack, req, alt);
+        List<String> blocks = new ArrayList<>(blockOf("futures-to-avoid", PARENT_BLOCK));
+        blocks.addAll(block("critique", "INAPPROPRIATE_CERTAINTY | P1 is stated as a certain fact.",
+            "UNREALISTIC_TIMELINE | The future event comes too early for the causal chain."));
+        assertThat(text).isEqualTo(altText(pack, req, alt, List.of(ALT_TASK, CRITIQUE_TASK), blocks, "Attempt: 2 | Reason: CRITIC_REGENERATION"));
+        assertThat(text).doesNotContain("duplicate-future");
+    }
+
+    // @trace FR-30
+    @Test
+    void aGuardRegenerationOfAnAlternativeCarriesFuturesToAvoidAndGuardViolationsButNoDuplicateFuture() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        Object alt = ReasoningHarness.alternative(List.of(parentFuture()), null, List.of());
+        GuardViolation v = violation(GuardViolationType.CAUSAL_CHAIN_INVALID, null, null, "causal chain: no FACT step remains",
+            GuardAction.REGENERATION_REQUESTED);
+        Object req = generationRequest(2, "GUARD_REGENERATION", List.of(), List.of(v));
+        String text = ReasoningHarness.inputText(pack, req, alt);
+        List<String> blocks = new ArrayList<>(blockOf("futures-to-avoid", PARENT_BLOCK));
+        blocks.addAll(block("guard-violations", "CAUSAL_CHAIN_INVALID | - | - | causal chain: no FACT step remains"));
+        assertThat(text).isEqualTo(altText(pack, req, alt, List.of(ALT_TASK,
+            "Your previous scenario failed the Evidence Guard. Return a new complete scenario without the problems listed in guard-violations."),
+            blocks, "Attempt: 2 | Reason: GUARD_REGENERATION"));
+        assertThat(text).doesNotContain("duplicate-future");
+    }
+
+    // @trace FR-30
+    @Test
+    void anAvoidedTitleIsSanitizedWithTheDataLineRule() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        Object alt = ReasoningHarness.alternative(List.of(ReasoningHarness.avoided("Mars <<<x>>> | y", "step")), null, List.of());
+        String text = ReasoningHarness.inputText(pack, initial(), alt);
+        assertThat(futuresBlockContent(text)).isEqualTo("Future 1: Mars ‹‹‹x››› / y\n- step");
+        assertThat(text).doesNotContain("Mars <<<x>>>");
+        assertThat(text.split("<<<END_ORACUL_UNTRUSTED_DATA>>>", -1)).hasSize(4);
+        assertThat(text.split("<<<ORACUL_UNTRUSTED_DATA name=", -1)).hasSize(4);
+    }
+
+    // @trace FR-30
+    @Test
+    void atMostTenFuturesAreRendered() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        List<Object> futures = new ArrayList<>();
+        for (int i = 1; i <= 11; i++) futures.add(ReasoningHarness.avoided("Title " + i, "step " + i));
+        String block = futuresBlockContent(ReasoningHarness.inputText(pack, initial(), ReasoningHarness.alternative(futures, null, List.of())));
+        assertThat(block).contains("Future 10: Title 10").doesNotContain("Future 11:").doesNotContain("Title 11");
+        assertThat(block.lines().filter(l -> l.startsWith("Future ")).count()).isEqualTo(10);
+    }
+
+    // @trace FR-30
+    @Test
+    void atMostTwelveStepLinesPerFutureThenAnOverflowLine() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        for (int total : new int[] {12, 13, 15}) {
+            List<String> steps = new ArrayList<>();
+            for (int i = 1; i <= total; i++) steps.add("step " + i);
+            String block = futuresBlockContent(ReasoningHarness.inputText(pack, initial(),
+                ReasoningHarness.alternative(List.of(ReasoningHarness.avoided("T", steps)), null, List.of())));
+            List<String> lines = List.of(block.split("\n"));
+            if (total == 12) {
+                assertThat(lines).hasSize(13).doesNotContain("- … and 0 more steps");
+                assertThat(lines.get(12)).isEqualTo("- step 12");
+            } else {
+                assertThat(lines).hasSize(14);
+                assertThat(lines.get(12)).isEqualTo("- step 12");
+                assertThat(lines.get(13)).isEqualTo("- … and " + (total - 12) + " more steps");
+            }
+        }
+        assertThat(ReasoningHarness.inputText(pack, initial(), ReasoningHarness.alternative(List.of(ReasoningHarness.avoided("T",
+            java.util.stream.IntStream.rangeClosed(1, 13).mapToObj(i -> "s" + i).toList())), null, List.of())))
+            .contains("\n- … and 1 more steps\n");
+    }
+
+    // @trace FR-30
+    @Test
+    void aStatementIsCutAt300CodePointsPlusEllipsis() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        String s300 = "x".repeat(300);
+        String s301 = "y".repeat(301);
+        String block = futuresBlockContent(ReasoningHarness.inputText(pack, initial(),
+            ReasoningHarness.alternative(List.of(ReasoningHarness.avoided("T", s300, s301)), null, List.of())));
+        assertThat(block).contains("\n- " + s300 + "\n");
+        assertThat(block).contains("\n- " + "y".repeat(300) + "…");
+        assertThat(block).doesNotContain("y".repeat(301));
+    }
+
+    // @trace FR-30
+    @Test
+    void theAlternativeBodyHasExactlyTheFiveKeysAndTheStandardInstructions() {
+        EvidencePack pack = ReasoningHarness.v4Pack();
+        Object alt = ReasoningHarness.alternative(List.of(parentFuture()), null, List.of());
+        Map<String, Object> body = ReasoningHarness.body("stub-model", pack, initial(), alt);
+        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store");
+        assertThat(body.get("instructions")).isEqualTo(ReasoningHarness.instructions());
+        assertThat(body.get("store")).isEqualTo(false);
+        JsonNode tree = MAPPER.valueToTree(body);
+        assertThat(tree.get("input").get(0).get("content").get(0).get("text").asText())
+            .isEqualTo(ReasoningHarness.inputText(pack, initial(), alt));
+    }
+
     private static List<String> concat(List<String> a, List<String> b) {
         List<String> out = new ArrayList<>(a);
         out.addAll(b);

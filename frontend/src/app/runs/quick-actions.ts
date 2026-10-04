@@ -21,6 +21,7 @@ export function quickTarget(action: QuickAction, value: number): number | null {
       <button mat-stroked-button data-testid="quick-darker" [disabled]="off('DARKER')" (click)="go('DARKER')">DARKER</button>
       <button mat-stroked-button data-testid="quick-more-optimistic" [disabled]="off('MORE_OPTIMISTIC')" (click)="go('MORE_OPTIMISTIC')">MORE OPTIMISTIC</button>
       <button mat-stroked-button data-testid="quick-more-extreme" [disabled]="off('MORE_EXTREME')" (click)="go('MORE_EXTREME')">MORE EXTREME</button>
+      <button mat-stroked-button data-testid="quick-alternative" [disabled]="blocked() || !runs.run()" (click)="alternative()">ALTERNATIVE FUTURE</button>
     </div>
   `,
   styles: `.quick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }`,
@@ -30,7 +31,7 @@ export class QuickActions {
   private readonly runs = inject(RunStore);
   private readonly scenario = inject(ScenarioStore);
 
-  private readonly blocked = computed(
+  protected readonly blocked = computed(
     () => !this.connection.canGenerate() || this.runs.starting() || this.runs.active(),
   );
 
@@ -41,6 +42,12 @@ export class QuickActions {
 
   protected off(a: QuickAction): boolean {
     return this.blocked() || this.target(a) === null;
+  }
+
+  protected alternative(): void {
+    const run = this.runs.run();
+    if (this.blocked() || !run) return;
+    this.runs.startAlternative(run.id);
   }
 
   protected go(a: QuickAction): void {

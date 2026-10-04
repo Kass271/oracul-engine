@@ -55,6 +55,20 @@ public final class ReasoningHarness {
         }
     }
 
+    /** First existing class among top-level and nested homes of a record the spec does not pin to one file. */
+    public static Class<?> typeAny(String simple, String... nestedIn) {
+        List<String> names = new ArrayList<>(List.of(simple));
+        for (String outer : nestedIn) names.add(outer + "$" + simple);
+        for (String n : names) {
+            try {
+                return Class.forName(PKG + n);
+            } catch (ClassNotFoundException ignored) {
+                // try the next home
+            }
+        }
+        throw new AssertionError(PKG + simple + " is missing (looked in " + names + ")");
+    }
+
     public static Object constant(String className, String field) {
         Class<?> type = type(className);
         try {
@@ -169,6 +183,64 @@ public final class ReasoningHarness {
     @SuppressWarnings("unchecked")
     public static Map<String, Object> body(String model, EvidencePack pack, Object request) {
         return (Map<String, Object>) call("ScenarioGenerationPrompt", "body", model, pack, request);
+    }
+
+    // ---- alternative runs (slice 17) ------------------------------------------------------------------------------
+
+    /** AvoidedFuture(title, steps) built reflectively. */
+    public static Object avoided(String title, String... steps) {
+        return avoided(title, List.of(steps));
+    }
+
+    public static Object avoided(String title, List<String> steps) {
+        Class<?> type = typeAny("AvoidedFuture", "AvoidedFutures", "AlternativeDistinctness", "ScenarioGenerationPrompt");
+        try {
+            Constructor<?> ctor = type.getDeclaredConstructor(String.class, List.class);
+            ctor.setAccessible(true);
+            return ctor.newInstance(title, new ArrayList<>(steps));
+        } catch (InvocationTargetException e) {
+            throw new AssertionError("AvoidedFuture constructor failed: " + e.getTargetException(), e.getTargetException());
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("AvoidedFuture(String, List) is missing: " + e, e);
+        }
+    }
+
+    /** Alternative(futuresToAvoid, rejectedTitle, duplicateFindings) built reflectively. */
+    public static Object alternative(List<Object> futures, String rejectedTitle, List<String> findings) {
+        Class<?> type = typeAny("Alternative", "ScenarioGenerationPrompt");
+        try {
+            Constructor<?> ctor = type.getDeclaredConstructor(List.class, String.class, List.class);
+            ctor.setAccessible(true);
+            return ctor.newInstance(new ArrayList<>(futures), rejectedTitle, new ArrayList<>(findings));
+        } catch (InvocationTargetException e) {
+            throw new AssertionError("Alternative constructor failed: " + e.getTargetException(), e.getTargetException());
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Alternative(List, String, List) is missing: " + e, e);
+        }
+    }
+
+    public static Object alternativeNone() {
+        try {
+            Field f = typeAny("Alternative", "ScenarioGenerationPrompt").getDeclaredField("NONE");
+            f.setAccessible(true);
+            return f.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Alternative.NONE is missing: " + e, e);
+        }
+    }
+
+    public static String inputText(EvidencePack pack, Object request, Object alt) {
+        return (String) call("ScenarioGenerationPrompt", "inputText", pack, request, alt);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> body(String model, EvidencePack pack, Object request, Object alt) {
+        return (Map<String, Object>) call("ScenarioGenerationPrompt", "body", model, pack, request, alt);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static List<String> findings(StructuredScenario candidate, List<Object> avoided) {
+        return (List<String>) call("AlternativeDistinctness", "findings", candidate, new ArrayList<>(avoided));
     }
 
     // ---- critic (slice 10) ----------------------------------------------------------------------------------------

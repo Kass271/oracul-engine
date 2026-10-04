@@ -60,7 +60,7 @@ public class FutureResultService {
         List<com.oracul.app.api.model.CriticIssue> openIssues = accepted.criticReport()
             .filter(r -> r.getVerdict() == com.oracul.app.api.model.CriticVerdict.FAIL)
             .map(r -> new ArrayList<>(r.getIssues())).orElseGet(ArrayList::new);
-        EvidencePack pack = packs.find(runId, run.evidencePackId()).orElseThrow(FutureResultService::notReady);
+        EvidencePack pack = packs.findById(run.evidencePackId()).orElseThrow(FutureResultService::notReady);
 
         Set<String> used = new HashSet<>();
         scenario.getFactsUsed().forEach(f -> used.addAll(f.getEvidenceIds()));

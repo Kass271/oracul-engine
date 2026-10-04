@@ -179,4 +179,34 @@ public final class ScenarioFixtures {
             + "\"futureEvent\":{\"title\":\"Stub future A\",\"summary\":\"Stub future event.\",\"date\":\"" + d + "\"},"
             + "\"unknowns\":[]}";
     }
+
+    // ---- SC-ALT(k) (slice 17_alternative-future) ------------------------------------------------------------------
+
+    /** SC-ALT(k): SC-DEFAULT with the titles, speculation and future-event texts of "Stub alternative future k". */
+    public static String scenarioAlternative(String inputText, int k) {
+        return scenarioDefault(inputText)
+            .replace("\"Stub future A\"", "\"Stub alternative future " + k + "\"")
+            .replace("\"Stub future B\"", "\"Stub alternative future " + k + " B\"")
+            .replace("\"Stub speculation.\"", "\"Stub alternative speculation " + k + ".\"")
+            .replace("\"Stub future event.\"", "\"Stub alternative future event " + k + ".\"");
+    }
+
+    /** k = number of lines starting "Future " in the futures-to-avoid block; -1 when the block is missing. */
+    public static int futuresToAvoidCount(String inputText) {
+        String open = "<<<ORACUL_UNTRUSTED_DATA name=\"futures-to-avoid\">>>";
+        int start = inputText.indexOf(open);
+        if (start < 0) return -1;
+        start += open.length();
+        int end = inputText.indexOf("<<<END_ORACUL_UNTRUSTED_DATA>>>", start);
+        String content = end < 0 ? inputText.substring(start) : inputText.substring(start, end);
+        int n = 0;
+        for (String line : content.split("\n")) if (line.startsWith("Future ")) n++;
+        return n;
+    }
+
+    /** Answer of the default responder for an ALTERNATIVE run's request (SC-ALT(k)), SC-DEFAULT otherwise. */
+    public static String alternativeFixture(String inputText) {
+        int k = futuresToAvoidCount(inputText);
+        return k < 0 ? scenarioDefault(inputText) : scenarioAlternative(inputText, k);
+    }
 }

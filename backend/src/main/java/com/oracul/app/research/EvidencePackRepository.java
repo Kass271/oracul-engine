@@ -48,10 +48,17 @@ public class EvidencePackRepository {
             json.writeValueAsString(sourceIds), pack.getPromptText(), createdAt);
     }
 
-    public Optional<EvidencePack> find(UUID runId, UUID packId) {
-        List<EvidencePack> rows = jdbc.query("select id, generation_id, cutoff, configuration, profile, items, "
-                + "source_ids, prompt_text from evidence_pack where id = ? and run_id = ?",
+    /** The run that built the pack (owner of its sources and events). */
+    public Optional<UUID> ownerRunId(UUID packId) {
+        return jdbc.query("select run_id from evidence_pack where id = ?", (rs, i) -> rs.getObject("run_id", UUID.class),
+            packId).stream().findFirst();
+    }
+
+    public Optional<EvidencePack> findById(UUID packId) {
+        List<EvidencePack> rows = jdbc.query("select id, run_id, generation_id, cutoff, configuration, profile, items, "
+                + "source_ids, prompt_text from evidence_pack where id = ?",
             (rs, i) -> {
+                UUID runId = rs.getObject("run_id", UUID.class);
                 Items items = json.readValue(rs.getString("items"), Items.class);
                 List<String> ids = json.readValue(rs.getString("source_ids"), new TypeReference<List<String>>() { });
                 Map<String, Source> all = new java.util.HashMap<>();
@@ -69,7 +76,7 @@ public class EvidencePackRepository {
                     json.readValue(rs.getString("configuration"), ScenarioConfiguration.class),
                     json.readValue(rs.getString("profile"), ResearchProfile.class),
                     items.core(), items.supporting(), items.counterSignals(), referenced, rs.getString("prompt_text"));
-            }, packId, runId);
+            }, packId);
         return rows.stream().findFirst();
     }
 }

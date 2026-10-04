@@ -81,7 +81,7 @@ public class StoryWriter {
 
     private void execute(UUID runId, UUID sessionId) throws InterruptedException {
         var row = runs.find(runId, sessionId).orElseThrow();
-        EvidencePack pack = packs.find(runId, row.evidencePackId()).orElseThrow();
+        EvidencePack pack = packs.findById(row.evidencePackId()).orElseThrow();
         int finalAttempt = attempts.finalAttempt(runId).orElseThrow();
         StructuredScenario scenario = attempts.list(runId).stream()
             .filter(a -> a.attempt() == finalAttempt).findFirst().orElseThrow().cleaned().orElseThrow();

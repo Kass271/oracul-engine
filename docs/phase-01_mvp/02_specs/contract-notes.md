@@ -222,6 +222,15 @@ Stores (signals): ScenarioStore (panel state, shared with quick actions), Connec
    profile, mildly positive real news makes many events counter-signals, so real runs at high realism may often be
    insufficient; the thresholds are configuration and can be tuned. No contract operation changes (descriptions
    only). To confirm at approval.
+17. Slice 17 (generation-runs.md "Slice 17_alternative-future"): an alternative copies the parent's configuration,
+   Research Profile, search plan, counts and Evidence Pack id and starts at EXPLORING_FUTURES (no search, no
+   sufficiency check). "Futures to avoid" = the parent (Future 1) plus every earlier COMPLETED run of the session on
+   the same pack, capped at 10. Distinct = normalized title (trim, collapsed whitespace, lower case) differs from
+   every avoided title AND ≥ 1 causal-step statement is not in the parent's chain; otherwise one ALTERNATIVE_DISTINCT
+   regeneration, then FAILED ALTERNATIVE_NOT_DISTINCT. The check runs at acceptance (after guard and critic). The
+   panel is reloaded with the parent's configuration when the alternative starts (panel edits made on the result view
+   are discarded by ALTERNATIVE FUTURE). Sources / events of an alternative are those of the run that built the pack.
+   Check order 404 → 401/403 → RUN_NOT_COMPLETED → RUN_ALREADY_ACTIVE. To confirm at approval.
 
 ## NFR hooks
 NFR-1 → chatgpt-connection.md FR-9 (no credential column, redactor, no web storage). NFR-2 → generation-runs.md FR-32

@@ -53,6 +53,7 @@ public class ReasoningPipeline {
     private final EvidencePackRepository packs;
     private final ScenarioAttemptRepository attempts;
     private final ModelCallRepository modelCalls;
+    private final AvoidedFutures avoidedFutures;
     private final HttpResponsesClient responses;
     private final ScenarioCritic critic;
     private final RunGuard guard;
@@ -61,7 +62,7 @@ public class ReasoningPipeline {
     private final Duration minStageDuration;
 
     ReasoningPipeline(GenerationRunRepository runs, EvidencePackRepository packs, ScenarioAttemptRepository attempts,
-                      ModelCallRepository modelCalls, HttpResponsesClient responses, ScenarioCritic critic,
+                      ModelCallRepository modelCalls, AvoidedFutures avoidedFutures, HttpResponsesClient responses, ScenarioCritic critic,
                       RunGuard guard,
                       TransactionTemplate tx, Clock clock,
                       @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration) {
@@ -69,6 +70,7 @@ public class ReasoningPipeline {
         this.packs = packs;
         this.attempts = attempts;
         this.modelCalls = modelCalls;
+        this.avoidedFutures = avoidedFutures;
         this.responses = responses;
         this.critic = critic;
         this.guard = guard;
@@ -105,19 +107,24 @@ public class ReasoningPipeline {
 
     private Result execute(UUID runId, UUID sessionId) throws InterruptedException {
         var row = runs.find(runId, sessionId).orElseThrow();
-        EvidencePack pack = packs.find(runId, row.evidencePackId()).orElseThrow();
+        EvidencePack pack = packs.findById(row.evidencePackId()).orElseThrow();
 
         long started = begin(runId, RunStage.EXPLORING_FUTURES);
         if (pack.getCore().isEmpty() && pack.getSupporting().isEmpty() && pack.getCounterSignals().isEmpty()) {
             return Result.EMPTY_PACK;
         }
         State st = new State();
+        boolean alternative = row.kind() == com.oracul.app.api.model.RunKind.ALTERNATIVE;
+        List<AvoidedFutures.AvoidedFuture> avoided = alternative ? avoidedFutures.load(runId) : List.of();
+        ScenarioGenerationPrompt.Alternative base = alternative
+            ? new ScenarioGenerationPrompt.Alternative(avoided, null, List.of()) : ScenarioGenerationPrompt.Alternative.NONE;
+        st.base = base;
         Called current = call(runId, sessionId, pack, new GenerationRequest(++st.attempt,
-            ScenarioAttemptReason.INITIAL, List.of(), List.of(), List.of()));
+            ScenarioAttemptReason.INITIAL, List.of(), List.of(), List.of()), base);
         if (!current.valid()) {
             st.schemaUsed = true;
             current = call(runId, sessionId, pack, new GenerationRequest(++st.attempt,
-                ScenarioAttemptReason.SCHEMA_CORRECTION, current.parse().errors(), List.of(), List.of()));
+                ScenarioAttemptReason.SCHEMA_CORRECTION, current.parse().errors(), List.of(), List.of()), base);
             if (!current.valid()) {
                 fail(runId, "INVALID_SCENARIO", INVALID_MESSAGE);
                 return Result.STOPPED;
@@ -155,7 +162,31 @@ public class ReasoningPipeline {
                 report = critique(runId, sessionId, pack, current, checked);
             }
             if (report.getVerdict() == CriticVerdict.PASS || st.criticUsed) {
-                break;
+                if (!alternative) {
+                    break;
+                }
+                List<String> findings = AlternativeDistinctness.findings(checked.cleaned(), avoided);
+                if (findings.isEmpty()) {
+                    break;
+                }
+                if (st.distinctUsed) {
+                    fail(runId, "ALTERNATIVE_NOT_DISTINCT", com.oracul.app.runs.RunFailures.message(
+                        com.oracul.app.api.model.RunFailureCode.ALTERNATIVE_NOT_DISTINCT));
+                    return Result.STOPPED;
+                }
+                st.distinctUsed = true;
+                String rejected = checked.cleaned().getFutureEvent().getTitle();
+                current = regenerate(runId, sessionId, pack, st, ScenarioAttemptReason.ALTERNATIVE_DISTINCT,
+                    List.of(), List.of(), new ScenarioGenerationPrompt.Alternative(avoided, rejected, findings));
+                if (current == null) {
+                    return Result.STOPPED;
+                }
+                checked = checkNew(runId, pack, current, st.guardUsed);
+                if (checked == null) {
+                    return Result.STOPPED;
+                }
+                report = null;
+                continue;
             }
             st.criticUsed = true;
             current = regenerate(runId, sessionId, pack, st, ScenarioAttemptReason.CRITIC_REGENERATION, List.of(),
@@ -180,6 +211,8 @@ public class ReasoningPipeline {
         boolean schemaUsed;
         boolean guardUsed;
         boolean criticUsed;
+        boolean distinctUsed;
+        ScenarioGenerationPrompt.Alternative base = ScenarioGenerationPrompt.Alternative.NONE;
     }
 
     private static boolean passed(EvidenceGuard.GuardResult r) {
@@ -189,15 +222,21 @@ public class ReasoningPipeline {
     /** A regeneration call with at most one schema correction; null when the run was failed INVALID_SCENARIO. */
     private Called regenerate(UUID runId, UUID sessionId, EvidencePack pack, State st, ScenarioAttemptReason reason,
                               List<GuardViolation> violations, List<CriticIssue> issues) {
+        return regenerate(runId, sessionId, pack, st, reason, violations, issues, st.base);
+    }
+
+    private Called regenerate(UUID runId, UUID sessionId, EvidencePack pack, State st, ScenarioAttemptReason reason,
+                              List<GuardViolation> violations, List<CriticIssue> issues,
+                              ScenarioGenerationPrompt.Alternative alt) {
         Called c = call(runId, sessionId, pack, new GenerationRequest(++st.attempt, reason, List.of(), violations,
-            issues));
+            issues), alt);
         if (c.valid()) {
             return c;
         }
         if (!st.schemaUsed) {
             st.schemaUsed = true;
             c = call(runId, sessionId, pack, new GenerationRequest(++st.attempt,
-                ScenarioAttemptReason.SCHEMA_CORRECTION, c.parse().errors(), violations, issues));
+                ScenarioAttemptReason.SCHEMA_CORRECTION, c.parse().errors(), violations, issues), alt);
             if (c.valid()) {
                 return c;
             }
@@ -237,8 +276,9 @@ public class ReasoningPipeline {
 
     // ---- calls ------------------------------------------------------------------------------------------------------
 
-    private Called call(UUID runId, UUID sessionId, EvidencePack pack, GenerationRequest req) {
-        var body = ScenarioGenerationPrompt.body(responses.model(), pack, req);
+    private Called call(UUID runId, UUID sessionId, EvidencePack pack, GenerationRequest req,
+                        ScenarioGenerationPrompt.Alternative alt) {
+        var body = ScenarioGenerationPrompt.body(responses.model(), pack, req, alt);
         Long[] callId = new Long[1];
         Runnable beforeSend = () -> {
             if (!guard.check(runId)) {

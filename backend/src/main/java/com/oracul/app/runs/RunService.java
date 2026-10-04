@@ -69,6 +69,37 @@ public class RunService {
         return created;
     }
 
+    public GenerationRun startAlternative(UUID sessionId, UUID parentId) {
+        OffsetDateTime now = clock.instant().truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        UUID id = UUID.randomUUID();
+        for (int attempt = 0; attempt < ID_ATTEMPTS; attempt++) {
+            try {
+                tx.executeWithoutResult(status -> {
+                    if (!runs.isCompletedWithScenario(parentId)) {
+                        throw new ApiException(HttpStatus.CONFLICT, "RUN_NOT_COMPLETED",
+                            "Only a completed future can have an alternative");
+                    }
+                    if (runs.hasActiveRun(sessionId)) {
+                        throw activeConflict();
+                    }
+                    runs.insertAlternativeQueued(id, nextGenerationId(now), sessionId, parentId, now, now.plus(timeout));
+                });
+                break;
+            } catch (DuplicateKeyException e) {
+                String message = String.valueOf(e.getMessage());
+                if (message.contains("one_active_run_per_session")) {
+                    throw activeConflict();
+                }
+                if (attempt == ID_ATTEMPTS - 1) {
+                    throw e;
+                }
+            }
+        }
+        GenerationRun created = toApi(runs.find(id, sessionId).orElseThrow());
+        pipeline.submit(id, sessionId);
+        return created;
+    }
+
     public GenerationRun get(UUID id, UUID sessionId) {
         return toApi(runs.find(id, sessionId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found")));

@@ -1,0 +1,29 @@
+{
+  "slice": "17_alternative-future",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/runs/quick-actions.ts",
+      "line": 24,
+      "fr": "FR-30",
+      "problem": "quick-alternative is disabled on `blocked() || !runs.run()`, while the test contract says disabled iff ... or `RunStore.run()?.status !== 'COMPLETED'`. It works today only because app-quick-actions is rendered inside the COMPLETED result view; the backend would answer 409 RUN_NOT_COMPLETED otherwise.",
+      "fix": "Use `blocked() || runs.run()?.status !== 'COMPLETED'` in the template and in alternative().",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/AlternativeRunIT.java",
+      "line": 202,
+      "fr": "FR-30",
+      "problem": "AvoidedFutures.load selection is only exercised for n = 1 and 2 (IT #1, #3). The spec's range classes n = 10 and n = 11 (parent as Future 1 plus the 9 newest others, oldest other dropped, still oldest first) are not covered. ScenarioGenerationPromptTest only checks the prompt-side cut of a pre-built list of 11.",
+      "fix": "Add an IT that seeds 11 COMPLETED runs on the same pack (jdbc seed, as RecentRunsIT) and asserts the futures-to-avoid order and that the oldest non-parent run is the one dropped.",
+      "status": "open"
+    }
+  ]
+}

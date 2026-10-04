@@ -43,7 +43,18 @@ public class RunsController implements RunsApi {
 
     @Override
     public ResponseEntity<GenerationRun> startAlternativeRun(java.util.UUID runId) {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        CurrentSession current = session.getIfAvailable();
+        RunService service = runs.getObject();
+        if (current == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found");
+        }
+        service.get(runId, current.id()); // 404 for unknown / foreign runs
+        ChatGptAuthService chatGpt = auth.getIfAvailable();
+        if (chatGpt == null) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "CHATGPT_NOT_CONNECTED", "Connect ChatGPT to generate");
+        }
+        chatGpt.requireUsableCredentials(current.id());
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.startAlternative(current.id(), runId));
     }
 
     @Override

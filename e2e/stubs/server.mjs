@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', scenario: 'ok', scenarioCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [] } };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', scenario: 'ok', scenarioCalls: 0, alternativeCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [] } };
 
 function reset() {
   state.mode = 'ok';
@@ -18,6 +18,7 @@ function reset() {
   state.events = 'ok';
   state.scenario = 'ok';
   state.scenarioCalls = 0;
+  state.alternativeCalls = 0;
   state.critic = 'ok';
   state.criticCalls = 0;
   state.story = 'ok';
@@ -61,7 +62,7 @@ const storyDefault = (d) =>
     body: [1, 2, 3].map((k) => `Stub paragraph ${k}` + ' lorem'.repeat(57)).join('\n\n'),
   });
 
-const SCENARIO_MODES = ['ok', 'invalid-once', 'invalid', 'e099', 'guard-fail-once', 'guard-fail', 'bad-after-first'];
+const SCENARIO_MODES = ['ok', 'invalid-once', 'invalid', 'e099', 'guard-fail-once', 'guard-fail', 'bad-after-first', 'alt-repeat-once', 'alt-repeat'];
 const CRITIC_MODES = ['ok', 'fail-once', 'fail', 'malformed', 'rate-limited'];
 // critic-validation fixtures (scenario-reasoning.md FR-22)
 const CR_PASS = '{"verdict":"PASS","issues":[]}';
@@ -108,6 +109,19 @@ function scenarioDefault(text, variant) {
     futureEvent: { title: 'Stub future A', summary: 'Stub future event.', date },
     unknowns: [],
   });
+}
+// SC-ALT (generation-runs.md): SC-DEFAULT with distinct texts; k = number of "Future " lines in futures-to-avoid.
+function scenarioAlt(text, k) {
+  const o = JSON.parse(scenarioDefault(text, 'ok'));
+  o.candidateFutures[0].title = `Stub alternative future ${k}`;
+  o.candidateFutures[1].title = `Stub alternative future ${k} B`;
+  o.futureEvent.title = `Stub alternative future ${k}`;
+  o.futureEvent.summary = `Stub alternative future event ${k}.`;
+  o.speculations[0].statement = `Stub alternative speculation ${k}.`;
+  const step = (n) => o.causalChain.find((s) => s.order === n);
+  step(3).statement = `Stub alternative speculation ${k}.`;
+  step(4).statement = `Stub alternative future event ${k}.`;
+  return JSON.stringify(o);
 }
 const s256 = (v) => createHash('sha256').update(v).digest('base64url');
 
@@ -266,7 +280,11 @@ export const routes = {
     } else if (purpose === 'SCENARIO_GENERATION') {
       const call = ++state.scenarioCalls;
       const m = state.scenario;
-      if (m === 'invalid' || (m === 'invalid-once' && call === 1)) output = 'not json';
+      if (text.includes('name="futures-to-avoid"')) {
+        const altCall = ++state.alternativeCalls;
+        const k = dataBlock(text, 'futures-to-avoid').split('\n').filter((l) => l.startsWith('Future ')).length;
+        output = m === 'alt-repeat' || (m === 'alt-repeat-once' && altCall === 1) ? scenarioDefault(text, 'ok') : scenarioAlt(text, k);
+      } else if (m === 'invalid' || (m === 'invalid-once' && call === 1)) output = 'not json';
       else if (m === 'e099') output = scenarioDefault(text, 'e099');
       else if (m === 'guard-fail' || (m === 'bad-after-first' && call > 1) || (m === 'guard-fail-once' && call === 1)) output = scenarioDefault(text, 'bad');
       else output = scenarioDefault(text, 'ok');

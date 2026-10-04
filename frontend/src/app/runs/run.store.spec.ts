@@ -453,3 +453,46 @@ describe('slice 15_recent-futures: reopening a run loads its configuration into 
     expect(panel.darkness()).toBe(3);
   });
 });
+
+// @trace FR-30
+describe('slice 17_alternative-future', () => {
+  let http: HttpTestingController;
+  const NEW_ID = '99999999-2222-3333-4444-555555555555';
+  const isAltPost = (r: { url: string; method: string }): boolean => r.method === 'POST' && r.url.endsWith('/api/runs/P/alternatives');
+  const isNewGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${NEW_ID}`);
+  const altRun = (): GenerationRun => ({ ...queued(), id: NEW_ID, kind: 'ALTERNATIVE', parentRunId: 'P' }) as unknown as GenerationRun;
+
+  const startAlt = (store: RunStore, id: string): void => (store as unknown as { startAlternative(id: string): void }).startAlternative(id);
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    TestBed.inject(RunStore).stop();
+    http.match(() => true);
+    vi.useRealTimers();
+  });
+
+  // @trace FR-30
+  it('startAlternative sends one POST /api/runs/P/alternatives; 202 sets run() and polls the new run after 1000 ms', async () => {
+    const store = TestBed.inject(RunStore);
+    startAlt(store, 'P');
+    http.expectOne(isAltPost).flush(altRun(), { status: 202, statusText: 'Accepted' });
+    expect(store.run()?.id).toBe(NEW_ID);
+    expect(http.match(isNewGet)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(http.match(isNewGet)).toHaveLength(1);
+  });
+
+  // @trace FR-30
+  it('a call while starting() sends nothing', () => {
+    const store = TestBed.inject(RunStore);
+    startAlt(store, 'P');
+    expect(store.starting()).toBe(true);
+    startAlt(store, 'P');
+    expect(http.match(isAltPost)).toHaveLength(1);
+  });
+});

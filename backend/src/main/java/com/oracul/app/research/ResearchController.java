@@ -50,7 +50,7 @@ public class ResearchController implements ResearchApi {
         if (run.evidencePackId() == null) {
             throw new ApiException(HttpStatus.CONFLICT, "EVIDENCE_PACK_NOT_READY", "The Evidence Pack is not ready yet");
         }
-        return ResponseEntity.ok(packs.getObject().find(run.id(), run.evidencePackId())
+        return ResponseEntity.ok(packs.getObject().findById(run.evidencePackId())
             .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "EVIDENCE_PACK_NOT_READY",
                 "The Evidence Pack is not ready yet")));
     }
@@ -59,13 +59,20 @@ public class ResearchController implements ResearchApi {
     public ResponseEntity<EventList> listRunEvents(UUID runId) {
         var run = runs.getObject().find(runId, session.getObject().id())
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found"));
-        return ResponseEntity.ok(new EventList(events.getObject().list(run.id())));
+        return ResponseEntity.ok(new EventList(events.getObject().list(owner(run))));
     }
 
     @Override
     public ResponseEntity<SourceList> listRunSources(UUID runId) {
         var run = runs.getObject().find(runId, session.getObject().id())
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found"));
-        return ResponseEntity.ok(new SourceList(sources.getObject().list(run.id())));
+        return ResponseEntity.ok(new SourceList(sources.getObject().list(owner(run))));
+    }
+
+    private UUID owner(GenerationRunRepository.Row run) {
+        if (run.evidencePackId() == null) {
+            return run.id();
+        }
+        return packs.getObject().ownerRunId(run.evidencePackId()).orElse(run.id());
     }
 }

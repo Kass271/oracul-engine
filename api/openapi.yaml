@@ -257,6 +257,19 @@ paths:
       tags: [runs]
       operationId: startAlternativeRun
       summary: ALTERNATIVE FUTURE — new run with the same configuration and the same Evidence Pack, different causal path
+      description: |
+        No request body (a body is ignored). Checks in this order: runId unknown, malformed or of another session →
+        404 RUN_NOT_FOUND "Future not found"; ChatGPT not connected → 401 CHATGPT_NOT_CONNECTED "Connect ChatGPT to
+        generate"; refresh failed → 401 CHATGPT_SESSION_EXPIRED "ChatGPT session expired — please reconnect"; plan not
+        eligible → 403 CHATGPT_PLAN_NOT_ELIGIBLE "Your ChatGPT plan is not eligible for ORACUL"; parent not COMPLETED
+        with an accepted scenario and an Evidence Pack (FAILED, INSUFFICIENT_EVIDENCE, QUEUED, RUNNING, or COMPLETED
+        without them) → 409 RUN_NOT_COMPLETED "Only a completed future can have an alternative"; another run of the
+        session QUEUED/RUNNING → 409 RUN_ALREADY_ACTIVE "A generation is already running". Nothing is stored on an error.
+        202 body: kind ALTERNATIVE, parentRunId = runId, status QUEUED, stageIndex 0, configuration deep-equal to the
+        parent's, evidencePackId = the parent's, counts equal to the parent's. The run skips stages 1–6 (no search;
+        it goes from QUEUED to EXPLORING_FUTURES), lists the parent's and every earlier future on the same Evidence Pack
+        as futures to avoid, and ends FAILED ALTERNATIVE_NOT_DISTINCT when its future repeats one of them after one
+        regeneration (FR-30).
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -310,7 +323,8 @@ paths:
       summary: Every source retrieved for the run after basic filtering (S001…)
       description: |
         Items ordered by id. `items` is empty until READING_SOURCES commits the sources (also for a run that failed
-        with NEWS_UNAVAILABLE). Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
+        with NEWS_UNAVAILABLE). For an ALTERNATIVE run: the sources of the run that built its Evidence Pack. Unknown,
+        malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -334,7 +348,8 @@ paths:
         `items` is empty until stage CONNECTING_SIGNALS commits the events (also for a run that failed before or
         during that stage). Order: ranked events by `ranking.score` descending (ties: sourceQuality desc, date desc,
         id), then unranked events (excluded, or before RANKING) by id ascending — before ranking exists this is id
-        order EV001, EV002, …. Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
+        order EV001, EV002, …. For an ALTERNATIVE run: the events of the run that built its Evidence Pack. Unknown,
+        malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -357,7 +372,8 @@ paths:
       description: |
         200 once stage RANKING has committed the pack (`GenerationRun.evidencePackId` set); the pack is immutable, so
         repeated calls return identical bodies. Also returned for a run whose pack is empty (0 eligible events) and
-        for INSUFFICIENT_EVIDENCE runs (the pack is stored before the sufficiency check).
+        for INSUFFICIENT_EVIDENCE runs (the pack is stored before the sufficiency check). An ALTERNATIVE run returns
+        its parent's pack (same id, identical body) from creation on.
         Run QUEUED / RUNNING before that commit, or ended before stage RANKING → 409 EVIDENCE_PACK_NOT_READY
         "The Evidence Pack is not ready yet". Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
@@ -853,7 +869,7 @@ components:
         parentRunId:
           type: string
           format: uuid
-          description: Set for ALTERNATIVE runs
+          description: Set iff kind is ALTERNATIVE — the run the alternative was started from (startAlternativeRun runId)
         status:
           $ref: '#/components/schemas/RunStatus'
         stage:
