@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ORACUL API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Contract between the Spring Boot backend and the Angular frontend. Both sides are generated from this file.
     Every request is tied to an anonymous browser session (HttpOnly cookie ORACUL_SID, created by the backend on the
@@ -13,7 +13,7 @@ tags:
   - name: scenario
     description: Scenario Panel — catalogue, defaults and current configuration (spec scenario-panel.md)
   - name: chatgpt
-    description: Sign in with ChatGPT, connection status and sign-out (spec chatgpt-connection.md)
+    description: Sign in with ChatGPT, connection status, sign-out and reset (specs phase-01 chatgpt-connection.md, phase-02 chatgpt-connection.md)
   - name: runs
     description: Generation runs — start, progress, alternative futures (spec generation-runs.md)
   - name: research
@@ -74,17 +74,19 @@ paths:
       operationId: startChatGptSignIn
       summary: Browser navigation — starts Sign in with ChatGPT (OAuth 2.0 + PKCE) and redirects to OpenAI
       description: |
-        Creates a fresh state and PKCE verifier in backend memory (bound to this session, single use, 10 min) and
-        answers 302 to the OpenAI authorize endpoint. Never answers with a body the user has to read and never 4xx/5xx:
-        if the authorize URL cannot be built it answers 302 to <frontend-base-url>/?chatgpt=not_completed.
-        First sign-in (no persisted client id) uses client_id=dynamic_agent_client plus ext_agent_host_id and
-        agent_name_hint=ORACUL; later sign-ins use the persisted oaiapp_… client id.
+        Creates a fresh state, OIDC nonce and PKCE verifier in backend memory (bound to this session, single use,
+        10 min) and answers 302 to the OpenAI authorize endpoint. Never answers with a body the user has to read and
+        never 4xx/5xx: if the authorize URL cannot be built it answers 302 to <frontend-base-url>/?chatgpt=not_completed.
+        First registration (no persisted client id) uses client_id=dynamic_agent_client plus agent_name_hint=ORACUL;
+        reauthorization uses the persisted oaiapp_… client id and no agent_name_hint. Both always send
+        ext_agent_host_id=urn:uuid:<stable host uuid> and redirect_uri=http://127.0.0.1:4200/callback
+        (phase-02 chatgpt-connection.md FR-35).
       responses:
         '302':
           description: Redirect to the OpenAI authorization endpoint (or to <frontend-base-url>/?chatgpt=not_completed on misconfiguration)
           headers:
             Location:
-              description: Authorize URL with response_type=code, client_id, [ext_agent_host_id, agent_name_hint], redirect_uri (http://127.0.0.1:<port>/auth/callback), scope (6 scopes, space-separated), state, code_challenge (BASE64URL(SHA-256(verifier))), code_challenge_method=S256, resource
+              description: Authorize URL with exactly client_id, [agent_name_hint only for dynamic_agent_client], ext_agent_host_id (urn:uuid:<uuid>), response_type=code, redirect_uri (http://127.0.0.1:<port>/callback), scope (6 scopes, space-separated), resource=https://api.openai.com/v1, state, nonce, code_challenge (BASE64URL(SHA-256(verifier))), code_challenge_method=S256
               schema:
                 type: string
 
@@ -94,9 +96,12 @@ paths:
       operationId: completeChatGptSignIn
       summary: Browser navigation — OAuth redirect target; exchanges the code and redirects back to ORACUL
       description: |
-        Reached through the registered loopback redirect URI http://127.0.0.1:<port>/auth/callback, which the
-        frontend web server forwards to this path with the query string unchanged. Always answers 302 to the
-        ORACUL frontend with ?chatgpt=connected | not_completed | not_eligible. Never answers 4xx/5xx.
+        Reached through the registered loopback redirect URI http://127.0.0.1:<port>/callback, which the frontend web
+        server forwards to this path with the query string unchanged. Checks state, the issued client id, exchanges
+        the code (with resource), validates the ID token (RS256 signature against OpenAI's JWKS, iss, aud = issued
+        client id, exp, nonce of this attempt) and the granted scopes. Always answers 302 to the ORACUL frontend with
+        ?chatgpt=connected | not_completed | not_eligible | not_verified | expired. Never answers 4xx/5xx
+        (phase-02 chatgpt-connection.md FR-36).
       parameters:
         - name: code
           in: query
@@ -125,7 +130,7 @@ paths:
         - name: client_id
           in: query
           required: false
-          description: Issued client id (oaiapp_…, pattern ^oaiapp_[A-Za-z0-9_-]{1,249}$) returned on the first sign-in with dynamic client registration; persisted after a successful token exchange. Limit 256; other values are ignored.
+          description: Issued client id (oaiapp_…, pattern ^oaiapp_[A-Za-z0-9_-]{1,249}$). First registration - required (missing or other value → not_completed, nothing persisted); persisted after a successful token exchange and ID-token validation. Reauthorization - absent or equal to the stored id, any other value → not_completed and the stored id stays unchanged. Limit 256 (checked by the service).
           schema:
             type: string
       responses:
@@ -133,7 +138,7 @@ paths:
           description: Redirect back to the ORACUL frontend with the outcome in the chatgpt query parameter
           headers:
             Location:
-              description: Exactly <frontend-base-url>/?chatgpt=connected|not_completed|not_eligible (never contains code, state, error or error_description)
+              description: Exactly <frontend-base-url>/?chatgpt=connected|not_completed|not_eligible|not_verified|expired (never contains code, state, nonce, error, error_description or a token)
               schema:
                 type: string
 
@@ -159,15 +164,37 @@ paths:
                   value: { state: PLAN_NOT_ELIGIBLE, canGenerate: false }
                 sessionExpired:
                   value: { state: SESSION_EXPIRED, canGenerate: false }
+                registrationInvalid:
+                  value: { state: REGISTRATION_INVALID, canGenerate: false }
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
       tags: [chatgpt]
       operationId: disconnectChatGpt
       summary: Disconnect — drops every credential of this session from backend memory (idempotent)
+      description: Best-effort revocation of the session's refresh token at OpenAI's revocation endpoint first (outcome ignored), then the session's credentials, pending sign-ins and flag are dropped.
       responses:
         '204':
           description: Disconnected (also when nothing was connected)
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/auth/chatgpt/registration:
+    delete:
+      tags: [chatgpt]
+      operationId: resetChatGptRegistration
+      summary: Reset ChatGPT connection — forget the issued client id and every runtime token (installation-wide)
+      description: |
+        Refused with 409 RUN_IN_PROGRESS while any generation run is QUEUED or RUNNING (nothing changes). Otherwise:
+        best-effort revocation of every held refresh token (outcome ignored), all sessions' credentials, pending
+        sign-ins and flags dropped, chatgpt_client_registration.client_id set to NULL. The host id is kept, so the
+        next sign-in is a first registration (client_id=dynamic_agent_client, agent_name_hint=ORACUL) with the same
+        ext_agent_host_id. Idempotent (phase-02 chatgpt-connection.md FR-37).
+      responses:
+        '204':
+          description: Registration and tokens cleared (also when nothing was stored)
+        '409':
+          $ref: '#/components/responses/RunInProgress'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -177,7 +204,9 @@ paths:
       operationId: startRun
       summary: GENERATE THE FUTURE — snapshot the configuration into a new Generation Run and start the pipeline
       description: |
-        Check order: body validation → ChatGPT connection → single active run. The first body violation wins, in the
+        Check order: body validation → ChatGPT connection (401 CHATGPT_NOT_CONNECTED / CHATGPT_SESSION_EXPIRED /
+        CHATGPT_REGISTRATION_INVALID, 403 CHATGPT_PLAN_NOT_ELIGIBLE, 503 CHATGPT_UNAVAILABLE when a needed token refresh
+        fails transiently) → single active run. The first body violation wins, in the
         order JSON syntax → realism → darkness → optimism → horizon → wildcards → customWildcards → output
         (messages in scenario-panel.md). realism/darkness/optimism must be JSON integers (no strings or fractions);
         horizon codes are case-sensitive. Unknown properties are ignored. Nothing is stored when a check fails.
@@ -215,6 +244,8 @@ paths:
           $ref: '#/components/responses/PlanNotEligible'
         '409':
           $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ChatGptUnavailable'
         '500':
           $ref: '#/components/responses/InternalError'
     get:
@@ -266,7 +297,8 @@ paths:
       description: |
         No request body (a body is ignored). Checks in this order: runId unknown, malformed or of another session →
         404 RUN_NOT_FOUND "Future not found"; ChatGPT not connected → 401 CHATGPT_NOT_CONNECTED "Connect ChatGPT to
-        generate"; refresh failed → 401 CHATGPT_SESSION_EXPIRED "ChatGPT session expired — please reconnect"; plan not
+        generate"; refresh failed → 401 CHATGPT_SESSION_EXPIRED "ChatGPT session expired — please reconnect" (refresh
+        invalid_client → 401 CHATGPT_REGISTRATION_INVALID; transient refresh failure → 503 CHATGPT_UNAVAILABLE); plan not
         eligible → 403 CHATGPT_PLAN_NOT_ELIGIBLE "Your ChatGPT plan is not eligible for ORACUL"; parent not COMPLETED
         with an accepted scenario and an Evidence Pack (FAILED, INSUFFICIENT_EVIDENCE, QUEUED, RUNNING, or COMPLETED
         without them) → 409 RUN_NOT_COMPLETED "Only a completed future can have an alternative"; another run of the
@@ -293,6 +325,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ChatGptUnavailable'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -487,7 +521,7 @@ components:
             invalidJson:
               value: { code: VALIDATION_FAILED, message: Request body is not valid JSON }
     ChatGptRequired:
-      description: CHATGPT_NOT_CONNECTED or CHATGPT_SESSION_EXPIRED
+      description: CHATGPT_NOT_CONNECTED, CHATGPT_SESSION_EXPIRED or CHATGPT_REGISTRATION_INVALID (refresh answered invalid_client)
       content:
         application/json:
           schema:
@@ -497,6 +531,26 @@ components:
               value: { code: CHATGPT_NOT_CONNECTED, message: Connect ChatGPT to generate }
             expired:
               value: { code: CHATGPT_SESSION_EXPIRED, message: ChatGPT session expired — please reconnect }
+            registrationInvalid:
+              value: { code: CHATGPT_REGISTRATION_INVALID, message: ChatGPT registration is no longer valid — use Reset ChatGPT connection, then reconnect }
+    ChatGptUnavailable:
+      description: CHATGPT_UNAVAILABLE — a needed token refresh failed transiently (5xx, timeout, network); credentials are kept
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            unavailable:
+              value: { code: CHATGPT_UNAVAILABLE, message: ChatGPT is temporarily unavailable — try again in a few minutes }
+    RunInProgress:
+      description: RUN_IN_PROGRESS — the ChatGPT connection cannot be reset while a generation run is QUEUED or RUNNING
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            runInProgress:
+              value: { code: RUN_IN_PROGRESS, message: Wait until the current run finishes }
     PlanNotEligible:
       description: CHATGPT_PLAN_NOT_ELIGIBLE
       content:
@@ -748,7 +802,8 @@ components:
     # ---------- chatgpt ----------
     ChatGptConnectionState:
       type: string
-      enum: [NOT_CONNECTED, CONNECTED, PLAN_NOT_ELIGIBLE, SESSION_EXPIRED]
+      description: REGISTRATION_INVALID - a refresh answered invalid_client; only Reset ChatGPT connection helps (phase-02 chatgpt-inference.md FR-40)
+      enum: [NOT_CONNECTED, CONNECTED, PLAN_NOT_ELIGIBLE, SESSION_EXPIRED, REGISTRATION_INVALID]
 
     ChatGptConnection:
       type: object
@@ -787,10 +842,18 @@ components:
     RunFailureCode:
       type: string
       description: |
-        Why a run ended without a story (generation-runs.md "Run failure codes and messages"). Fixed messages:
+        Why a run ended without a story (generation-runs.md "Run failure codes and messages", phase-02
+        chatgpt-inference.md FR-38–40). Fixed messages:
         NEWS_UNAVAILABLE "ORACUL could not reach its news sources — try again later" · CHATGPT_RATE_LIMITED "ChatGPT
-        plan limit reached — try again later" · CHATGPT_UNAVAILABLE "ChatGPT is unavailable right now — try again
-        later" · CHATGPT_SESSION_EXPIRED "ChatGPT session expired — please reconnect" · RUN_TIMEOUT "Generation took
+        usage limit reached — try again later" (UI links ChatGPT Settings → Usage) · CHATGPT_UNAVAILABLE "ChatGPT is
+        temporarily unavailable — try again in a few minutes" (after at most 2 retries) · CHATGPT_SESSION_EXPIRED
+        "ChatGPT session expired — please reconnect" · CHATGPT_PLAN_NOT_ELIGIBLE "Your ChatGPT plan is not eligible for
+        ORACUL — a personal Plus or Pro plan is needed" · CHATGPT_REGISTRATION_INVALID "ChatGPT registration is no
+        longer valid — use Reset ChatGPT connection, then reconnect" · CHATGPT_INCOMPLETE "ChatGPT did not finish the
+        answer — please try again" · CHATGPT_REQUEST_REJECTED "ChatGPT rejected ORACUL's request — please report this"
+        (providerCode set) · CHATGPT_UNEXPECTED_ERROR "ChatGPT returned an unexpected error (<providerCode>) — please
+        try again" (providerCode set) · CHATGPT_NO_MODEL "ChatGPT offers no model for this account — check your plan,
+        then try again" · RUN_TIMEOUT "Generation took
         too long — try again" (QUEUED/RUNNING run with now >= deadlineAt; scheduler every 5 s or pipeline check) ·
         INVALID_SCENARIO "ORACUL could not construct a valid scenario" · SCENARIO_REJECTED "ORACUL could not construct
         a scenario supported by current evidence" · ALTERNATIVE_NOT_DISTINCT "ORACUL could not find a different
@@ -804,6 +867,12 @@ components:
         - CHATGPT_RATE_LIMITED
         - CHATGPT_UNAVAILABLE
         - CHATGPT_SESSION_EXPIRED
+        - CHATGPT_PLAN_NOT_ELIGIBLE
+        - CHATGPT_REGISTRATION_INVALID
+        - CHATGPT_INCOMPLETE
+        - CHATGPT_REQUEST_REJECTED
+        - CHATGPT_UNEXPECTED_ERROR
+        - CHATGPT_NO_MODEL
         - RUN_TIMEOUT
         - INVALID_SCENARIO
         - SCENARIO_REJECTED
@@ -815,9 +884,9 @@ components:
     RunFailure:
       type: object
       description: |
-        Set on GenerationRun iff status is FAILED or INSUFFICIENT_EVIDENCE; absent otherwise. Exactly the keys code and
-        message; message is the fixed text of the code (see RunFailureCode) and never contains stack traces, provider
-        bodies, URLs, JSON or tokens.
+        Set on GenerationRun iff status is FAILED or INSUFFICIENT_EVIDENCE; absent otherwise. Keys code and message,
+        plus providerCode only for CHATGPT_REQUEST_REJECTED and CHATGPT_UNEXPECTED_ERROR; message is the fixed text of
+        the code (see RunFailureCode) and never contains stack traces, provider bodies, URLs, JSON or tokens.
       required: [code, message]
       properties:
         code:
@@ -825,6 +894,13 @@ components:
         message:
           type: string
           description: User-facing message; never technical details
+        providerCode:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_.:-]{1,64}$'
+          description: Sanitized OpenAI error code (unknown_error when the provider value does not match the pattern; http_<status> when the answer had no code). Present only for CHATGPT_REQUEST_REJECTED and CHATGPT_UNEXPECTED_ERROR.
+          example: subscription_sharing_route_not_supported
 
     ResearchCounts:
       type: object
@@ -1894,6 +1970,12 @@ components:
             $ref: '#/components/schemas/WildcardDisplay'
         counts:
           $ref: '#/components/schemas/ResearchCounts'
+        model:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Model slug actually used for this run, chosen from the signed-in account's GET /v1/models catalogue (phase-02 chatgpt-inference.md FR-38). Absent for runs created before phase 02.
+          example: gpt-5
 
     ResultSource:
       type: object
