@@ -1,0 +1,40 @@
+{
+  "slice": "18_custom-wildcards-output",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/scenario/custom-wildcards.ts",
+      "line": 26,
+      "fr": "FR-5",
+      "problem": "scenario-panel.md (slice 18 test contract) says the `mat-stroked-button` is `custom-wildcard-add` and the `mat-icon-button` is `custom-wildcard-remove-<i>` (aria-label \"Remove <label>\"). The code puts `data-testid=\"custom-wildcard-add\"` on an inner <span> and `custom-wildcard-remove-<i>` on the <mat-icon>, not on the buttons. Every other button in the app (generate-button, recent-futures-button, recent-future-<id>) has the testid on the <button>. As a result, getByTestId(...) toBeEnabled / toHaveAttribute('aria-label') / focus checks point at a non-interactive element. The unit tests only pass because they work around it with .closest('button').",
+      "fix": "Move `data-testid=\"custom-wildcard-add\"` onto the <button mat-stroked-button> and `[attr.data-testid]=\"'custom-wildcard-remove-' + i\"` onto the <button mat-icon-button>. The existing .closest('button') calls in the tests still work because closest() also matches the element itself.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/scenario/ScenarioConfigurationDeserializer.java",
+      "line": 146,
+      "fr": "FR-5",
+      "problem": "The backend trims with String.strip() (Character.isWhitespace), but the UI trims with JS String.trim(). The two disagree on U+00A0 (NBSP), U+FEFF and U+2007/U+202F. A direct API call with label \"\\u00A0\" is accepted as a 1-character label, while the UI would reject the same input as blank. This cannot happen through the panel, which sends labels already trimmed.",
+      "fix": "Trim with the same whitespace set as JS trim(), e.g. a regex on ^[\\s\\u00A0\\uFEFF\\p{Z}]+|...$, or treat Character.isSpaceChar as whitespace too.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/scenario/custom-wildcards.ts",
+      "line": 16,
+      "fr": "FR-5",
+      "problem": "The error is a plain role=\"alert\" <div> outside the mat-form-field. The input has no aria-describedby / aria-invalid pointing to it, and the field does not show Material's error styling. Screen readers do announce the alert, but the error is not tied to the field.",
+      "fix": "Render the message as <mat-error> inside the form field (with a matching error state), or add [attr.aria-invalid] and aria-describedby that point to the error element.",
+      "status": "open"
+    }
+  ]
+}

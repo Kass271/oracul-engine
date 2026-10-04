@@ -34,8 +34,8 @@ public class ScenarioConfigurationDeserializer extends ValueDeserializer<Scenari
             integer(root.get("optimism")),
             horizon(root.get("horizon")),
             wildcards(root.get("wildcards")),
-            list(ctxt, root.get("customWildcards"), CustomWildcard.class),
-            value(ctxt, root.get("output"), OutputSettings.class));
+            customWildcards(root.get("customWildcards")),
+            output(root.get("output")));
     }
 
     private static Integer integer(JsonNode n) {
@@ -80,5 +80,26 @@ public class ScenarioConfigurationDeserializer extends ValueDeserializer<Scenari
             out.add(v);
         }
         return out;
+    }
+
+    private static List<CustomWildcard> customWildcards(JsonNode n) {
+        if (n == null || !n.isArray()) return null;
+        List<CustomWildcard> out = new ArrayList<>();
+        for (JsonNode item : n) {
+            if (item == null || !item.isObject()) return null;
+            JsonNode label = item.get("label");
+            out.add(new CustomWildcard(label != null && label.isString() ? label.stringValue().strip() : null,
+                integer(item.get("intensity"))));
+        }
+        return out;
+    }
+
+    private static OutputSettings output(JsonNode n) {
+        if (n == null || !n.isObject()) return null;
+        return new OutputSettings(bool(n.get("story")), bool(n.get("illustration")));
+    }
+
+    private static Boolean bool(JsonNode n) {
+        return n != null && n.isBoolean() ? n.booleanValue() : null;
     }
 }

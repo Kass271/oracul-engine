@@ -76,4 +76,32 @@ export class ScenarioStore {
       wildcards: s.wildcards.map((w) => (w.wildcardId === id ? { ...w, intensity: n } : w)),
     }));
   }
+
+  readonly customWildcards = computed(() => this.state().customWildcards);
+
+  /** Returns an error message, or null when added. Check order: count, length, duplicate. */
+  addCustomWildcard(raw: string): string | null {
+    const list = this.state().customWildcards;
+    if (list.length >= 3) return 'At most 3 custom wildcards';
+    const label = raw.trim();
+    if (label.length < 1 || label.length > 40) return 'Wildcard name must be 1–40 characters';
+    if (list.some((c) => c.label.trim().toLowerCase() === label.toLowerCase())) {
+      return 'This wildcard already exists';
+    }
+    this.state.update((s) => ({ ...s, customWildcards: [...s.customWildcards, { label, intensity: 5 }] }));
+    return null;
+  }
+
+  removeCustomWildcard(index: number): void {
+    if (!Number.isInteger(index) || index < 0 || index >= this.state().customWildcards.length) return;
+    this.state.update((s) => ({ ...s, customWildcards: s.customWildcards.filter((_, i) => i !== index) }));
+  }
+
+  setCustomWildcardIntensity(index: number, n: number): void {
+    if (!validIntensity(n) || !Number.isInteger(index) || index < 0 || index >= this.state().customWildcards.length) return;
+    this.state.update((s) => ({
+      ...s,
+      customWildcards: s.customWildcards.map((c, i) => (i === index ? { ...c, intensity: n } : c)),
+    }));
+  }
 }

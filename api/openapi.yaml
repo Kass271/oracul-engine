@@ -184,7 +184,13 @@ paths:
         Wildcards are checked element by element in array order (id → duplicate → intensity): unknown id →
         "unknown wildcard: <id>"; id missing/null/non-string → "wildcards[<i>].wildcardId is invalid"; repeated id →
         "duplicate wildcard: <id>"; intensity not an integer 1–10 → "wildcard intensity must be between 1 and 10";
-        wildcards missing/null/not an array of objects → "wildcards is invalid". All 400 VALIDATION_FAILED.
+        wildcards missing/null/not an array of objects → "wildcards is invalid". customWildcards: missing/null/not
+        an array of objects → "customWildcards is invalid"; more than 3 → "At most 3 custom wildcards"; then per
+        element in array order: label (trimmed) blank, > 40 characters, missing or not a string → "Wildcard name must
+        be 1–40 characters"; label equal (trimmed, case-insensitive) to an earlier one → "This wildcard already
+        exists"; intensity not an integer 1–10 → "wildcard intensity must be between 1 and 10". output: missing/null/
+        not an object or story not true → "Story output is required"; illustration not false → "Illustration is not
+        available yet (MVP+1)". All 400 VALIDATION_FAILED.
       requestBody:
         required: true
         content:
@@ -594,6 +600,7 @@ components:
             $ref: '#/components/schemas/WildcardSetting'
         customWildcards:
           type: array
+          description: Custom wildcards in panel order (≤ 3, labels trimmed and unique case-insensitively). Missing/null/not an array of objects → "customWildcards is invalid"; more than 3 → "At most 3 custom wildcards".
           maxItems: 3
           items:
             $ref: '#/components/schemas/CustomWildcard'
@@ -627,13 +634,17 @@ components:
           type: string
           minLength: 1
           maxLength: 40
-          pattern: '^\s*\S.*$'
-          description: Free text, trimmed by the backend; 1–40 characters after trimming
+          description: |
+            Free text (JSON string only, no coercion). The backend trims it before validation, so the 1–40 limit
+            applies to the trimmed label ("  " + 40 chars + "  " is valid and stored as the 40 chars); blank → invalid.
+            Labels must be unique within the request (trimmed, case-insensitive). Violations → 400 VALIDATION_FAILED
+            "Wildcard name must be 1–40 characters" / "This wildcard already exists".
         intensity:
           type: integer
           format: int32
           minimum: 1
           maximum: 10
+          description: JSON integer 1–10 (no strings or fractions); UI default 5 when added
 
     OutputSettings:
       type: object
@@ -641,10 +652,10 @@ components:
       properties:
         story:
           type: boolean
-          description: Must be true in this version
+          description: Must be JSON true in this version; anything else (or output missing/null) → 400 VALIDATION_FAILED "Story output is required"
         illustration:
           type: boolean
-          description: Must be false in this version (MVP+1)
+          description: Must be JSON false in this version (MVP+1); anything else → 400 VALIDATION_FAILED "Illustration is not available yet (MVP+1)" (checked after story)
 
     ScenarioCatalogue:
       type: object

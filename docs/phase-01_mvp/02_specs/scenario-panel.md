@@ -121,29 +121,47 @@ defaults when the session has no run. No separate table — read from `generatio
     reported first.
 
 ### FR-5 — Custom wildcard
-- Happy path: below the catalogue a `mat-form-field` input (`custom-wildcard-input`) and an "Add" button
-  (`custom-wildcard-add`). Pressing Add (or Enter) with a valid label adds an enabled custom wildcard with intensity 5,
-  shown with its own slider and a remove icon button (`custom-wildcard-remove-<index>`); the input is cleared.
-- Rules: label trimmed; 1–40 characters; at most 3; a label equal (case-insensitive) to an existing custom label is
-  rejected; removing frees a slot.
+- Happy path: below the catalogue (inside the WILDCARDS section) a `mat-form-field` input (`custom-wildcard-input`)
+  and an "Add" button (`custom-wildcard-add`). Pressing Add (or Enter in the input) with a valid label adds an enabled
+  custom wildcard (label trimmed) with intensity 5, shown as a row with its label text "<label> <n>/10", its own slider
+  and a remove icon button (`custom-wildcard-remove-<index>`); the input is cleared. Custom wildcards have no on/off
+  toggle: present = enabled = sent in `configuration.customWildcards` (panel order).
+- Rules: label trimmed; 1–40 characters after trimming; at most 3; a label equal (trimmed, case-insensitive) to an
+  existing custom label is rejected (catalogue labels are not compared); removing frees a slot. UI check order on Add:
+  count → label length → duplicate (first failing rule's message is shown).
 - Errors:
-  - UI: empty / whitespace-only / > 40 characters → `mat-error` "Wildcard name must be 1–40 characters", nothing added
   - UI: 3 already exist and Add is pressed → `mat-error` "At most 3 custom wildcards", nothing added (the Add button
     stays enabled so the message can be shown)
+  - UI: empty / whitespace-only / > 40 characters after trim → `mat-error` "Wildcard name must be 1–40 characters",
+    nothing added
   - UI: duplicate label → `mat-error` "This wildcard already exists", nothing added
-  - API `POST /api/runs`: label empty/blank or > 40 after trim → 400 `VALIDATION_FAILED` → "Wildcard name must be 1–40 characters"
-  - API: more than 3 custom wildcards → 400 `VALIDATION_FAILED` → "At most 3 custom wildcards"
-  - API: duplicate custom label → 400 `VALIDATION_FAILED` → "This wildcard already exists"
-  - API: custom intensity outside 1–10 → 400 `VALIDATION_FAILED` → "wildcard intensity must be between 1 and 10"
+  - API `POST /api/runs`: `customWildcards` missing / `null` / not an array / an element that is not an object →
+    400 `VALIDATION_FAILED` → "customWildcards is invalid"
+  - API: more than 3 elements → 400 `VALIDATION_FAILED` → "At most 3 custom wildcards"
+  - API: `label` empty/blank or > 40 characters after trim, missing, `null` or not a JSON string → 400
+    `VALIDATION_FAILED` → "Wildcard name must be 1–40 characters"
+  - API: label equal (trimmed, case-insensitive) to an earlier element's label → 400 `VALIDATION_FAILED` →
+    "This wildcard already exists"
+  - API: custom `intensity` outside 1–10, missing, `null`, a fraction, a string or a boolean → 400
+    `VALIDATION_FAILED` → "wildcard intensity must be between 1 and 10"
+- Changes earlier behaviour: `customWildcards` violations other than shape (e.g. 4 elements, label `""`, label of 41 characters, intensity 11) answered with the generic fallback "`customWildcards…` is invalid" → now the specific messages above; no existing test sends an invalid non-empty `customWildcards` (checked `StartRunValidationTest.java`, `StartRunWildcardValidationTest.java`, `ResearchPlanIT.java`, `e2e/tests/run-start.spec.ts`) (tests: none)
+- Changes earlier behaviour: none for the panel — the WILDCARDS section gains `custom-wildcard-section` after `wildcard-section`; checked `wildcard-catalogue.spec.ts` (only asserts WILDCARDS after TIME HORIZON and the expansion panels inside `wildcard-section`), `app.spec.ts`, `scenario.store.spec.ts`, `scenario.store.wildcards.spec.ts`, `quick-actions.spec.ts` (loads a configuration with one custom wildcard, expects it carried unchanged — still true), `e2e/tests/wildcards.spec.ts`, `e2e/tests/scenario-controls.spec.ts` — none counts panel sections, inputs, sliders or buttons
+- Ranges & invariants: label length after trim (UTF-16 units, JS `.length` / Java `String.length()`) classes 0 (`""`, `"   "`) → name error, 1 → ok, 40 → ok, 41 → name error, `"  " + 40 chars + "  "` → ok and stored as the 40 trimmed chars (UI and API); count classes 0, 1, 2, 3 → ok, 4 → "At most 3 custom wildcards" (API: any 4-element array, even if an element is also invalid; UI: Add with any input while 3 exist); intensity classes 0, 1, 5, 10, 11 → 1/5/10 ok, 0/11 error (API), UI slider only yields 1–10; duplicate classes: identical, different case (`"mars colony"` vs `"Mars Colony"`), different only in surrounding spaces → duplicate; different inner spacing (`"Mars  colony"`) or equal to a catalogue label (`"New pandemic"`) → ok; API precedence inside `customWildcards`: shape → count → per element in array order (label → duplicate → intensity); invariants: `configuration().customWildcards` lists exactly the rows shown, in row order, labels trimmed, ≤ 3, no two labels equal case-insensitively; row count shown = `customWildcards.length`; adding/removing/changing custom wildcards never changes realism/darkness/optimism/horizon/wildcards/output; indices are 0-based and renumber after a removal (row 2 becomes row 1); an accepted run stores (and returns in `configuration`) the trimmed labels in request order and its ResearchProfile has one topic `custom-<n>` (1-based, request order) per custom wildcard after the catalogue topics.
 
 ### FR-6 — Output settings
-- Happy path: OUTPUT section with two `mat-checkbox`es: "Story" checked, "Illustration" unchecked + disabled with a
-  `mat-chip`/badge "MVP+1".
+- Happy path: after the WILDCARDS section the heading "OUTPUT" and `output-section` with two `mat-checkbox`es:
+  `output-story` "Story" checked, `output-illustration` "Illustration" unchecked + disabled with a `mat-chip`/badge
+  `output-illustration-badge` "MVP+1".
 - Rules: Illustration can never become checked (disabled control, click is a no-op). Story stays checked (it is the
-  only output in this version; the checkbox is shown checked and read-only).
-- Errors (backend, `POST /api/runs`):
-  - `output.illustration` = true → 400 `VALIDATION_FAILED` → "Illustration is not available yet (MVP+1)"
-  - `output.story` = false or `output` missing → 400 `VALIDATION_FAILED` → "Story output is required"
+  only output in this version; the checkbox is shown checked and read-only: clicking it keeps it checked). The panel
+  always sends `output` `{"story":true,"illustration":false}`.
+- Errors (backend, `POST /api/runs`, checked after customWildcards; story before illustration):
+  - `output` missing, `null` or not an object; `output.story` anything other than JSON `true` (`false`, missing,
+    `null`, `"true"`, `1`) → 400 `VALIDATION_FAILED` → "Story output is required"
+  - `output.story` true and `output.illustration` anything other than JSON `false` (`true`, missing, `null`,
+    `"false"`, `0`) → 400 `VALIDATION_FAILED` → "Illustration is not available yet (MVP+1)"
+- Changes earlier behaviour: `output` violations answered with the generic fallback "`output…` is invalid" (or were accepted, e.g. `story` false) → now the two messages above; no existing backend/E2E test sends an invalid `output` (checked `StartRunValidationTest.java`, `StartRunWildcardValidationTest.java`, `e2e/tests/run-start.spec.ts`, `e2e/tests/quick-regeneration.spec.ts`); `scenario.store.spec.ts` loads `{story:false, illustration:true}` and expects `configuration()` to equal it — the store keeps carrying the loaded `output` unchanged (only the checkboxes are fixed), so it stays green (tests: none)
+- Ranges & invariants: `output.story` classes `true` → ok; `false`, missing, `null`, `"true"`, `1` → "Story output is required"; `output.illustration` classes `false` → ok; `true`, missing, `null`, `"false"`, `0` → "Illustration is not available yet (MVP+1)"; `output` missing / `null` / `"x"` / `[]` → "Story output is required"; story false and illustration true together → "Story output is required"; any custom wildcard violation together with an output violation → the custom wildcard message; invariants: in the UI `output-story` is checked and `output-illustration` unchecked + disabled on every load (fresh session and loaded configuration) and after any number of clicks on either; the panel's `startRun` body carries `output` `{"story":true,"illustration":false}` in every real session (defaults and every stored configuration have exactly this value).
 
 ### FR-34 — Mobile layout
 - Happy path: viewport width < 768 px → the panel lives in a `mat-sidenav` in `over` mode, closed by default; the
@@ -155,8 +173,8 @@ defaults when the session has no run. No separate table — read from `generatio
 
 ### Validation precedence (all 400s above)
 The backend reports the first violation in this order: JSON syntax → realism → darkness → optimism → horizon →
-wildcards (in array order: id unknown, duplicate, intensity) → customWildcards (count, then per item label, duplicate,
-intensity) → output. Exactly one message per response.
+wildcards (in array order: id unknown, duplicate, intensity) → customWildcards (shape, count, then per item in array
+order: label, duplicate, intensity) → output (story, then illustration). Exactly one message per response.
 Any Bean Validation / deserialization violation on a field not named above (e.g. `wildcards` or `customWildcards`
 missing) → 400 `VALIDATION_FAILED` → "`<field path>` is invalid" (e.g. "wildcards is invalid") — never a 500. Later
 slices replace this fallback with the specific messages of FR-4/5/6.
@@ -190,9 +208,11 @@ its body.
     `wildcard-toggle-<wildcardId>`, `wildcard-label-<wildcardId>` (text "<label>" when off, "<label> <n>/10" when
     enabled), `wildcard-intensity-<wildcardId>` (the `mat-slider`, only when enabled),
     `wildcard-intensity-<wildcardId>-input` (its `matSliderThumb` input) — details in "Slice 03_wildcards"
-  - custom: `custom-wildcard-input`, `custom-wildcard-add`, `custom-wildcard-error`, `custom-wildcard-<index>`
-    (0-based), `custom-wildcard-intensity-<index>`, `custom-wildcard-remove-<index>`
-  - output: `output-story`, `output-illustration`, `output-illustration-badge` ("MVP+1")
+  - custom: `custom-wildcard-section`, `custom-wildcard-input`, `custom-wildcard-add`, `custom-wildcard-error`,
+    `custom-wildcard-<index>` (0-based row), `custom-wildcard-label-<index>` ("<label> <n>/10"),
+    `custom-wildcard-intensity-<index>` (the `mat-slider`), `custom-wildcard-intensity-<index>-input` (its
+    `matSliderThumb`), `custom-wildcard-remove-<index>` — details in "Slice 18_custom-wildcards-output"
+  - output: `output-section`, `output-story`, `output-illustration`, `output-illustration-badge` ("MVP+1")
   - mobile: `scenario-drawer-toggle` ("Scenario"), `scenario-drawer-close`
 - Keyboard: every control reachable by Tab with visible focus, sliders operable with arrow keys, accessible names
   equal to the visible labels (NFR-5).
@@ -391,3 +411,124 @@ Files: `src/app/scenario/wildcard-catalogue.ts` (`WildcardCatalogueComponent`, s
   `wildcard-intensity-biology-new-pandemic-input` → `wildcard-label-biology-new-pandemic` "New pandemic 8/10";
   disable → label "New pandemic", slider absent. API rows may be checked with `request.post('/api/runs', …)`.
 
+## Slice 18_custom-wildcards-output — test contract (FR-5, FR-6)
+
+Delivers custom wildcards and the output section in the panel, and the `customWildcards` / `output` validation of
+`startRun`. The research side (custom topics `custom-<n>`, WILDCARD intents, `custom-wildcards` data block) exists since
+slices 05/07 and is only re-checked end-to-end here. Behaviour and tests of slices 01–17 stay unchanged (incl. the
+fallback row "`wildcards` removed → `wildcards is invalid`").
+
+### Backend (`com.oracul.app.scenario`, `com.oracul.app.common`)
+- `ScenarioConfigurationDeserializer` reads `customWildcards` strictly (no scalar coercion): `label` only from a JSON
+  string (then trimmed), `intensity` only from a JSON integer; `output.story` / `output.illustration` only from JSON
+  booleans. A new pure `CustomWildcardRules.firstViolation(List<CustomWildcard>)` and `OutputRules.firstViolation(
+  OutputSettings)` (or one `ScenarioRules`) produce the messages; `ApiExceptionHandler` uses them for the
+  `customWildcards` / `output` roots exactly as `WildcardRules` for `wildcards`.
+- `POST /api/runs` (`startRun`) — `@WebMvcTest`, base valid body as in slice 01 with `customWildcards` replaced.
+  Valid = `401 CHATGPT_NOT_CONNECTED` "Connect ChatGPT to generate" (no connection in a WebMvcTest). Every error body:
+  exactly the keys `code`, `message`; status 400, code `VALIDATION_FAILED`. `L40` = `"a"` × 40, `L41` = `"a"` × 41.
+  | Test input (base body with `customWildcards` = …) | Status | `message` (exact) |
+  |---|---|---|
+  | `[{"label":"Ocean desalination boom","intensity":5}]` | 401 | `Connect ChatGPT to generate` |
+  | `[{"label":"A","intensity":1},{"label":"B","intensity":10},{"label":<L40>,"intensity":5}]` (3 items; `<L40>` = the 40-character string) | 401 | `Connect ChatGPT to generate` |
+  | `[{"label":"  Mars colony  ","intensity":7}]` / `[{"label":"  " + L40 + "  ","intensity":7}]` | 401 | `Connect ChatGPT to generate` |
+  | `[{"label":"Mars  colony","intensity":5},{"label":"Mars colony","intensity":5}]` (inner spacing differs) | 401 | `Connect ChatGPT to generate` |
+  | `[{"label":"New pandemic","intensity":5}]` (same as a catalogue label) | 401 | `Connect ChatGPT to generate` |
+  | `[{"label":"x","intensity":5,"foo":1}]` (unknown property) | 401 | `Connect ChatGPT to generate` |
+  | 4 items `A`,`B`,`C`,`D` intensity 5 / 4 items where item 3 has label `""` | 400 | `At most 3 custom wildcards` |
+  | label `""` / `"   "` / L41 / `"  " + L41` / `5` / `true` / `null` / key removed | 400 | `Wildcard name must be 1–40 characters` |
+  | `[{"label":"Mars colony","intensity":5},{"label":"mars colony","intensity":3}]` / second label `"  MARS COLONY "` | 400 | `This wildcard already exists` |
+  | `[{"label":"Mars colony","intensity":X}]` for X = `0`, `11`, `-1`, `null`, `5.5`, `"8"`, `true`, key removed | 400 | `wildcard intensity must be between 1 and 10` |
+  | `[{"label":"A","intensity":11},{"label":"","intensity":5}]` | 400 | `wildcard intensity must be between 1 and 10` (element 0 first) |
+  | `[{"label":"","intensity":11}]` | 400 | `Wildcard name must be 1–40 characters` (label before intensity) |
+  | `[{"label":"A","intensity":5},{"label":"a","intensity":0}]` | 400 | `This wildcard already exists` (duplicate before intensity) |
+  | `null` / `{}` / `"x"` / `[1]` / `[null]` / `["A"]` / key removed | 400 | `customWildcards is invalid` |
+  | 4 items with item 3 = `1` (not an object) | 400 | `customWildcards is invalid` (shape before count) |
+  | `wildcards` `[{"wildcardId":"biology-zombies","intensity":5}]` + `customWildcards` 4 items | 400 | `unknown wildcard: biology-zombies` |
+  | `horizon` `"3y"` + `customWildcards` `[{"label":"","intensity":5}]` | 400 | `unknown horizon` |
+  | `customWildcards` `[{"label":"","intensity":5}]` + `output` `{"story":false,"illustration":true}` | 400 | `Wildcard name must be 1–40 characters` |
+
+  | Test input (base body with `output` = …) | Status | `message` (exact) |
+  |---|---|---|
+  | `{"story":true,"illustration":false}` / with extra `"foo":1` | 401 | `Connect ChatGPT to generate` |
+  | `{"story":X,"illustration":false}` for X = `false`, `null`, `"true"`, `1`; `{"illustration":false}` | 400 | `Story output is required` |
+  | `output` = `null` / `"x"` / `[]` / `{}` / key removed | 400 | `Story output is required` |
+  | `{"story":false,"illustration":true}` | 400 | `Story output is required` (story first) |
+  | `{"story":true,"illustration":X}` for X = `true`, `null`, `"false"`, `0`; `{"story":true}` | 400 | `Illustration is not available yet (MVP+1)` |
+- Integration (`AbstractRunIT`, connected session, stubs): `startOk` with body B (slice 04) plus
+  `customWildcards` `[{"label":"  Ocean desalination boom ","intensity":7},{"label":"Mars colony","intensity":3}]` →
+  202, `configuration.customWildcards` = `[{"label":"Ocean desalination boom","intensity":7},{"label":"Mars colony",
+  "intensity":3}]`; `GET /api/runs/{id}` returns the same; after the run is done `getRunResearch.profile.topics` =
+  `[{"key":"custom-1","label":"Ocean desalination boom","category":"custom","weight":0.7,"custom":true},
+  {"key":"custom-2","label":"Mars colony","category":"custom","weight":0.3,"custom":true}]` and
+  `searchPlan.intents` starts with two WILDCARD intents with `topicKey` `custom-1`, `custom-2`, descriptions
+  `Current developments related to Ocean desalination boom` / `… Mars colony`, `drivenBy[0]`
+  `Ocean desalination boom 7/10` / `Mars colony 3/10`; no ADJACENT intent has a `category` (custom topics add none).
+  A rejected body (any row of the tables above, connected session) creates no `generation_run` row.
+
+### Frontend
+Files: `src/app/scenario/custom-wildcards.ts` (`CustomWildcardsComponent`), `src/app/scenario/output-settings.ts`
+(`OutputSettingsComponent`), both standalone, used by `scenario-panel.html`: `<app-custom-wildcards>` directly after
+`<app-wildcard-catalogue>` (inside WILDCARDS), then `<h2 class="section">OUTPUT</h2>` and `<app-output-settings>`.
+`scenario.store.ts` extended.
+
+- Custom section `custom-wildcard-section` (sub-heading "Custom wildcards"):
+  - `mat-form-field` with `<input matInput>` `data-testid="custom-wildcard-input"`, `aria-label` "Custom wildcard
+    name", placeholder "e.g. Ocean desalination boom", **no `maxlength` attribute** (so > 40 can be typed and
+    rejected). `mat-stroked-button` `custom-wildcard-add` text "Add", never disabled. Enter in the input = Add.
+  - Error: `custom-wildcard-error` (a `mat-error`, or an element with `role="alert"` directly under the form field)
+    shows exactly one of "At most 3 custom wildcards" / "Wildcard name must be 1–40 characters" / "This wildcard
+    already exists" after a rejected Add; the input text is kept on rejection. The element is absent when there is no
+    error; the error is removed by a successful Add, by typing in the input, and by removing a row.
+  - On a successful Add: a row is appended, the input value becomes `""`, no error.
+  - Row `i` (0-based, panel order): `custom-wildcard-<i>` containing `custom-wildcard-label-<i>` with text exactly
+    "<trimmed label> <n>/10" (e.g. "Ocean desalination boom 5/10"), `mat-slider` `custom-wildcard-intensity-<i>`
+    (min 1, max 10, step 1, discrete) with `<input matSliderThumb>` `custom-wildcard-intensity-<i>-input`
+    (`aria-label` "<label> intensity", value "5" after Add) and `mat-icon-button` `custom-wildcard-remove-<i>`
+    (`aria-label` "Remove <label>"). Sliders are changed as in slice 01 (`fill('8')` or arrow keys).
+  - Remove row `i` → that row disappears, later rows shift down (row 2 becomes row 1, testids renumbered), a slot
+    is free again.
+  - A loaded configuration (`getScenarioConfiguration`) with custom wildcards renders them as rows with their
+    intensities.
+- Output section `output-section` (after heading "OUTPUT"):
+  - `mat-checkbox` `output-story`, label "Story": inner `input[type=checkbox]` `checked` true, not disabled, clicking
+    it (once or repeatedly) leaves it checked and the store's `output` unchanged.
+  - `mat-checkbox` `output-illustration`, label "Illustration": inner input `checked` false and `disabled` true;
+    `click({force: true})` leaves it unchecked. Next to it `output-illustration-badge` (a `mat-chip` or span) with text
+    exactly "MVP+1".
+  - The checkboxes do not read `output` from the store; they always show Story checked / Illustration unchecked.
+- `ScenarioStore` additions (unit-test surface):
+  - `customWildcards()` — `CustomWildcard[]` in panel order; `configuration().customWildcards` equals it.
+  - `addCustomWildcard(label: string): string | null` — trims; checks in order count (3 exist → returns
+    "At most 3 custom wildcards"), length (trimmed length 0 or > 40 → "Wildcard name must be 1–40 characters"),
+    duplicate (case-insensitive vs existing → "This wildcard already exists"); on success appends
+    `{label: trimmed, intensity: 5}` and returns `null`; on failure the state is unchanged.
+  - `removeCustomWildcard(index)`: removes that element; out-of-range index → no-op.
+  - `setCustomWildcardIntensity(index, n)`: integers 1–10 only (0, 11, 5.5, NaN → unchanged); out-of-range index →
+    no-op; order unchanged.
+  - `load(config)` keeps `customWildcards` and `output` as given (unchanged from slice 01).
+  - Custom wildcard changes never change realism/darkness/optimism/horizon/wildcards/output, and vice versa.
+  - Example: add "Ocean desalination boom", add " Mars colony ", set index 1 to 8, add "OCEAN DESALINATION BOOM"
+    (→ "This wildcard already exists") → `customWildcards()` = `[{"label":"Ocean desalination boom","intensity":5},
+    {"label":"Mars colony","intensity":8}]`.
+
+### Test locations and traces
+- Backend: `backend/src/test/java/com/oracul/app/runs/StartRunCustomWildcardValidationTest.java` (`// @trace FR-5`
+  custom table), `StartRunOutputValidationTest.java` (`// @trace FR-6` output table), optional pure unit tests
+  `com.oracul.app.scenario.CustomWildcardRulesTest` / `OutputRulesTest`; `backend/src/test/java/com/oracul/app/runs/
+  CustomWildcardRunIT.java` (`// @trace FR-5`, integration row).
+- Frontend unit (Vitest): `src/app/scenario/scenario.store.custom.spec.ts` (store additions, FR-5),
+  `src/app/scenario/custom-wildcards.spec.ts` (FR-5 rows, errors, remove, loaded configuration),
+  `src/app/scenario/output-settings.spec.ts` (FR-6, incl. heading OUTPUT after WILDCARDS).
+- E2E (`e2e/tests/custom-wildcards-output.spec.ts`, fresh context = defaults):
+  - FR-5: fill "Ocean desalination boom", click Add → `custom-wildcard-label-0` "Ocean desalination boom 5/10",
+    input empty (`evidence(page, 'FR-5', 'custom-wildcard-added')`); Add with empty input and with 41 characters →
+    error "Wildcard name must be 1–40 characters", still 1 row; add "Mars colony" (Enter) and "Fusion towns" → 3 rows;
+    fill "Fourth" + Add → "At most 3 custom wildcards", 3 rows (`evidence(page, 'FR-5', 'custom-wildcard-limit')`);
+    remove row 0 → 2 rows, `custom-wildcard-label-0` "Mars colony 5/10"; add "mars colony" → "This wildcard already
+    exists". Connected run (connect as in `run-start.spec.ts`): add "Ocean desalination boom", `fill('7')` on
+    `custom-wildcard-intensity-0-input`, generate → request body `customWildcards` =
+    `[{"label":"Ocean desalination boom","intensity":7}]`, `output` `{"story":true,"illustration":false}`.
+  - FR-6: fresh page → `output-story` checked, `output-illustration` unchecked + disabled, badge "MVP+1"
+    (`evidence(page, 'FR-6', 'output-settings')`); click `output-illustration` with `force: true` → still unchecked;
+    click `output-story` → still checked. API rows may be checked with `request.post('/api/runs', …)`.

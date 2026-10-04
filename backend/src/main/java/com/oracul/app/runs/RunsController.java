@@ -28,7 +28,7 @@ public class RunsController implements RunsApi {
 
     @Override
     public ResponseEntity<GenerationRun> startRun(ScenarioConfiguration scenarioConfiguration) {
-        com.oracul.app.scenario.WildcardRules.firstViolation(scenarioConfiguration.getWildcards()).ifPresent(m -> {
+        com.oracul.app.scenario.WildcardRules.firstViolation(scenarioConfiguration).ifPresent(m -> {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", m);
         });
         // Body is validated by bean validation first, then the ChatGPT connection is checked.

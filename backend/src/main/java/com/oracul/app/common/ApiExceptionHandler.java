@@ -47,7 +47,7 @@ public class ApiExceptionHandler {
         String message = first == null ? "request is invalid" : messageFor(first.getField());
         if (first != null && List.of("wildcards", "customWildcards", "output").contains(root(first.getField()))
             && e.getBindingResult().getTarget() instanceof com.oracul.app.api.model.ScenarioConfiguration cfg) {
-            message = com.oracul.app.scenario.WildcardRules.firstViolation(cfg.getWildcards()).orElse(message);
+            message = com.oracul.app.scenario.WildcardRules.firstViolation(cfg).orElse(message);
         }
         return respond(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", message);
     }

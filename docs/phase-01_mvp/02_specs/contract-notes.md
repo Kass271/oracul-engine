@@ -39,10 +39,11 @@ specification §48 asks for. Capability specs: `scenario-panel.md` (FR-1–6, FR
 | wildcard id missing / null / not a string | 400 | VALIDATION_FAILED | "wildcards[`<i>`].wildcardId is invalid" |
 | `wildcards` missing / null / not an array / element not an object; > 30 entries is never reported alone (implies an unknown or duplicate id) | 400 | VALIDATION_FAILED | "wildcards is invalid" |
 | wildcard or custom intensity (`@Min/@Max/@NotNull`) | 400 | VALIDATION_FAILED | "wildcard intensity must be between 1 and 10" |
-| `customWildcards` `@Size(max=3)` | 400 | VALIDATION_FAILED | "At most 3 custom wildcards" |
-| custom `label` `@Size/@Pattern/@NotNull` or blank after trim | 400 | VALIDATION_FAILED | "Wildcard name must be 1–40 characters" |
+| `customWildcards` missing / null / not an array / element not an object | 400 | VALIDATION_FAILED | "customWildcards is invalid" |
+| `customWildcards` `@Size(max=3)` (after the shape check, before any element) | 400 | VALIDATION_FAILED | "At most 3 custom wildcards" |
+| custom `label` `@Size/@NotNull` on the trimmed label (deserializer trims; non-string → null), i.e. blank, > 40 after trim, missing, not a string | 400 | VALIDATION_FAILED | "Wildcard name must be 1–40 characters" |
 | duplicate custom label (service check) | 400 | VALIDATION_FAILED | "This wildcard already exists" |
-| `output.illustration` true / `output.story` false or missing | 400 | VALIDATION_FAILED | "Illustration is not available yet (MVP+1)" / "Story output is required" |
+| `output` missing/null/not an object or `output.story` not JSON true / else `output.illustration` not JSON false | 400 | VALIDATION_FAILED | "Illustration is not available yet (MVP+1)" / "Story output is required" |
 | malformed JSON, empty body, top-level non-object, or `Content-Type` not `application/json` | 400 | VALIDATION_FAILED | "Request body is not valid JSON" |
 | any other field violation not listed here (fallback) | 400 | VALIDATION_FAILED | "`<field path>` is invalid" |
 | not connected | 401 | CHATGPT_NOT_CONNECTED | "Connect ChatGPT to generate" |
