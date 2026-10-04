@@ -3,3 +3,5 @@
 .content { display: flex; }
 .center { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 16px; }
 .spacer { flex: 1 1 auto; }
+mat-toolbar.mobile { height: auto; flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; min-height: 64px; }
+.drawer-mobile { width: min(300px, 85vw); }

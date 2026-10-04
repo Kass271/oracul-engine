@@ -164,12 +164,19 @@ defaults when the session has no run. No separate table — read from `generatio
 - Ranges & invariants: `output.story` classes `true` → ok; `false`, missing, `null`, `"true"`, `1` → "Story output is required"; `output.illustration` classes `false` → ok; `true`, missing, `null`, `"false"`, `0` → "Illustration is not available yet (MVP+1)"; `output` missing / `null` / `"x"` / `[]` → "Story output is required"; story false and illustration true together → "Story output is required"; any custom wildcard violation together with an output violation → the custom wildcard message; invariants: in the UI `output-story` is checked and `output-illustration` unchecked + disabled on every load (fresh session and loaded configuration) and after any number of clicks on either; the panel's `startRun` body carries `output` `{"story":true,"illustration":false}` in every real session (defaults and every stored configuration have exactly this value).
 
 ### FR-34 — Mobile layout
-- Happy path: viewport width < 768 px → the panel lives in a `mat-sidenav` in `over` mode, closed by default; the
-  header shows a "Scenario" button (`scenario-drawer-toggle`) that opens it; a close button (`scenario-drawer-close`)
-  or backdrop click closes it. The center content fills the width (no horizontal scroll at 390 px).
-- Rules: ≥ 768 px → `side` mode, always open, no "Scenario" button. Panel values are kept in the shared store, so
-  closing the drawer never resets them. Starting a generation from the drawer closes it.
-- Errors: none (pure layout).
+- Happy path: viewport width ≤ 767 px (CDK media query `(max-width: 767.98px)`) → the panel lives in the
+  `mat-sidenav` `scenario-drawer` in `over` mode, closed on page load; the header shows the "Scenario" button
+  `scenario-drawer-toggle` that opens it; the close button `scenario-drawer-close`, a backdrop click or Escape closes
+  it. The center content (`mat-sidenav-content`) starts at x = 0 and is as wide as the viewport; the page has no
+  horizontal scroll at 390 px.
+- Rules: width ≥ 768 px → `side` mode, always open, `disableClose`, no `scenario-drawer-toggle` and no
+  `scenario-drawer-close` in the DOM (desktop unchanged). Panel values live in the shared `ScenarioStore`, so
+  opening/closing the drawer never resets or changes them (the panel component is not re-created). Crossing the
+  breakpoint at runtime switches the mode; entering mobile mode always starts closed. The generate button stays in
+  the center (welcome view), not in the drawer. Loading/error states render no sidenav and no toggle (as FR-1).
+- Errors: none (pure layout, no API call, no `ApiError.code`).
+- Changes earlier behaviour: below 768 px the panel was a 300 px `side` sidenav always open next to the center → now an `over` drawer closed on load plus a "Scenario" header button; ≥ 768 px is unchanged, Vitest (jsdom, no `matchMedia` → CDK reports no match → desktop) and the E2E project (Desktop Chrome 1280×720) both run in desktop mode, and no existing test sets a narrow viewport (grep `setViewportSize|viewport|matchMedia|sidenav|scenario-drawer` in `frontend/src/app/**/*.spec.ts` and `e2e/tests`: no hits; `app-header` assertions in `app.spec.ts`, `chatgpt-connection.spec.ts`, `smoke.spec.ts`, `scenario-controls.spec.ts` only check containment/order of wordmark and status, which stay) (tests: none)
+- Ranges & invariants: viewport width classes — 360, 390, 414, 767 px → mobile (`over`, closed on load, toggle present, `scenario-panel` hidden); 768, 1024, 1280 px → desktop (`side`, open, `scenario-panel` visible, no toggle/close); invariants for every mobile width 360/390/414/767 with the drawer closed: `document.documentElement.scrollWidth ≤ window.innerWidth`, `mat-sidenav-content` bounding box x = 0 and width = viewport width (±1 px), every header child's bounding box lies within [0, viewport width]; for any sequence of open/close (toggle, close button, backdrop, Escape) and any Darkness value 1–10 set while open, after closing `ScenarioStore.darkness()` (and the whole `configuration()`) equals the last value set and `value-darkness` shows it again on reopen; the toggle's `aria-expanded` always equals the drawer's opened state.
 
 ### Validation precedence (all 400s above)
 The backend reports the first violation in this order: JSON syntax → realism → darkness → optimism → horizon →
@@ -213,7 +220,8 @@ its body.
     `custom-wildcard-intensity-<index>` (the `mat-slider`), `custom-wildcard-intensity-<index>-input` (its
     `matSliderThumb`), `custom-wildcard-remove-<index>` — details in "Slice 18_custom-wildcards-output"
   - output: `output-section`, `output-story`, `output-illustration`, `output-illustration-badge` ("MVP+1")
-  - mobile: `scenario-drawer-toggle` ("Scenario"), `scenario-drawer-close`
+  - mobile: `scenario-drawer` (the `mat-sidenav`, both modes), `scenario-drawer-toggle` ("Scenario", mobile only),
+    `scenario-drawer-close` (mobile only) — details in "Slice 19_mobile-layout"
 - Keyboard: every control reachable by Tab with visible focus, sliders operable with arrow keys, accessible names
   equal to the visible labels (NFR-5).
 
@@ -532,3 +540,55 @@ Files: `src/app/scenario/custom-wildcards.ts` (`CustomWildcardsComponent`), `src
   - FR-6: fresh page → `output-story` checked, `output-illustration` unchecked + disabled, badge "MVP+1"
     (`evidence(page, 'FR-6', 'output-settings')`); click `output-illustration` with `force: true` → still unchecked;
     click `output-story` → still checked. API rows may be checked with `request.post('/api/runs', …)`.
+
+## Slice 19_mobile-layout — test contract (FR-34)
+
+Frontend only: no migration, no change to `api/openapi.yaml`, no new `ApiError.code`. Where this section is more
+precise than "Behaviour" or "UI", this section wins.
+
+### Frontend
+Files: `src/app/layout.ts` exports `MOBILE_QUERY = '(max-width: 767.98px)'`; `app.ts` / `app.html` / `app.scss`
+changed. `App` decides the mode only via `inject(BreakpointObserver).observe(MOBILE_QUERY)` (`matches` true →
+mobile) — unit tests replace it with `{ provide: BreakpointObserver, useValue: { observe: () => subject,
+isMatched: () => subject.value.matches } }` where `subject` is a `BehaviorSubject<BreakpointState>`.
+
+- `mat-sidenav` `data-testid="scenario-drawer"` (rendered only when `loader.state() === 'ready'`, as before):
+  - desktop: `mode="side"`, opened, `disableClose` true → class `mat-drawer-side` + `mat-drawer-opened`.
+  - mobile: `mode="over"`, closed on load and whenever mobile mode is entered → class `mat-drawer-over`, no
+    `mat-drawer-opened`; `scenario-panel` is in the DOM but not visible (Playwright `toBeHidden`). Opening →
+    class `mat-drawer-opened`, `scenario-panel` visible, a `.mat-drawer-backdrop.mat-drawer-shown` covers the
+    center. Width `min(300px, 85vw)`.
+  - `scenario-drawer-close`: `mat-icon-button`, `aria-label` "Close scenario panel", `<mat-icon>close</mat-icon>`,
+    first element inside the sidenav above `<app-scenario-panel>`; only in mobile mode. Click → closed.
+  - Backdrop click and Escape (sidenav default, `disableClose` false in mobile) → closed.
+- Header `app-header`:
+  - `scenario-drawer-toggle`: `mat-stroked-button` with text exactly "Scenario", first child of the toolbar (before
+    `app-wordmark`), only in mobile mode and only when the loader is ready; `aria-expanded` "true"/"false" = drawer
+    opened; `aria-controls` the sidenav's id. Click → toggles the drawer.
+  - mobile: the toolbar wraps (`height: auto`, `flex-wrap: wrap`, row gap), so wordmark, toggle, "Recent futures",
+    `chatgpt-status` and connect/disconnect stay inside the viewport; desktop styling unchanged.
+- Center: `mat-sidenav-content` has no left margin in mobile mode (x = 0, full width); `.layout` min-height as before.
+- Values: the drawer hosts the same `ScenarioPanel` instance for its whole life; closing it changes nothing in
+  `ScenarioStore`.
+
+### Test locations and traces (`// @trace FR-34`)
+- Frontend unit (Vitest): `src/app/app.mobile.spec.ts` with the stub `BreakpointObserver` above (same
+  catalogue/configuration flush helpers as `app.spec.ts`):
+  - matches false → `scenario-drawer` has `mat-drawer-side` + `mat-drawer-opened`, no `scenario-drawer-toggle`, no
+    `scenario-drawer-close`.
+  - matches true → `mat-drawer-over`, not opened, `scenario-drawer-toggle` text "Scenario" inside `app-header` and
+    before `app-wordmark`, `aria-expanded` "false"; while loading/error: no toggle, no `scenario-drawer`.
+  - click toggle → opened, `aria-expanded` "true"; `scenario-drawer-close` click → closed, "false".
+  - open, set `slider-darkness-input` to 9 (input+change events), close → `ScenarioStore.darkness()` 9, reopen →
+    `value-darkness` "9"; other configuration fields unchanged.
+  - subject emits false after true while open → side + opened; emits true again → over + closed.
+- E2E (`e2e/tests/mobile-layout.spec.ts`, `page.setViewportSize({ width: 390, height: 844 })` before `goto('/')`):
+  - load → `scenario-drawer-toggle` visible with text "Scenario", `scenario-panel` hidden, `welcome-view` visible,
+    `scrollWidth ≤ innerWidth`, `mat-sidenav-content` box x = 0 / width 390 ± 1 (`evidence(page, 'FR-34',
+    'mobile-closed')`).
+  - toggle → `scenario-panel` visible (`evidence(page, 'FR-34', 'mobile-drawer-open')`); `fill('9')` on
+    `slider-darkness-input`; `scenario-drawer-close` → panel hidden; toggle → `value-darkness` "9". Also close via
+    Escape and via backdrop click (`.mat-drawer-backdrop`) → hidden, value kept.
+  - parameterized widths 360, 414, 767 → mobile (toggle visible, panel hidden, no horizontal scroll, header children
+    within viewport); 768 and 1280 → toggle count 0, `scenario-panel` visible.
+

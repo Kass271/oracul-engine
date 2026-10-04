@@ -1,0 +1,40 @@
+{
+  "slice": "19_mobile-layout",
+  "round": 5,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "e2e/tests/mobile-layout.spec.ts",
+      "line": 59,
+      "fr": "FR-34",
+      "problem": "Spec invariant: \"the toggle's aria-expanded always equals the drawer's opened state\" for every close path (toggle, close button, backdrop, Escape). The only code that keeps `drawerOpen` in sync after a backdrop click or the sidenav's own Escape handling is `(closedStart)=\"isMobile() && drawerOpen.set(false)\"` in app.html. No test covers this path. The unit spec (app.mobile.spec.ts) closes only through the close button and the document Escape handler, never through `.mat-drawer-backdrop`. The E2E test does click the backdrop, but then it reopens and asserts only `value-darkness` toHaveText('9'). That element is in the DOM while the drawer is hidden, so the assertion passes even if the toggle click did not reopen the drawer. That is exactly the failure you would get if closedStart were removed: aria-expanded stays \"true\", so the first toggle click just sets it to false. aria-expanded is never asserted in E2E. The reopen after the close button (line 52-53) has the same weak assertion. [Round 5: verified fixed. app.mobile.spec.ts now has 'backdrop click closes the drawer and one toggle click reopens it' (clicks .mat-drawer-backdrop, asserts no mat-drawer-opened, aria-expanded 'false', one toggle click -> 'true' + opened). This path reaches only closedStart, so it isolates the sync binding. The sidenav-element Escape test bubbles to the document handler too, so it does not isolate closedStart on its own, but the backdrop test already covers that. E2E now asserts aria-expanded after every open/close and scenario-panel toBeVisible after every reopen (button, Escape, backdrop).]",
+      "fix": "In app.mobile.spec.ts, add an aria-expanded invariant test that opens the drawer, closes it by clicking `.mat-drawer-backdrop` (and by keydown Escape dispatched on the sidenav element), then asserts `mat-drawer-opened` is absent, aria-expanded is \"false\", and one toggle click reopens it (aria-expanded \"true\"). In the E2E test, after each reopen, assert `scenario-panel` toBeVisible() and toggle toHaveAttribute('aria-expanded', 'true'/'false') after each open/close.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "frontend/src/app/app.mobile.spec.ts",
+      "line": 167,
+      "fr": "FR-34",
+      "problem": "The spec's ranges & invariants say \"any Darkness value 1-10 set while open\" survives close/reopen, but only the value 9 is tested, in both unit and E2E. Also, the E2E header-within-viewport check runs at 360/414/767 but not at 390, and the desktop class 1024 px from the ranges list is not exercised. The test contract lists only 768/1280, so that part is consistent with the contract.",
+      "fix": "Parameterize the unit retention test over darkness 1..10 (it.each), and call headerWithin(page, 390) in the 390 px test.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/app.ts",
+      "line": 35,
+      "fr": "FR-34",
+      "problem": "The document-level `(document:keydown.escape)` handler ignores `event.defaultPrevented`. In mobile mode the header (including the Recent futures `mat-menu` trigger) is outside the sidenav container, so the backdrop does not cover it. With the drawer open, a user can open the Recent futures menu. Pressing Escape to dismiss the menu (MatMenu calls preventDefault) also closes the scenario drawer. Related: selecting a recent future navigates to /futures/:id while the over-mode drawer stays open on top of it.",
+      "fix": "Take the event in onEscape($event) and return early when `event.defaultPrevented`. Optionally, close the drawer on NavigationEnd in mobile mode.",
+      "status": "open"
+    }
+  ]
+}

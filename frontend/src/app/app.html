@@ -1,4 +1,16 @@
-<mat-toolbar data-testid="app-header">
+<mat-toolbar data-testid="app-header" [class.mobile]="isMobile()">
+  @if (isMobile() && loader.state() === 'ready') {
+    <button
+      mat-stroked-button
+      type="button"
+      data-testid="scenario-drawer-toggle"
+      aria-controls="scenario-drawer"
+      [attr.aria-expanded]="drawerOpen() ? 'true' : 'false'"
+      (click)="drawerOpen.set(!drawerOpen())"
+    >
+      Scenario
+    </button>
+  }
   <span class="wordmark" data-testid="app-wordmark">ORACUL</span>
   <span class="spacer"></span>
   <app-recent-futures />
@@ -7,7 +19,27 @@
 
 <mat-sidenav-container class="layout">
   @if (loader.state() === 'ready') {
-    <mat-sidenav mode="side" [opened]="true" [disableClose]="true">
+    <mat-sidenav
+      id="scenario-drawer"
+      data-testid="scenario-drawer"
+      [class.drawer-mobile]="isMobile()"
+      [mode]="isMobile() ? 'over' : 'side'"
+      [opened]="isMobile() ? drawerOpen() : true"
+      [disableClose]="!isMobile()"
+      [autoFocus]="isMobile() ? 'first-tabbable' : 'false'"
+      (closedStart)="isMobile() && drawerOpen.set(false)"
+    >
+      @if (isMobile()) {
+        <button
+          mat-icon-button
+          type="button"
+          data-testid="scenario-drawer-close"
+          aria-label="Close scenario panel"
+          (click)="drawerOpen.set(false)"
+        >
+          <mat-icon>close</mat-icon>
+        </button>
+      }
       <app-scenario-panel />
     </mat-sidenav>
   }
@@ -21,7 +53,9 @@
       @case ('error') {
         <div class="center" data-testid="backend-unavailable">
           <p>ORACUL is unavailable — try again shortly</p>
-          <button mat-flat-button data-testid="backend-retry" (click)="loader.load()">Try again</button>
+          <button mat-flat-button data-testid="backend-retry" (click)="loader.load()">
+            Try again
+          </button>
         </div>
       }
       @case ('ready') {
