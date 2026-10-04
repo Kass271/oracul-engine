@@ -21,7 +21,7 @@ class ChatGptPendingExpiryIT extends AbstractChatGptIT {
     void expiredStateIsNotCompletedWithoutTokenRequest() throws Exception {
         String sid = newSid();
         Started s = start(sid);
-        assertThat(callbackLocation("code=c&state=" + enc(s.state()))).isEqualTo(NOT_COMPLETED);
+        assertThat(callbackLocation(returnQuery(s, "c"))).isEqualTo(NOT_COMPLETED);
         assertThat(stub.requests).isEmpty();
         assertThat(stateOf(sid)).isEqualTo("NOT_CONNECTED");
     }

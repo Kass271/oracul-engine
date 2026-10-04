@@ -1,8 +1,8 @@
 {
   "/api": { "target": "http://localhost:8080", "secure": false },
-  "/auth/callback": {
+  "/callback": {
     "target": "http://localhost:8080",
     "secure": false,
-    "pathRewrite": { "^/auth/callback": "/api/auth/chatgpt/callback" }
+    "pathRewrite": { "^/callback": "/api/auth/chatgpt/callback" }
   }
 }

@@ -1,0 +1,73 @@
+{
+  "slice": "01_signin-fix",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/ChatGptAuthService.java",
+      "line": 238,
+      "fr": "FR-37",
+      "problem": "resetRegistration() checks anyRunActive() under resetLock, but run creation does not take that lock. A run can be inserted as QUEUED between the check and clearEverything(), so its credentials are dropped (and its refresh token revoked) mid-run. The spec says 'under one lock, if any run is QUEUED or RUNNING → 409'. The window is small and the run fails cleanly with session-expired, so no data is lost.",
+      "fix": "Make run creation and the reset exclusive, for example with a shared lock or a DB advisory lock around 'check credentials + insert run' and 'check runs + reset'.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/ChatGptAuthService.java",
+      "line": 181,
+      "fr": "FR-37",
+      "problem": "A first-registration callback that already removed its pending entry and is waiting on the token/JWKS request is not stopped by a concurrent reset. After the reset it still runs persistClientIdIfAbsent and putCredentials, so the installation ends up connected with a stored client id right after a 'successful' reset. This needs the user to reset during the seconds of an in-flight sign-in.",
+      "fix": "Keep a reset generation counter. Capture it in PendingAuthorization at start() and skip the persist/store steps when it changed before step 11.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "docker-compose.override.yml",
+      "line": 12,
+      "fr": "FR-36",
+      "problem": "The spec's test-fixture section says the E2E stub serves the JWKS at GET /.well-known/jwks.json and the override sets ORACUL_CHATGPT_JWKS_URL to that path. The stub (e2e/stubs/server.mjs) and the override use /jwks instead. They match each other, so this is a doc/fixture deviation, not a functional one.",
+      "fix": "Serve the stub JWKS at /.well-known/jwks.json (mirroring the real issuer layout) and point the override at it, or update the spec's fixture section.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/runs/RunFailures.java",
+      "line": 25,
+      "fr": "FR-36",
+      "problem": "The new `default -> \"Something went wrong — try again\"` branch silently maps every failure code added by the regenerated contract (FR-39 codes, other slice) to the generic message. The exhaustive switch no longer forces later slices to supply their plain-language messages.",
+      "fix": "Remove the default once FR-39 lands, or list the new codes explicitly so a missing mapping fails compilation.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/chatgpt/ChatGptIdTokenIT.java",
+      "line": 56,
+      "fr": "FR-36",
+      "problem": "The spec's exp classes are 'now+1 s ✓ / now ✗ / now−1 s ✗ (injected Clock)'. The IT uses the real wall clock and widens the valid class to now+2 s. It can flake if the callback takes more than about 1 s, and it does not pin the exact boundary at the IT level (IdTokenValidatorTest may cover it as a unit test).",
+      "fix": "Use a fixed/mutable test Clock bean in this IT and assert now+1 s valid and now invalid exactly.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/ChatGptProperties.java",
+      "line": 38,
+      "fr": "FR-35",
+      "problem": "requireLoopbackRedirect accepts a redirect URI with userinfo, e.g. http://user@127.0.0.1:4200/callback, because getHost() is still 127.0.0.1. The spec allows only http://127.0.0.1:<port>/callback. This is configuration-only input.",
+      "fix": "Also require uri.getRawUserInfo() == null, and add that value to the parameterized startup test.",
+      "status": "open"
+    }
+  ]
+}

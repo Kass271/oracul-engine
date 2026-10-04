@@ -14,6 +14,11 @@ import { RunStore } from './run.store';
     </button>
     @if (!connection.canGenerate()) {
       <p class="hint" data-testid="generate-hint">Connect ChatGPT to generate</p>
+      @if (connection.state() !== 'LOADING' && connection.state() !== 'CONNECTED') {
+        <p class="hint" data-testid="chatgpt-conditions">
+          Signing in needs a personal ChatGPT Plus or Pro account. Open ORACUL in a browser on the same computer where ORACUL runs.
+        </p>
+      }
     }
   `,
   styles: `

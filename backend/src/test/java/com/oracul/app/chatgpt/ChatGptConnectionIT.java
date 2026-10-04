@@ -98,7 +98,7 @@ class ChatGptConnectionIT extends AbstractChatGptIT {
         stub.responder = r -> stub.ok(3600, "openid profile email offline_access resource.invoke", true);
         String sid = newSid();
         Started s = start(sid);
-        assertThat(callbackLocation("code=c&state=" + enc(s.state()))).isEqualTo(NOT_ELIGIBLE);
+        assertThat(callbackLocation(returnQuery(s, "c"))).isEqualTo(NOT_ELIGIBLE);
         assertThat(connection(sid)).isEqualTo(Map.of("state", "PLAN_NOT_ELIGIBLE", "canGenerate", false));
         assertError(startRun(sid), 403, "CHATGPT_PLAN_NOT_ELIGIBLE", NOT_ELIGIBLE_MSG);
     }
@@ -109,7 +109,7 @@ class ChatGptConnectionIT extends AbstractChatGptIT {
         stub.responder = r -> stub.ok(3600, null, true);
         String sid = newSid();
         Started s = start(sid);
-        assertThat(callbackLocation("code=c&state=" + enc(s.state()))).isEqualTo(CONNECTED);
+        assertThat(callbackLocation(returnQuery(s, "c"))).isEqualTo(CONNECTED);
         assertThat(stateOf(sid)).isEqualTo("CONNECTED");
     }
 
@@ -120,7 +120,7 @@ class ChatGptConnectionIT extends AbstractChatGptIT {
         connect(sid);
         stub.responder = r -> stub.ok(3600, "openid", true);
         Started s = start(sid);
-        assertThat(callbackLocation("code=c&state=" + enc(s.state()))).isEqualTo(NOT_ELIGIBLE);
+        assertThat(callbackLocation(returnQuery(s, "c"))).isEqualTo(NOT_ELIGIBLE);
         assertThat(stateOf(sid)).isEqualTo("PLAN_NOT_ELIGIBLE");
         stub.reset();
         connect(sid);
@@ -147,7 +147,7 @@ class ChatGptConnectionIT extends AbstractChatGptIT {
         stub.responder = r -> stub.ok(3600, "openid", true);
         String sid = newSid();
         Started s = start(sid);
-        callbackLocation("code=c&state=" + enc(s.state()));
+        callbackLocation(returnQuery(s, "c"));
         disconnect(sid).andExpect(status().isNoContent());
         assertThat(stateOf(sid)).isEqualTo("NOT_CONNECTED");
     }

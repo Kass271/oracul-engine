@@ -11,7 +11,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record ChatGptProperties(
     @DefaultValue("https://auth.openai.com/api/accounts/authorize") String authorizeUrl,
     @DefaultValue("https://auth.openai.com/api/accounts/oauth/token") String tokenUrl,
-    @DefaultValue("http://127.0.0.1:4200/auth/callback") String redirectUri,
+    @DefaultValue("http://127.0.0.1:4200/callback") String redirectUri,
     @DefaultValue("openid profile email offline_access resource.invoke chatgpt.tokens.use.direct") String scopes,
     @DefaultValue("https://api.openai.com/v1") String resource,
     @DefaultValue("dynamic_agent_client") String dynamicClientId,
@@ -19,10 +19,14 @@ public record ChatGptProperties(
     @DefaultValue("chatgpt.tokens.use.direct") String requiredScope,
     @DefaultValue("PT10M") Duration pendingTtl,
     @DefaultValue("PT60S") Duration refreshSkew,
-    @DefaultValue("PT10S") Duration httpTimeout) {
+    @DefaultValue("PT10S") Duration httpTimeout,
+    @DefaultValue("https://auth.openai.com") String issuer,
+    @DefaultValue("https://auth.openai.com/.well-known/jwks.json") String jwksUrl,
+    @DefaultValue("https://auth.openai.com/api/accounts/oauth/revoke") String revocationUrl,
+    @DefaultValue("PT1H") Duration jwksCacheTtl) {
 
     private static final String REDIRECT_MESSAGE =
-        "oracul.chatgpt.redirect-uri must be http://127.0.0.1:<port>/auth/callback";
+        "oracul.chatgpt.redirect-uri must be http://127.0.0.1:<port>/callback";
 
     public ChatGptProperties {
         requireLoopbackRedirect(redirectUri);
@@ -32,7 +36,8 @@ public record ChatGptProperties(
         try {
             URI uri = new URI(redirectUri);
             if (uri.isAbsolute() && "http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost())
-                && uri.getPort() > 0 && "/auth/callback".equals(uri.getPath())) {
+                && uri.getPort() >= 1 && uri.getPort() <= 65535 && "/callback".equals(uri.getPath())
+                && uri.getRawQuery() == null && uri.getRawFragment() == null) {
                 return;
             }
         } catch (Exception e) {

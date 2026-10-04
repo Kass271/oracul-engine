@@ -130,11 +130,19 @@ public abstract class AbstractRunIT {
         assertEquals(302, r.getResponse().getStatus(), "authorize must redirect");
         String loc = r.getResponse().getHeader("Location");
         String state = null;
+        String nonce = null;
+        String clientId = null;
         for (String pair : loc.substring(loc.indexOf('?') + 1).split("&")) {
             if (pair.startsWith("state=")) state = URLDecoder.decode(pair.substring(6), StandardCharsets.UTF_8);
+            if (pair.startsWith("nonce=")) nonce = URLDecoder.decode(pair.substring(6), StandardCharsets.UTF_8);
+            if (pair.startsWith("client_id=")) clientId = URLDecoder.decode(pair.substring(10), StandardCharsets.UTF_8);
         }
-        MvcResult cb = mvc.perform(get("/api/auth/chatgpt/callback?code=" + URLEncoder.encode("code-" + System.nanoTime(), StandardCharsets.UTF_8)
-            + "&state=" + URLEncoder.encode(state, StandardCharsets.UTF_8))).andReturn();
+        String code = "code-" + System.nanoTime();
+        stub.expectNonce(code, nonce);
+        // a first registration must bring the issued client id back (phase-02 FR-36); a reauthorization may omit it
+        String issued = "dynamic_agent_client".equals(clientId) ? "&client_id=oaiapp_stub_issued" : "";
+        MvcResult cb = mvc.perform(get("/api/auth/chatgpt/callback?code=" + URLEncoder.encode(code, StandardCharsets.UTF_8)
+            + "&state=" + URLEncoder.encode(state, StandardCharsets.UTF_8) + issued)).andReturn();
         assertEquals(302, cb.getResponse().getStatus());
     }
 

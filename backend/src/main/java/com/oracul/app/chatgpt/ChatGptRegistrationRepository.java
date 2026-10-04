@@ -38,4 +38,15 @@ class ChatGptRegistrationRepository {
         jdbc.update("update chatgpt_client_registration set client_id = ?, updated_at = ? where client_id is null",
             clientId, clock.instant().atOffset(ZoneOffset.UTC));
     }
+
+    boolean anyRunActive() {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+            "select exists (select 1 from generation_run where status in ('QUEUED','RUNNING'))", Boolean.class));
+    }
+
+    /** Forgets the issued client id (host id is kept); no row means nothing to do. */
+    void clearClientId() {
+        jdbc.update("update chatgpt_client_registration set client_id = null, updated_at = ?",
+            clock.instant().atOffset(ZoneOffset.UTC));
+    }
 }

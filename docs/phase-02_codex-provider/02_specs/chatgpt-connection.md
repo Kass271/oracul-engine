@@ -109,6 +109,11 @@ http://127.0.0.1:<port>/callback")`. Examples: `http://127.0.0.1:4200/callback` 
   - database unavailable while ensuring the registration → same `302 ?chatgpt=not_completed`
   - invalid `oracul.chatgpt.redirect-uri` → application does not start (`IllegalStateException`, message above)
 
+- Changes earlier behaviour: `ext_agent_host_id` bare UUID sent on first registration only (`UUID.fromString` of the value; reauthorization asserted to carry no host id) → `urn:uuid:<host_id>` on every authorize request incl. reauthorization, stored `host_id` stays the bare UUID (tests: backend/src/test/java/com/oracul/app/chatgpt/ChatGptSignInIT.java)
+- Changes earlier behaviour: `redirect_uri` `http://127.0.0.1:4200/auth/callback` and startup message `…must be http://127.0.0.1:<port>/auth/callback` → `http://127.0.0.1:4200/callback` and `…must be http://127.0.0.1:<port>/callback`; the web-server path `/auth/callback` is gone (tests: backend/src/test/java/com/oracul/app/chatgpt/AbstractChatGptIT.java, backend/src/test/java/com/oracul/app/chatgpt/ChatGptStartupValidationTest.java, e2e/tests/chatgpt-connection.spec.ts)
+- Changes earlier behaviour: no `nonce` parameter → fresh 43-char `nonce` on every authorize request (tests: none)
+- Ranges & invariants: `oracul.chatgpt.redirect-uri` classes (parameterized startup test, valid → context starts, invalid → `IllegalStateException` with the exact message): valid `http://127.0.0.1:4200/callback`, `http://127.0.0.1:1/callback`, `http://127.0.0.1:65535/callback`, `http://127.0.0.1:1455/callback`; invalid scheme `https://…`, host `localhost` / `127.0.0.2` / `[::1]`, no port, port `0`, port `65536`, path `/auth/callback` / `/callback/` / `/other` / empty, any query `?x=1`, any fragment `#f`. Authorize request invariants for every start (first registration and reauthorization, N ≥ 3 starts): the parameter set is exactly the 11 (first registration) / 10 (reauthorization) names of the table, each once, no `id_token_hint`/`login_hint`; `ext_agent_host_id` = `urn:uuid:` + the stored `host_id` text (45 chars, matches `^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`) and identical across all starts and across reset; `state`, `nonce`, `code_challenge` each match `^[A-Za-z0-9_-]{43}$` and are pairwise distinct across the N starts; `code_challenge` = S256 of the verifier later sent to the token endpoint (verifier `^[A-Za-z0-9_-]{86}$`); `redirect_uri` identical in every start and equal to the one sent in the token request; `chatgpt_client_registration` has exactly one row after any number of starts; a pre-existing row with a bare UUID is reused (no new host id).
+
 ### FR-36 — Callback handling, nonce check and issued client id persistence
 - Happy path: OpenAI redirects the browser to `http://127.0.0.1:4200/callback?code=…&state=…[&client_id=oaiapp_X]
   [&scope=…]` → nginx forwards to `GET /api/auth/chatgpt/callback` → `302 Location:
@@ -175,6 +180,16 @@ http://127.0.0.1:<port>/callback")`. Examples: `http://127.0.0.1:4200/callback` 
     ORACUL"; header "Plan not eligible"; `canGenerate=false`
   - over-long parameter → `not_completed`, no token request
 
+- Changes earlier behaviour: first-registration callback without issued `client_id` → exchanged with `dynamic_agent_client` and ended `connected` → `not_completed`, no token request, nothing persisted; every test sign-in helper must now pass `client_id=oaiapp_…` on a first registration (and may omit it on reauthorization) (tests: backend/src/test/java/com/oracul/app/chatgpt/AbstractChatGptIT.java, backend/src/test/java/com/oracul/app/runs/AbstractRunIT.java, backend/src/test/java/com/oracul/app/chatgpt/ChatGptSignInIT.java, backend/src/test/java/com/oracul/app/chatgpt/ChatGptConnectionIT.java, backend/src/test/java/com/oracul/app/chatgpt/ChatGptCredentialHandlingIT.java)
+- Changes earlier behaviour: malformed callback `client_id` (`evil client`, `oaiapp_`, `other_abc`, `oaiapp_bad!id`) on first registration ignored → `connected` with `dynamic_agent_client` → `not_completed`, no token request, `client_id` stays NULL (tests: backend/src/test/java/com/oracul/app/chatgpt/ChatGptSignInIT.java)
+- Changes earlier behaviour: reauthorization callback with a different `client_id` (`oaiapp_other`) ignored → `connected` → `not_completed`, no token request, stored id unchanged (tests: backend/src/test/java/com/oracul/app/chatgpt/ChatGptSignInIT.java)
+- Changes earlier behaviour: token-response `id_token` stored unvalidated (stub issues opaque `id-STUBSECRET-<n>`) → must be an RS256 JWT verified against `jwks-url` with `iss`, `aud`, `exp`, `nonce`, else `not_verified`; the in-process stub must sign ID tokens (claims `iss`=`oracul.chatgpt.issuer`, `aud`=form `client_id`, `exp`=now+3600, `nonce`=the nonce of the attempt taken from the authorize Location, `kid` of its JWKS), serve the JWKS and register `oracul.chatgpt.jwks-url` / `oracul.chatgpt.issuer` in `registerAll` (tests: backend/src/test/java/com/oracul/app/chatgpt/StubOpenAi.java, backend/src/test/java/com/oracul/app/chatgpt/AbstractChatGptIT.java, backend/src/test/java/com/oracul/app/runs/AbstractRunIT.java, backend/src/test/java/com/oracul/app/chatgpt/ChatGptCredentialHandlingIT.java)
+- Changes earlier behaviour: token endpoint 4xx with `{"error":"invalid_grant"}` → `not_completed` → `expired` (400 and 401 cases of the parameterized non-2xx test; 500 and 302 stay `not_completed`) (tests: backend/src/test/java/com/oracul/app/chatgpt/ChatGptSignInIT.java)
+- Changes earlier behaviour: authorization-code token form without `resource` → adds `resource=https://api.openai.com/v1` (tests: none)
+- Changes earlier behaviour: snackbar for `?chatgpt=not_completed` "ChatGPT connection was not completed" → "ChatGPT connection was not completed — please try again" (tests: frontend/src/app/chatgpt/connection.store.spec.ts, frontend/src/app/chatgpt/chatgpt-connection.spec.ts, e2e/tests/chatgpt-connection.spec.ts)
+- Changes earlier behaviour: `?chatgpt=not_verified` / `?chatgpt=expired` showed no snackbar (unknown value) → messages of the table above (tests: none)
+- Ranges & invariants: parameter lengths (parameterized, boundary each side): `code` 4096 → proceeds / 4097 → `not_completed`, nothing removed; `state` 512 / 513; `error` 256 / 257; `error_description` 2048 / 2049; `client_id` 256 / 257. Callback `client_id` classes on first registration: `oaiapp_a` (1 char after prefix) ✓, `oaiapp_` + 249 chars [A-Za-z0-9_-] (256 total) ✓, missing ✗, empty ✗, `oaiapp_` ✗, `dynamic_agent_client` ✗, `oaiapp_bad!id` ✗, `evil client` ✗, `OAIAPP_x` ✗ (✗ = `not_completed`, 0 token requests, `client_id` NULL); on reauthorization: absent ✓, equal ✓, any other value incl. another valid `oaiapp_…` ✗. ID-token classes (each alone, all else valid; ✗ = `not_verified`, nothing stored/persisted): `alg` RS256 ✓ / `none`, `HS256`, `RS512` ✗; missing `kid` ✗; unknown `kid` → exactly one JWKS refetch, still unknown ✗; tampered payload or signature ✗; JWKS 500 / unreachable / not JSON ✗; `iss` equal ✓ / other / with trailing `/` / missing ✗; `aud` = client id ✓ / array containing it ✓ / other string / array without it / missing ✗; `exp` = now+1 s ✓ / now ✗ / now−1 s ✗ / missing ✗ (injected `Clock`); `nonce` equal ✓ / nonce of another pending attempt / missing ✗; `id_token` missing / not 3 segments ✗. Token-response classes: 4xx with `error`=`invalid_grant` (string or `error.code`) → `expired`; 4xx with any other error, 5xx, 3xx (also with an `invalid_grant` body), timeout, non-JSON, missing/empty/null `access_token` → `not_completed`. Invariants for every callback: answer is 302 with Location exactly one of the 5 outcome URLs, never 4xx/5xx, never containing `code`, `state`, `nonce`, `error`, `error_description` or a token; rules 1–6 make 0 token requests, later rules exactly 1; a state is usable at most once (second use → `not_completed`, 0 token requests); `chatgpt_client_registration.client_id` changes only from NULL to the exchange client id of a first-registration attempt that passed rule 10 (outcomes `connected` or `not_eligible`), is never `dynamic_agent_client`, is never overwritten; on any non-`connected` outcome the session's previous credentials/flag are unchanged except `not_eligible`, which drops them.
+
 ### FR-37 — Reset ChatGPT connection
 - Happy path: header menu `chatgpt-menu` → item `chatgpt-reset` "Reset ChatGPT connection" → dialog
   `chatgpt-reset-dialog` → `chatgpt-reset-confirm` "Reset" → `DELETE /api/auth/chatgpt/registration` → `204` → snackbar
@@ -203,6 +218,10 @@ http://127.0.0.1:<port>/callback")`. Examples: `http://127.0.0.1:4200/callback` 
     header keeps its state
   - network error / backend down → snackbar "Something went wrong — try again"
 
+- Changes earlier behaviour: disconnect made no outbound call → one best-effort `POST revocation-url` per held refresh token before clearing; the in-process stub must serve the revocation endpoint, register `oracul.chatgpt.revocation-url` in `registerAll` (no test may reach the real OpenAI URL, NFR-7) and record revocation calls apart from the token `requests` list so existing token-request counts stay (tests: backend/src/test/java/com/oracul/app/chatgpt/StubOpenAi.java)
+- Changes earlier behaviour: `ChatGptConnectionState` has 4 values and the header has no menu → 5 values (`REGISTRATION_INVALID` "Registration invalid", no connect) and `chatgpt-menu` in every non-LOADING state; the spec's exhaustive `STATUS_TEXT: Record<ChatGptConnectionState, string>` no longer compiles against the regenerated model (tests: frontend/src/app/chatgpt/chatgpt-connection.spec.ts)
+- Ranges & invariants: run-status classes for reset (parameterized over all `RunStatus` values, any session): a run QUEUED → 409 `RUN_IN_PROGRESS`, RUNNING → 409, only COMPLETED / INSUFFICIENT_EVIDENCE / FAILED runs or no run → 204; a 409 changes nothing (client id, tokens, pending entries, flags, revocation calls = 0). Revocation outcome classes (200, 400, 500, timeout > `http-timeout`, connection refused) → reset and disconnect still 204 and the same state afterwards. Invariants after every 204 reset: `host_id` and the registration row count are unchanged (0 stays 0, 1 stays 1), `client_id` is NULL, every session (≥ 2 sessions tested) is NOT_CONNECTED, every pending state is unusable (callback → `not_completed`, 0 token requests), revocation calls = number of held refresh tokens (sessions without a refresh token add none), each with form exactly `token`, `token_type_hint=refresh_token`, `client_id`; reset is idempotent (second reset 204, 0 revocations); the next authorize is a first registration with the same `ext_agent_host_id`. Logs never contain a refresh token, only `chatgpt revocation: status=<code>` / `chatgpt revocation failed: <ExceptionSimpleName>`. UI: Cancel / Escape / backdrop → 0 DELETE requests; confirm sends exactly 1 DELETE and stays disabled until it ends; the header with `chatgpt-menu` stays within the viewport at 360, 414 and 767 px (existing mobile-layout check).
+
 ### FR-41 — Sign-in conditions shown in the UI
 - Happy path: whenever the connection state is NOT_CONNECTED, PLAN_NOT_ELIGIBLE, SESSION_EXPIRED or
   REGISTRATION_INVALID, the welcome view's sign-in area (below `generate-hint` "Connect ChatGPT to generate") shows
@@ -215,6 +234,9 @@ http://127.0.0.1:<port>/callback")`. Examples: `http://127.0.0.1:4200/callback` 
     between is OpenAI's).
 - Errors:
   - connection load fails → state NOT_CONNECTED (phase-01) → conditions shown
+
+- Changes earlier behaviour: none
+- Ranges & invariants: connection-state classes (parameterized over all 5 `ChatGptConnectionState` values plus LOADING and a failed load): NOT_CONNECTED, PLAN_NOT_ELIGIBLE, SESSION_EXPIRED, REGISTRATION_INVALID, load 500, load network error → `chatgpt-conditions` present exactly once with the exact text; LOADING, CONNECTED → absent. In every one of these states and with the reset dialog open, `input[type=password]` count is 0 and no ORACUL element asks for an API key or configuration value.
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |
@@ -249,3 +271,21 @@ Web-server route (not an API operation): `GET http://127.0.0.1:4200/callback?…
   - `chatgpt-reset-confirm` — `mat-flat-button` "Reset" (disabled while the DELETE is in flight)
   - `chatgpt-conditions` — `<p>` in the welcome view with the FR-41 text
   - existing: `chatgpt-status`, `chatgpt-connect`, `chatgpt-disconnect`, `chatgpt-message`
+
+## Test fixtures (stubbed, NFR-7 — slice 01_signin-fix)
+- In-process backend stub `StubOpenAi` (one per JVM): besides `POST /oauth/token` it serves `GET /jwks` (one RSA-2048
+  key, `kid` = `stub-key-1`, `alg` RS256) and `POST /oauth/revoke` (default 200, controllable status/delay; calls kept
+  in a separate `revocations` list). `registerAll` additionally registers `oracul.chatgpt.jwks-url` =
+  `http://127.0.0.1:<port>/jwks`, `oracul.chatgpt.issuer` = `http://127.0.0.1:<port>` and
+  `oracul.chatgpt.revocation-url` = `http://127.0.0.1:<port>/oauth/revoke`. `ok(...)` returns an `id_token` signed
+  with that key: `iss` = the registered issuer, `aud` = the token request's `client_id`, `exp` = now + 3600 s, `iat`
+  = now, `nonce` = the nonce the test helper registered for that attempt (taken from the authorize `Location`). Tests
+  for invalid ID tokens build their own token (other key, other `alg`, other claims) through the same helper.
+- E2E stub `e2e/stubs/server.mjs` (port 4010, still auto-merged through `docker-compose.override.yml` in this slice):
+  `GET /oauth/authorize` remembers `nonce` and `client_id` per issued code and redirects to the given `redirect_uri`
+  (`/callback`) with `client_id=oaiapp_stub_client` only when the request used `dynamic_agent_client`;
+  `POST /oauth/token` answers with an RS256 `id_token` (`iss` `http://stub:4010`, `aud` = form `client_id`, the
+  remembered `nonce`) signed by the key served at `GET /.well-known/jwks.json`; `POST /oauth/revoke` → 200.
+  `docker-compose.override.yml` adds `ORACUL_CHATGPT_JWKS_URL=http://stub:4010/.well-known/jwks.json`,
+  `ORACUL_CHATGPT_ISSUER=http://stub:4010`, `ORACUL_CHATGPT_REVOCATION_URL=http://stub:4010/oauth/revoke`.
+- E2E reaches the callback through the web server: `http://127.0.0.1:4200/callback?…` (nginx exact location).

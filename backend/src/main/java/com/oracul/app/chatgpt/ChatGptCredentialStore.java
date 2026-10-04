@@ -11,9 +11,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class ChatGptCredentialStore {
 
-    public enum Flag { PLAN_NOT_ELIGIBLE, SESSION_EXPIRED }
+    public enum Flag { PLAN_NOT_ELIGIBLE, SESSION_EXPIRED, REGISTRATION_INVALID }
 
-    public record PendingAuthorization(Secret state, Secret codeVerifier, UUID sessionId, String clientId,
+    public record PendingAuthorization(Secret state, Secret codeVerifier, Secret nonce, UUID sessionId, String clientId,
                                        boolean dynamicRegistration, Instant createdAt) {
         @Override
         public String toString() {
@@ -78,6 +78,16 @@ public class ChatGptCredentialStore {
         credentials.remove(sessionId);
         flags.remove(sessionId);
         pending.values().removeIf(p -> p.sessionId().equals(sessionId));
+    }
+
+    /** Every held credential set (reset revokes their refresh tokens). */
+    java.util.List<SessionCredentials> allCredentials() {
+        return java.util.List.copyOf(credentials.values());
+    }
+
+    /** Drops every credential, pending authorization and flag of the installation. */
+    void clearEverything() {
+        clearAll();
     }
 
     /** Simulates a backend restart (tests). */

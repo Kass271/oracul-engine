@@ -23,7 +23,7 @@ class ChatGptTokenTimeoutIT extends AbstractChatGptIT {
         String sid = newSid();
         Started s = start(sid);
         long t0 = System.nanoTime();
-        assertThat(callbackLocation("code=c&state=" + enc(s.state()))).isEqualTo(NOT_COMPLETED);
+        assertThat(callbackLocation(returnQuery(s, "c"))).isEqualTo(NOT_COMPLETED);
         assertThat((System.nanoTime() - t0) / 1_000_000).isLessThan(3500);
         assertThat(stateOf(sid)).isEqualTo("NOT_CONNECTED");
     }

@@ -47,6 +47,12 @@ public class ChatGptController implements ChatgptApi {
         return ResponseEntity.noContent().build();
     }
 
+    @Override
+    public ResponseEntity<Void> resetChatGptRegistration() {
+        services.getObject().resetRegistration();
+        return ResponseEntity.noContent().build();
+    }
+
     private static ResponseEntity<Void> redirect(String location) {
         return ResponseEntity.status(HttpStatus.FOUND).header(HttpHeaders.LOCATION, location).build();
     }

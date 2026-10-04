@@ -73,7 +73,7 @@ class ChatGptCredentialHandlingIT extends AbstractChatGptIT {
         String startLoc = startRes.getResponse().getHeader("Location");
         Started s = new Started(startLoc, queryOf(startLoc));
         String code = "code-SECRETCODE-" + System.nanoTime();
-        MvcResult cb = callback("code=" + enc(code) + "&state=" + enc(s.state())).andReturn();
+        MvcResult cb = callback(returnQuery(s, code)).andReturn();
         responses.add(cb.getResponse().getHeader("Location"));
         responses.add(cb.getResponse().getContentAsString());
         MvcResult conn = mvc.perform(get("/api/auth/chatgpt/connection").cookie(new Cookie("ORACUL_SID", sid))).andReturn();
@@ -85,7 +85,8 @@ class ChatGptCredentialHandlingIT extends AbstractChatGptIT {
 
         String verifier = stub.requests.get(0).form().get("code_verifier");
         List<String> secrets = new ArrayList<>(stub.issued);
-        secrets.addAll(List.of(code, verifier, s.state()));
+        assertThat(s.nonce()).as("the authorize request carries a nonce").isNotNull();
+        secrets.addAll(List.of(code, verifier, s.state(), s.nonce()));
         assertThat(secrets).hasSizeGreaterThanOrEqualTo(5);
 
         for (String secret : secrets) {
@@ -105,7 +106,7 @@ class ChatGptCredentialHandlingIT extends AbstractChatGptIT {
     void providerFailureLogsOnlyStatusAndNeverTheBody(CapturedOutput output) throws Exception {
         stub.responder = r -> StubOpenAi.status(500, "{\"error\":\"PROVIDERBODY at-STUBSECRET-leak\"}");
         Started s = start(newSid());
-        String loc = callbackLocation("code=c&state=" + enc(s.state()));
+        String loc = callbackLocation(returnQuery(s, "c"));
         assertThat(loc).isEqualTo(NOT_COMPLETED);
         assertThat(output.getAll()).contains("chatgpt token request failed: status=500")
             .doesNotContain("PROVIDERBODY").doesNotContain("STUBSECRET");

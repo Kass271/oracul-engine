@@ -22,6 +22,7 @@ public final class RunFailures {
             case INTERNAL_ERROR -> "Something went wrong — try again";
             case INSUFFICIENT_EVIDENCE ->
                 throw new IllegalArgumentException("INSUFFICIENT_EVIDENCE message depends on the realism");
+            default -> "Something went wrong — try again";
         };
     }
 

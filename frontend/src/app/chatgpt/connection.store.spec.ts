@@ -7,7 +7,7 @@ import { provideRouter } from '@angular/router';
 
 import { ConnectionStore } from './connection.store';
 
-// @trace FR-8
+// @trace FR-8, FR-36
 describe('ConnectionStore message replacement (FR-8)', () => {
   let store: ConnectionStore;
   let http: HttpTestingController;
@@ -39,7 +39,7 @@ describe('ConnectionStore message replacement (FR-8)', () => {
     const open = vi.spyOn(snackBar, 'openFromComponent');
 
     store.handleReturn('not_completed');
-    expect(messages()).toEqual(['ChatGPT connection was not completed']);
+    expect(messages()).toEqual(['ChatGPT connection was not completed — please try again']);
     const firstRef = open.mock.results[0].value;
     const dismiss = vi.spyOn(firstRef, 'dismiss');
 

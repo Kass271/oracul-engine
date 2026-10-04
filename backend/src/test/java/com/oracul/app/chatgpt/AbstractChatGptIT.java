@@ -37,10 +37,13 @@ import org.springframework.test.web.servlet.ResultActions;
 abstract class AbstractChatGptIT {
 
     static final String FRONTEND = "http://localhost:4200";
-    static final String REDIRECT_URI = "http://127.0.0.1:4200/auth/callback";
+    static final String REDIRECT_URI = "http://127.0.0.1:4200/callback";
     static final String CONNECTED = FRONTEND + "/?chatgpt=connected";
     static final String NOT_COMPLETED = FRONTEND + "/?chatgpt=not_completed";
     static final String NOT_ELIGIBLE = FRONTEND + "/?chatgpt=not_eligible";
+    static final String NOT_VERIFIED = FRONTEND + "/?chatgpt=not_verified";
+    static final String EXPIRED = FRONTEND + "/?chatgpt=expired";
+    static final String ISSUED_ID = "oaiapp_stub_issued";
     static final String VALID_RUN = """
         {"realism":8,"darkness":5,"optimism":5,"horizon":"1y","wildcards":[],"customWildcards":[],
          "output":{"story":true,"illustration":false}}""";
@@ -83,6 +86,8 @@ abstract class AbstractChatGptIT {
     /** Authorize-URL parameters (decoded) plus the raw Location. */
     record Started(String location, Map<String, String> params) {
         String state() { return params.get("state"); }
+        String nonce() { return params.get("nonce"); }
+        boolean firstRegistration() { return "dynamic_agent_client".equals(params.get("client_id")); }
         String challenge() { return params.get("code_challenge"); }
     }
 
@@ -118,10 +123,35 @@ abstract class AbstractChatGptIT {
         MvcResult r = mvc.perform(get("/api/auth/chatgpt/authorize").cookie(new Cookie("ORACUL_SID", sid))).andReturn();
         assertEquals(302, r.getResponse().getStatus(), "authorize must redirect");
         String loc = r.getResponse().getHeader("Location");
-        return new Started(loc, queryOf(loc));
+        Started s = new Started(loc, queryOf(loc));
+        if (s.state() != null && s.nonce() != null) stub.nonceByState.put(s.state(), s.nonce());
+        return s;
+    }
+
+    /** Tells the stub which attempt (nonce) the code of this callback query belongs to. */
+    private void registerAttempt(String query) {
+        Map<String, String> q = new LinkedHashMap<>();
+        for (String pair : query.split("&")) {
+            int i = pair.indexOf('=');
+            if (i <= 0) continue;
+            try {
+                q.put(pair.substring(0, i), URLDecoder.decode(pair.substring(i + 1), StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException ignored) {
+                // unreadable value: nothing to register
+            }
+        }
+        String state = q.get("state");
+        String nonce = state == null ? null : stub.nonceByState.get(state);
+        if (nonce != null) stub.expectNonce(q.get("code"), nonce);
+    }
+
+    /** Callback query of a normal browser return: code, state and, on a first registration, the issued client id. */
+    String returnQuery(Started s, String code) {
+        return "code=" + enc(code) + "&state=" + enc(s.state()) + (s.firstRegistration() ? "&client_id=" + ISSUED_ID : "");
     }
 
     ResultActions callback(String query) throws Exception {
+        registerAttempt(query);
         return mvc.perform(get("/api/auth/chatgpt/callback" + (query.isEmpty() ? "" : "?" + query)));
     }
 
@@ -138,7 +168,7 @@ abstract class AbstractChatGptIT {
     /** Full successful sign-in for a session; returns the started flow. */
     Started connect(String sid) throws Exception {
         Started s = start(sid);
-        String loc = callbackLocation("code=" + enc("code-" + System.nanoTime()) + "&state=" + enc(s.state()));
+        String loc = callbackLocation(returnQuery(s, "code-" + System.nanoTime()));
         assertEquals(CONNECTED, loc);
         return s;
     }

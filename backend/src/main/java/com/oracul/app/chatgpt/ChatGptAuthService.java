@@ -35,8 +35,10 @@ public class ChatGptAuthService {
     public static final String CONNECTED = "connected";
     public static final String NOT_COMPLETED = "not_completed";
     public static final String NOT_ELIGIBLE = "not_eligible";
+    public static final String NOT_VERIFIED = "not_verified";
+    public static final String EXPIRED = "expired";
 
-    public enum State { NOT_CONNECTED, CONNECTED, PLAN_NOT_ELIGIBLE, SESSION_EXPIRED }
+    public enum State { NOT_CONNECTED, CONNECTED, PLAN_NOT_ELIGIBLE, SESSION_EXPIRED, REGISTRATION_INVALID }
 
     private final ChatGptProperties props;
     private final ChatGptCredentialStore store;
@@ -44,15 +46,19 @@ public class ChatGptAuthService {
     private final ChatGptTokenClient tokens;
     private final Clock clock;
     private final String frontendBaseUrl;
+    private final IdTokenValidator idTokens;
     private final Object[] locks = newLocks();
+    private final Object resetLock = new Object();
 
     ChatGptAuthService(ChatGptProperties props, ChatGptCredentialStore store,
-                       ChatGptRegistrationRepository registrations, ChatGptTokenClient tokens, Clock clock,
+                       ChatGptRegistrationRepository registrations, ChatGptTokenClient tokens, IdTokenValidator idTokens,
+                       Clock clock,
                        @Value("${oracul.frontend-base-url:http://localhost:4200}") String frontendBaseUrl) {
         this.props = props;
         this.store = store;
         this.registrations = registrations;
         this.tokens = tokens;
+        this.idTokens = idTokens;
         this.clock = clock;
         String base = frontendBaseUrl;
         while (base.endsWith("/")) {
@@ -74,6 +80,7 @@ public class ChatGptAuthService {
             boolean dynamic = reg.clientId() == null;
             String clientId = dynamic ? props.dynamicClientId() : reg.clientId();
             String state = randomUrlSafe(32);
+            String nonce = randomUrlSafe(32);
             String verifier = randomUrlSafe(64);
             String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
@@ -81,13 +88,14 @@ public class ChatGptAuthService {
             Map<String, String> q = new LinkedHashMap<>();
             q.put("response_type", "code");
             q.put("client_id", clientId);
+            q.put("ext_agent_host_id", "urn:uuid:" + reg.hostId().toString().toLowerCase(java.util.Locale.ROOT));
             if (dynamic) {
-                q.put("ext_agent_host_id", reg.hostId().toString());
                 q.put("agent_name_hint", props.agentNameHint());
             }
             q.put("redirect_uri", props.redirectUri());
             q.put("scope", String.join(" ", props.scopeList()));
             q.put("state", state);
+            q.put("nonce", nonce);
             q.put("code_challenge", challenge);
             q.put("code_challenge_method", "S256");
             q.put("resource", props.resource());
@@ -99,7 +107,7 @@ public class ChatGptAuthService {
             URI.create(url); // fails for an unbuildable authorize URL
 
             store.purgePendingCreatedAtOrBefore(clock.instant().minus(props.pendingTtl()));
-            store.putPending(new PendingAuthorization(new Secret(state), new Secret(verifier), sessionId, clientId,
+            store.putPending(new PendingAuthorization(new Secret(state), new Secret(verifier), new Secret(nonce), sessionId, clientId,
                 dynamic, clock.instant()));
             return url;
         } catch (Exception e) {
@@ -142,8 +150,18 @@ public class ChatGptAuthService {
         if (error != null || code == null || code.isEmpty()) {
             return NOT_COMPLETED;
         }
-        String exchangeClientId = pending.dynamicRegistration() && clientId != null
-            && ISSUED_CLIENT_ID.matcher(clientId).matches() ? clientId : pending.clientId();
+        String exchangeClientId;
+        if (pending.dynamicRegistration()) {
+            if (clientId == null || !ISSUED_CLIENT_ID.matcher(clientId).matches()) {
+                return NOT_COMPLETED;
+            }
+            exchangeClientId = clientId;
+        } else {
+            if (clientId != null && !clientId.equals(pending.clientId())) {
+                return NOT_COMPLETED;
+            }
+            exchangeClientId = pending.clientId();
+        }
 
         Map<String, String> form = new LinkedHashMap<>();
         form.put("grant_type", "authorization_code");
@@ -151,11 +169,19 @@ public class ChatGptAuthService {
         form.put("redirect_uri", props.redirectUri());
         form.put("client_id", exchangeClientId);
         form.put("code_verifier", pending.codeVerifier().value());
-        ChatGptTokenClient.TokenResponse token = tokens.post(form);
+        form.put("resource", props.resource());
+        ChatGptTokenClient.Result result = tokens.exchange(form);
+        if (result.invalidGrant()) {
+            return EXPIRED;
+        }
+        ChatGptTokenClient.TokenResponse token = result.token();
         if (token == null) {
             return NOT_COMPLETED;
         }
-        if (pending.dynamicRegistration() && ISSUED_CLIENT_ID.matcher(exchangeClientId).matches()) {
+        if (!idTokens.isValid(token.idToken(), exchangeClientId, pending.nonce().value())) {
+            return NOT_VERIFIED;
+        }
+        if (pending.dynamicRegistration()) {
             registrations.persistClientIdIfAbsent(exchangeClientId);
         }
         UUID sessionId = pending.sessionId();
@@ -192,12 +218,35 @@ public class ChatGptAuthService {
         if (flag == Flag.SESSION_EXPIRED) {
             return State.SESSION_EXPIRED;
         }
+        if (flag == Flag.REGISTRATION_INVALID) {
+            return State.REGISTRATION_INVALID;
+        }
         return store.credentials(sessionId) != null ? State.CONNECTED : State.NOT_CONNECTED;
     }
 
     public void disconnect(UUID sessionId) {
         synchronized (lockFor(sessionId)) {
+            SessionCredentials held = store.credentials(sessionId);
+            if (held != null && held.refreshToken() != null) {
+                tokens.revoke(held.refreshToken().value(), held.clientId());
+            }
             store.clearSession(sessionId);
+        }
+    }
+
+    /** Installation-wide reset: forget the issued client id and every session's credentials (FR-37). */
+    public void resetRegistration() {
+        synchronized (resetLock) {
+            if (registrations.anyRunActive()) {
+                throw new ApiException(HttpStatus.CONFLICT, "RUN_IN_PROGRESS", "Wait until the current run finishes");
+            }
+            for (SessionCredentials held : store.allCredentials()) {
+                if (held.refreshToken() != null) {
+                    tokens.revoke(held.refreshToken().value(), held.clientId());
+                }
+            }
+            registrations.clearClientId();
+            store.clearEverything();
         }
     }
 

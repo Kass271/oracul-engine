@@ -40,13 +40,49 @@ class ChatGptTokenClient {
             .build();
     }
 
+    /** Outcome of a token request: a response, or a failure that may be an invalid_grant. */
+    record Result(TokenResponse token, boolean invalidGrant) {
+    }
+
     /** Returns the parsed token response, or null on any failure (already logged without secrets). */
     TokenResponse post(Map<String, String> form) {
+        return exchange(form).token();
+    }
+
+    /** Best-effort token revocation: one attempt, every outcome is only logged (never the token). */
+    void revoke(String token, String clientId) {
         try {
-            String body = form.entrySet().stream()
-                .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8) + "="
-                    + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
-                .collect(Collectors.joining("&"));
+            Map<String, String> form = new java.util.LinkedHashMap<>();
+            form.put("token", token);
+            form.put("token_type_hint", "refresh_token");
+            form.put("client_id", clientId);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(props.revocationUrl()))
+                .timeout(props.httpTimeout())
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(encodeForm(form)))
+                .build();
+            HttpResponse<Void> response = http.send(request, HttpResponse.BodyHandlers.discarding());
+            log.info("chatgpt revocation: status={}", response.statusCode());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("chatgpt revocation failed: {}", e.getClass().getSimpleName());
+        } catch (Exception e) {
+            log.warn("chatgpt revocation failed: {}", e.getClass().getSimpleName());
+        }
+    }
+
+    private static String encodeForm(Map<String, String> form) {
+        return form.entrySet().stream()
+            .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8) + "="
+                + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
+            .collect(Collectors.joining("&"));
+    }
+
+    Result exchange(Map<String, String> form) {
+        Result failed = new Result(null, false);
+        try {
+            String body = encodeForm(form);
             HttpRequest request = HttpRequest.newBuilder(URI.create(props.tokenUrl()))
                 .timeout(props.httpTimeout())
                 .header("Content-Type", "application/x-www-form-urlencoded")
@@ -56,21 +92,37 @@ class ChatGptTokenClient {
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
                 log.warn("chatgpt token request failed: status={}", response.statusCode());
-                return null;
+                int status = response.statusCode();
+                return new Result(null, status >= 400 && status < 500 && isInvalidGrant(response.body()));
             }
             TokenResponse parsed = parse(response.body());
             if (parsed == null) {
                 log.warn("chatgpt token request failed: status={}", response.statusCode());
             }
-            return parsed;
+            return new Result(parsed, false);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("chatgpt token request failed: {}", e.getClass().getSimpleName());
-            return null;
+            return failed;
         } catch (Exception e) {
             log.warn("chatgpt token request failed: {}", e.getClass().getSimpleName());
-            return null;
+            return failed;
         }
+    }
+
+    private boolean isInvalidGrant(String body) {
+        try {
+            if (json.readValue(body, Object.class) instanceof Map<?, ?> m) {
+                Object err = m.get("error");
+                if (err instanceof Map<?, ?> em) {
+                    err = em.get("code");
+                }
+                return "invalid_grant".equals(err);
+            }
+        } catch (Exception e) {
+            // not JSON: not an invalid_grant
+        }
+        return false;
     }
 
     private TokenResponse parse(String body) {

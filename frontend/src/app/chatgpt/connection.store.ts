@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { MatSnackBar, MatSnackBarRef } from '@angular/material/snack-bar';
 import { Router } from '@angular/router';
+import { Observable, finalize } from 'rxjs';
 
 import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-state';
 import { ChatgptService } from '../api/services/chatgpt.service';
@@ -10,8 +11,10 @@ export type ConnectionViewState = 'LOADING' | ChatGptConnectionState;
 
 const RETURN_MESSAGES: Record<string, string> = {
   connected: 'ChatGPT connected',
-  not_completed: 'ChatGPT connection was not completed',
+  not_completed: 'ChatGPT connection was not completed — please try again',
   not_eligible: 'Your ChatGPT plan is not eligible for ORACUL',
+  not_verified: 'ChatGPT sign-in could not be verified — please try again',
+  expired: 'Sign-in expired — click Continue with ChatGPT to start again',
 };
 
 /** Connection state lives in memory only; nothing is persisted in the browser. */
@@ -26,6 +29,7 @@ export class ConnectionStore {
   readonly state = signal<ConnectionViewState>('LOADING');
   readonly canGenerate = signal(false);
   readonly disconnecting = signal(false);
+  readonly resetting = signal(false);
   readonly isConnected = computed(() => this.state() === 'CONNECTED');
 
   load(): void {
@@ -53,6 +57,29 @@ export class ConnectionStore {
         this.disconnecting.set(false);
         this.message('Something went wrong — try again');
       },
+    });
+  }
+
+  /** Resets the installation-wide registration; the returned observable completes when the request ends. */
+  reset(): Observable<void> {
+    this.resetting.set(true);
+    const done = this.api.resetChatGptRegistration().pipe(finalize(() => this.resetting.set(false)));
+    return new Observable<void>((sub) => {
+      done.subscribe({
+        next: () => {
+          this.message('ChatGPT connection reset');
+          this.load();
+        },
+        error: (e: { status?: number; error?: { message?: string } }) => {
+          this.message(
+            e?.status === 409
+              ? (e.error?.message ?? 'Wait until the current run finishes')
+              : 'Something went wrong — try again',
+          );
+          sub.complete();
+        },
+        complete: () => sub.complete(),
+      });
     });
   }
 

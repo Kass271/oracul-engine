@@ -1,7 +1,7 @@
 // E2E stub server (port 4010). Dependency-free. NEVER forwards to real OpenAI (NFR-7): every handler is local.
 // Structured as a small route table so later slices can register more fixtures (GDELT, Responses API).
 import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error'];
@@ -123,15 +123,27 @@ function scenarioAlt(text, k) {
   step(4).statement = `Stub alternative future event ${k}.`;
   return JSON.stringify(o);
 }
+const ISSUER = process.env.STUB_ISSUER ?? 'http://stub:4010';
+const KID = 'stub-key-1';
+const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const b64 = (v) => Buffer.from(typeof v === 'string' ? v : JSON.stringify(v)).toString('base64url');
+function idToken(aud, nonce) {
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { iss: ISSUER, aud, sub: 'stub-user', email: 'stub@example.com', iat: now, exp: now + 3600 };
+  if (nonce) claims.nonce = nonce;
+  const input = `${b64({ alg: 'RS256', typ: 'JWT', kid: KID })}.${b64(claims)}`;
+  const sig = createSign('RSA-SHA256').update(input).sign(privateKey).toString('base64url');
+  return `${input}.${sig}`;
+}
 const s256 = (v) => createHash('sha256').update(v).digest('base64url');
 
-function tokens() {
+function tokens(aud, nonce) {
   const n = ++state.counter;
   const scope = state.mode === 'not_eligible' ? SCOPES.replace('chatgpt.tokens.use.direct', '').replace(/\s+/g, ' ').trim() : SCOPES;
   const body = {
     access_token: `at-STUBSECRET-${n}`,
     refresh_token: `rt-STUBSECRET-${n}`,
-    id_token: `id-STUBSECRET-${n}`,
+    id_token: idToken(aud ?? 'oaiapp_stub_client', nonce),
     token_type: 'Bearer',
     expires_in: 3600,
     scope,
@@ -344,39 +356,55 @@ export const routes = {
 
   'GET /oauth/authorize': async (req, res, url) => {
     const q = url.searchParams;
-    const redirect = q.get('redirect_uri');
-    if (!redirect) return json(res, 400, { error: 'invalid_request' });
+    const clientId = q.get('client_id') ?? '';
+    const dynamic = clientId === 'dynamic_agent_client';
+    const redirect = q.get('redirect_uri') ?? '';
+    const valid =
+      q.get('response_type') === 'code' &&
+      (dynamic ? !!q.get('agent_name_hint') : /^oaiapp_\w+$/.test(clientId) && !q.has('agent_name_hint')) &&
+      /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(q.get('ext_agent_host_id') ?? '') &&
+      /^http:\/\/127\.0\.0\.1:\d{1,5}\/callback$/.test(redirect) &&
+      SCOPES.split(' ').every((sc) => (q.get('scope') ?? '').split(' ').includes(sc)) &&
+      q.get('resource') === 'https://api.openai.com/v1' &&
+      !!q.get('state') && !!q.get('nonce') && !!q.get('code_challenge') &&
+      q.get('code_challenge_method') === 'S256';
+    if (!valid) return json(res, 400, { error: 'invalid_authorize_request' });
     const target = new URL(redirect);
     const st = q.get('state');
     if (state.mode === 'deny') {
       target.searchParams.set('error', 'access_denied');
-      if (st) target.searchParams.set('state', st);
+      target.searchParams.set('state', st);
     } else {
       const code = `stub-code-${++state.counter}`;
-      state.codes.set(code, q.get('code_challenge'));
+      const issuedClient = dynamic ? 'oaiapp_stub_client' : clientId;
+      state.codes.set(code, { challenge: q.get('code_challenge'), nonce: q.get('nonce'), clientId: issuedClient });
       state.issued.push(code);
       target.searchParams.set('code', code);
-      if (st) target.searchParams.set('state', st);
-      if (q.get('client_id') === 'dynamic_agent_client') target.searchParams.set('client_id', 'oaiapp_stub_client');
+      target.searchParams.set('state', st);
+      if (dynamic) target.searchParams.set('client_id', issuedClient);
     }
     res.writeHead(302, { location: target.toString() });
     res.end();
   },
+  'GET /jwks': async (req, res) => {
+    const jwk = publicKey.export({ format: 'jwk' });
+    json(res, 200, { keys: [{ kty: 'RSA', kid: KID, use: 'sig', alg: 'RS256', n: jwk.n, e: jwk.e }] });
+  },
+  'POST /oauth/revoke': async (req, res) => empty(res, 200),
   'POST /oauth/token': async (req, res, url, body) => {
     const form = new URLSearchParams(body);
     const grant = form.get('grant_type');
     if (grant === 'authorization_code') {
-      const code = form.get('code');
-      const challenge = state.codes.get(code);
+      const entry = state.codes.get(form.get('code'));
       const verifier = form.get('code_verifier');
-      if (challenge === undefined || !verifier || s256(verifier) !== challenge) return json(res, 400, { error: 'invalid_grant' });
+      if (!entry || !verifier || s256(verifier) !== entry.challenge) return json(res, 400, { error: 'invalid_grant' });
       if (state.mode === 'token_error') return json(res, 500, { error: 'server_error' });
-      return json(res, 200, tokens());
+      return json(res, 200, tokens(form.get('client_id') ?? entry.clientId, entry.nonce));
     }
     if (grant === 'refresh_token') {
       if (state.mode === 'refresh_error') return json(res, 400, { error: 'invalid_grant' });
       if (state.mode === 'token_error') return json(res, 500, { error: 'server_error' });
-      return json(res, 200, tokens());
+      return json(res, 200, tokens(form.get('client_id') ?? undefined, undefined));
     }
     return json(res, 400, { error: 'unsupported_grant_type' });
   },
