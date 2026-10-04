@@ -73,6 +73,7 @@ test('FR-30 ALTERNATIVE FUTURE reuses the evidence and produces a different futu
   await expect(page.getByTestId('quick-alternative')).toHaveText('ALTERNATIVE FUTURE');
   await expect(page.getByTestId('quick-alternative')).toBeEnabled();
   const gdeltBefore = (await recorded(page, 'gdelt')).length;
+  const rssBefore = (await recorded(page, 'rss')).length;
   const first = await (await page.request.get(`/api/runs/${run1}`)).json();
 
   const run2 = await startAlternative(page, run1);
@@ -87,6 +88,9 @@ test('FR-30 ALTERNATIVE FUTURE reuses the evidence and produces a different futu
   await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 60_000 });
 
   expect((await recorded(page, 'gdelt')).length).toBe(gdeltBefore);
+  // an ALTERNATIVE run searches nothing: no Google News request either (news-search.md FR-48)
+  expect(rssBefore).toBe(4);
+  expect((await recorded(page, 'rss')).length).toBe(rssBefore);
   const texts = await generationTexts(page);
   const last = texts[texts.length - 1];
   expect(last).toContain('<<<ORACUL_UNTRUSTED_DATA name="futures-to-avoid">>>');

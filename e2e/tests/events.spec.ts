@@ -69,19 +69,23 @@ async function listEvents(page: Page, id: string): Promise<any[]> {
 
 // @trace FR-14
 // @trace FR-15
+// @trace FR-46
+// @trace FR-47
 test.describe('FR-14 / FR-15 Event normalisation and semantic classification', () => {
-  test('the acceptance run produces 41 normalized, classified events', async ({ page }) => {
+  test('the acceptance run produces 15 normalized, classified events from its 30 kept sources', async ({ page }) => {
     test.setTimeout(90_000);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    expect(run.counts.uniqueEvents).toBe(41);
+    // news-search.md FR-46: the run keeps 30 sources; the stub pairs them up -> 15 events
+    expect(run.counts.articlesConsidered).toBe(30);
+    expect(run.counts.uniqueEvents).toBe(15);
 
     const events = await listEvents(page, id);
-    expect(events).toHaveLength(41);
+    expect(events).toHaveLength(15);
     expect(events[0].id).toBe('EV001');
-    expect(events[40].id).toBe('EV041');
+    expect(events[14].id).toBe('EV015');
     expect(events[0].sourceIds).toEqual(['S001', 'S002']);
-    expect(events[40].sourceIds).toEqual(['S081']);
+    expect(events[14].sourceIds).toEqual(['S029', 'S030']);
     for (const e of events) {
       expect(e.excludedReason).toBeUndefined();
       expect(e.classification).toBeTruthy();
@@ -106,8 +110,9 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     const requests = await recorded(page);
     const purposes = requests.map(purposeOf);
     expect(purposes.filter((p) => p === 'QUERY_EXPANSION')).toHaveLength(1);
-    expect(purposes.filter((p) => p === 'EVENT_NORMALIZATION')).toHaveLength(3);
-    expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(3);
+    // 30 sources fit one normalisation batch (40), 15 events one classification batch (20)
+    expect(purposes.filter((p) => p === 'EVENT_NORMALIZATION')).toHaveLength(1);
+    expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(1);
     // slice 08: the pack is not empty, so exactly one SCENARIO_GENERATION request follows
     expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(1);
     // slice 10: the critic request sits between the scenario and the story
@@ -120,24 +125,29 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(requests.some((r) => JSON.stringify(r).includes('"tools"'))).toBe(false);
   });
 
-  test('FR-15 malformed classification answers exclude every event with CLASSIFICATION_FAILED', async ({ page }) => {
+  test('FR-15 malformed classification answers exclude every event with CLASSIFICATION_FAILED; the empty pack is written up speculatively', async ({ page }) => {
     test.setTimeout(90_000);
     const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'malformed-classification' } });
     expect(mode.status()).toBe(204);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    expect(run.counts.uniqueEvents).toBe(41);
+    expect(run.counts.uniqueEvents).toBe(15);
     const events = await listEvents(page, id);
-    expect(events).toHaveLength(41);
+    expect(events).toHaveLength(15);
     for (const e of events) {
       expect(e.excludedReason).toBe('CLASSIFICATION_FAILED');
       expect(e.classification).toBeUndefined();
     }
     const purposes = (await recorded(page)).map(purposeOf);
-    expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(6);
-    // the pack is empty (every event excluded): no scenario generation
-    expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(0);
-    expect(purposes.filter((p) => p === 'SCENARIO_CRITIC')).toHaveLength(0);
+    // one batch, answered twice (the content retry)
+    expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(2);
+    // run-control.md FR-47: the pack is empty (every event excluded) -> speculative mode, still scenario, critic and story
+    expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(1);
+    expect(purposes.filter((p) => p === 'SCENARIO_CRITIC')).toHaveLength(1);
+    expect(purposes.filter((p) => p === 'STORY_WRITING')).toHaveLength(1);
+    expect(run.status).toBe('COMPLETED');
+    expect(run.headline).toBeTruthy();
+    expect(run.evidenceNote.kind).toBe('NO_EVIDENCE');
   });
 
   test('FR-14 a rate-limited normalisation fails the run with the usage-limit message and writes no events', async ({ page }) => {

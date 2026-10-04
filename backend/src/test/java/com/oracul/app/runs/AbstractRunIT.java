@@ -252,6 +252,14 @@ public abstract class AbstractRunIT {
         return jdbc.queryForObject("select count(*) from generation_run", Integer.class);
     }
 
+    /** kind of the run's evidenceNote (run-control.md FR-47); fails with the whole run body when there is no note. */
+    @SuppressWarnings("unchecked")
+    public static Object noteKind(Map<String, Object> run) {
+        Object note = run.get("evidenceNote");
+        org.assertj.core.api.Assertions.assertThat(note).as("evidenceNote of " + run).isNotNull();
+        return ((Map<String, Object>) note).get("kind");
+    }
+
     protected static boolean absent(Map<String, Object> m, String key) {
         return m.get(key) == null;
     }

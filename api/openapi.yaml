@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ORACUL API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Contract between the Spring Boot backend and the Angular frontend. Both sides are generated from this file.
     Every request is tied to an anonymous browser session (HttpOnly cookie ORACUL_SID, created by the backend on the
@@ -15,7 +15,7 @@ tags:
   - name: chatgpt
     description: Sign in with ChatGPT, connection status, sign-out and reset (specs phase-01 chatgpt-connection.md, phase-02 chatgpt-connection.md)
   - name: runs
-    description: Generation runs — start, progress, alternative futures (spec generation-runs.md)
+    description: Generation runs — start, progress, stop, alternative futures (specs generation-runs.md, phase-02 run-control.md)
   - name: research
     description: Research profile, search plan, sources, events and Evidence Pack of a run (spec research-pipeline.md)
   - name: reasoning
@@ -251,12 +251,13 @@ paths:
     get:
       tags: [history]
       operationId: listRecentRuns
-      summary: Recent futures — the 20 newest COMPLETED runs of this session, newest first
+      summary: Recent futures — the 20 newest COMPLETED or STOPPED runs of this session, newest first
       description: |
         Runs of the caller's browser session (cookie ORACUL_SID; none/unknown → new session → empty list) with status
-        COMPLETED and a headline, ordered by createdAt desc, ties by id desc, at most 20. FAILED,
-        INSUFFICIENT_EVIDENCE, QUEUED and RUNNING runs and runs of other sessions are never listed. Older runs stay
-        stored and reachable via getRun / getFutureResult. No parameters.
+        COMPLETED and a headline, or with status STOPPED (phase-02 run-control.md FR-45), ordered by createdAt desc,
+        ties by id desc, at most 20. FAILED, INSUFFICIENT_EVIDENCE, QUEUED and RUNNING runs, COMPLETED runs without a
+        headline and runs of other sessions are never listed. Every item carries `status`; `headline` only when
+        COMPLETED. Older runs stay stored and reachable via getRun / getFutureResult. No parameters.
       responses:
         '200':
           description: Recent futures
@@ -289,6 +290,35 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/runs/{runId}/stop:
+    post:
+      tags: [runs]
+      operationId: stopRun
+      summary: STOP — end a QUEUED or RUNNING run as STOPPED; no further ChatGPT or news request is sent for it
+      description: |
+        No request body (a body is ignored). No ChatGPT connection check (a run can be stopped while disconnected).
+        Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found". Run QUEUED or RUNNING → one
+        conditional commit sets status STOPPED, completedAt = updatedAt = now (stage and stageIndex stay those of the
+        moment of the stop, 0 / absent when it was QUEUED; failure, headline and suggestedRealism stay absent) and
+        frees the session's active-run slot; every later run-guard check of the pipeline fails, so no ChatGPT, model
+        catalogue, token refresh, news (Google News RSS, GDELT) or article-page request starts for the run afterwards
+        and the answers of requests still in flight are discarded. Run already terminal (COMPLETED, FAILED,
+        INSUFFICIENT_EVIDENCE, STOPPED), also when it ended between the client's last poll and this request → nothing
+        changes. The 200 body is getRun of the run after the request (phase-02 run-control.md FR-45).
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run after the request — STOPPED, or unchanged when it was already terminal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationRun'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/runs/{runId}/alternatives:
     post:
       tags: [runs]
@@ -300,11 +330,12 @@ paths:
         generate"; refresh failed → 401 CHATGPT_SESSION_EXPIRED "ChatGPT session expired — please reconnect" (refresh
         invalid_client → 401 CHATGPT_REGISTRATION_INVALID; transient refresh failure → 503 CHATGPT_UNAVAILABLE); plan not
         eligible → 403 CHATGPT_PLAN_NOT_ELIGIBLE "Your ChatGPT plan is not eligible for ORACUL"; parent not COMPLETED
-        with an accepted scenario and an Evidence Pack (FAILED, INSUFFICIENT_EVIDENCE, QUEUED, RUNNING, or COMPLETED
-        without them) → 409 RUN_NOT_COMPLETED "Only a completed future can have an alternative"; another run of the
+        with an accepted scenario and an Evidence Pack (FAILED, INSUFFICIENT_EVIDENCE, STOPPED, QUEUED, RUNNING, or
+        COMPLETED without them) → 409 RUN_NOT_COMPLETED "Only a completed future can have an alternative"; another run of the
         session QUEUED/RUNNING → 409 RUN_ALREADY_ACTIVE "A generation is already running". Nothing is stored on an error.
         202 body: kind ALTERNATIVE, parentRunId = runId, status QUEUED, stageIndex 0, configuration deep-equal to the
-        parent's, evidencePackId = the parent's, counts equal to the parent's. The run skips stages 1–6 (no search;
+        parent's, evidencePackId = the parent's, counts equal to the parent's, evidenceNote and suggestedRealism equal
+        to the parent's (phase-02 run-control.md FR-47). The run skips stages 1–6 (no search;
         it goes from QUEUED to EXPLORING_FUTURES), lists the parent's and every earlier future on the same Evidence Pack
         as futures to avoid, and ends FAILED ALTERNATIVE_NOT_DISTINCT when its future repeats one of them after one
         regeneration (FR-30).
@@ -362,8 +393,8 @@ paths:
       operationId: listRunSources
       summary: Every source retrieved for the run after basic filtering (S001…)
       description: |
-        Items ordered by id. `items` is empty until READING_SOURCES commits the sources (also for a run that failed
-        with NEWS_UNAVAILABLE). For an ALTERNATIVE run: the sources of the run that built its Evidence Pack. Unknown,
+        Items ordered by id. `items` is empty until READING_SOURCES commits the sources (also for a run whose news
+        search found nothing). Since phase-02 slice 03 a run keeps at most 30 sources (news-search.md FR-46). For an ALTERNATIVE run: the sources of the run that built its Evidence Pack. Unknown,
         malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
       parameters:
         - $ref: '#/components/parameters/RunId'
@@ -411,8 +442,8 @@ paths:
       summary: The Evidence Pack of the run — exactly the current-world context given to ChatGPT
       description: |
         200 once stage RANKING has committed the pack (`GenerationRun.evidencePackId` set); the pack is immutable, so
-        repeated calls return identical bodies. Also returned for a run whose pack is empty (0 eligible events) and
-        for INSUFFICIENT_EVIDENCE runs (the pack is stored before the sufficiency check). An ALTERNATIVE run returns
+        repeated calls return identical bodies. Also returned for a run whose pack is empty (0 eligible events — the
+        run then writes a speculative future, run-control.md FR-47) and for stored INSUFFICIENT_EVIDENCE runs. An ALTERNATIVE run returns
         its parent's pack (same id, identical body) from creation on.
         Run QUEUED / RUNNING before that commit, or ended before stage RANKING → 409 EVIDENCE_PACK_NOT_READY
         "The Evidence Pack is not ready yet". Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND "Future not found".
@@ -442,8 +473,8 @@ paths:
         SCENARIO_REJECTED). `structuredScenario` is the latest parsed attempt's scenario — the cleaned version when
         its Evidence Guard outcome was PASS / PASS_WITH_REMOVALS, otherwise as parsed; `accepted` tells whether that
         attempt is the run's final scenario. Run QUEUED / RUNNING before the first parsed attempt, FAILED before
-        stage EXPLORING_FUTURES, FAILED INVALID_SCENARIO, INSUFFICIENT_EVIDENCE, or COMPLETED without a scenario
-        (empty Evidence Pack with the sufficiency check disabled) →
+        stage EXPLORING_FUTURES, FAILED INVALID_SCENARIO, INSUFFICIENT_EVIDENCE, STOPPED before the first parsed
+        attempt, or a stored COMPLETED run without a scenario (empty Evidence Pack before phase-02 slice 03) →
         409 SCENARIO_NOT_READY "The scenario is not ready yet". Unknown, malformed or foreign runId → 404
         RUN_NOT_FOUND "Future not found". `criticReports` lists one report per critiqued attempt (the critic runs
         only on attempts whose Evidence Guard outcome is PASS / PASS_WITH_REMOVALS), attempt ascending; a critic
@@ -471,8 +502,8 @@ paths:
       summary: Everything the result view renders — story, labels, metadata, causal chain, sources, research summary
       description: |
         200 only for a COMPLETED run that has a stored future story (stage WRITING_STORY done). Run QUEUED / RUNNING,
-        FAILED, INSUFFICIENT_EVIDENCE, or COMPLETED without a story (empty Evidence Pack with the sufficiency check
-        disabled by configuration) → 409
+        FAILED, INSUFFICIENT_EVIDENCE, STOPPED, or a stored COMPLETED run without a story (empty Evidence Pack before
+        phase-02 slice 03) → 409
         RESULT_NOT_READY "This future is not ready yet". Unknown, malformed or foreign runId → 404 RUN_NOT_FOUND
         "Future not found". All values come from the run snapshot, never from the current panel configuration.
       parameters:
@@ -822,8 +853,11 @@ components:
 
     RunStatus:
       type: string
-      description: QUEUED and RUNNING are active; the others are terminal
-      enum: [QUEUED, RUNNING, COMPLETED, INSUFFICIENT_EVIDENCE, FAILED]
+      description: |
+        QUEUED and RUNNING are active; the others are terminal. STOPPED = ended by the user's STOP (stopRun, phase-02
+        run-control.md FR-45). INSUFFICIENT_EVIDENCE is no longer produced since phase-02 slice 03 (FR-47: a lack of
+        evidence never ends a run; the run completes with an evidenceNote); stored runs keep it.
+      enum: [QUEUED, RUNNING, COMPLETED, INSUFFICIENT_EVIDENCE, FAILED, STOPPED]
 
     RunStage:
       type: string
@@ -843,7 +877,9 @@ components:
       type: string
       description: |
         Why a run ended without a story (generation-runs.md "Run failure codes and messages", phase-02
-        chatgpt-inference.md FR-38–40). Fixed messages:
+        chatgpt-inference.md FR-38–40). NEWS_UNAVAILABLE and INSUFFICIENT_EVIDENCE are no longer produced since phase-02
+        slice 03 (run-control.md FR-47: no news and too little evidence never end a run); stored runs keep them.
+        Fixed messages:
         NEWS_UNAVAILABLE "ORACUL could not reach its news sources — try again later" · CHATGPT_RATE_LIMITED "ChatGPT
         usage limit reached — try again later" (UI links ChatGPT Settings → Usage) · CHATGPT_UNAVAILABLE "ChatGPT is
         temporarily unavailable — try again in a few minutes" (after at most 2 retries) · CHATGPT_SESSION_EXPIRED
@@ -910,7 +946,7 @@ components:
           type: integer
           format: int32
           minimum: 0
-          description: Planned search queries covered by the news search (OK + EMPTY + FAILED); since phase 02 they are sent in at most 4 grouped GDELT requests
+          description: Planned search queries covered by the news search (OK + EMPTY + FAILED); since phase-02 slice 03 they are sent in at most 4 OR-group requests to Google News RSS, a failed group once more to GDELT (news-search.md FR-48)
         articlesRetrieved:
           type: integer
           format: int32
@@ -920,7 +956,7 @@ components:
           type: integer
           format: int32
           minimum: 0
-          description: Articles left after basic filtering (= stored sources)
+          description: Articles kept after basic filtering (= stored sources); at most 30 for runs since phase-02 slice 03 (news-search.md FR-46, best-ranked with topic spread), stored older runs may have more
         uniqueEvents:
           type: integer
           format: int32
@@ -973,7 +1009,7 @@ components:
           format: int32
           minimum: 0
           maximum: 10
-          description: 1-based index of the current stage, 0 while QUEUED, 10 when terminal after WRITING_STORY, 6 (stage RANKING) for INSUFFICIENT_EVIDENCE
+          description: 1-based index of the current stage, 0 while QUEUED, 10 when terminal after WRITING_STORY, 6 (stage RANKING) for stored INSUFFICIENT_EVIDENCE runs; a STOPPED run keeps the index of the stage it was stopped in (0 when stopped while QUEUED)
         stageCount:
           type: integer
           format: int32
@@ -996,14 +1032,17 @@ components:
           minimum: 1
           maximum: 10
           description: |
-            Set iff status is INSUFFICIENT_EVIDENCE and configuration.realism > 1: max(1, realism − 2) (e.g. 10 → 8,
-            2 → 1). Absent otherwise (also for INSUFFICIENT_EVIDENCE at realism 1). The UI's LOWER REALISM sets the
-            panel realism to this value and starts a new run (FR-31).
+            max(1, realism − 2) (e.g. 10 → 8, 2 → 1), set iff configuration.realism > 1 and either evidenceNote.kind is
+            INSUFFICIENT_EVIDENCE (phase-02 run-control.md FR-47) or status is a stored INSUFFICIENT_EVIDENCE (FR-31).
+            Absent otherwise (realism 1, NO_EVIDENCE note, no note). The UI's LOWER REALISM sets the panel realism to
+            this value and starts a new run.
+        evidenceNote:
+          $ref: '#/components/schemas/EvidenceNote'
         headline:
           type: string
           minLength: 1
           maxLength: 160
-          description: Headline of the future story; set only when COMPLETED with a story (absent while active, for FAILED / INSUFFICIENT_EVIDENCE and for interim COMPLETED runs without a story)
+          description: Headline of the future story; set only when COMPLETED with a story (absent while active, for FAILED / INSUFFICIENT_EVIDENCE / STOPPED and for stored COMPLETED runs without a story)
         hasOpenCriticIssues:
           type: boolean
           description: |
@@ -1021,6 +1060,44 @@ components:
           type: string
           format: date-time
 
+    EvidenceNoteKind:
+      type: string
+      description: |
+        INSUFFICIENT_EVIDENCE = the Evidence Pack has items but fewer CORE items than the chosen realism needs;
+        NO_EVIDENCE = the Evidence Pack is empty (no usable news at all) and the future is fully speculative
+      enum: [INSUFFICIENT_EVIDENCE, NO_EVIDENCE]
+
+    EvidenceNote:
+      type: object
+      description: |
+        Note shown at the end of the result (phase-02 run-control.md FR-47). Set from the commit of stage RANKING on
+        (copied from the parent for an ALTERNATIVE run) iff the pack is empty (NO_EVIDENCE, wins over
+        INSUFFICIENT_EVIDENCE) or coreItems < coreNeeded (INSUFFICIENT_EVIDENCE); absent when the evidence meets the
+        realism and for runs before phase-02 slice 03. Fixed messages: INSUFFICIENT_EVIDENCE "Realism <r> couldn't be
+        fully met: only <coreItems> core evidence item(s) (needs <coreNeeded>). This future is less grounded." — "item"
+        when coreItems is 1, else "items"; NO_EVIDENCE "No current news could be used — this future is speculative,
+        not grounded in evidence."
+      required: [kind, message, coreItems, coreNeeded]
+      properties:
+        kind:
+          $ref: '#/components/schemas/EvidenceNoteKind'
+        message:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: "Realism 10 couldn't be fully met: only 2 core evidence items (needs 5). This future is less grounded."
+        coreItems:
+          type: integer
+          format: int32
+          minimum: 0
+          description: CORE items of the run's Evidence Pack (0 for NO_EVIDENCE)
+        coreNeeded:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10
+          description: oracul.evidence.min-core of the realism band (9–10 high, 6–8 medium, 1–5 low) at the time of RANKING
+
     # ---------- history ----------
     RecentRunList:
       type: object
@@ -1034,8 +1111,8 @@ components:
 
     RecentRunSummary:
       type: object
-      description: One COMPLETED run; configuration equals getRun.configuration, headline equals the story headline
-      required: [id, generationId, kind, createdAt, headline, configuration]
+      description: One COMPLETED (with headline) or STOPPED run; configuration equals getRun.configuration, headline equals the story headline
+      required: [id, generationId, kind, createdAt, configuration]
       properties:
         id:
           type: string
@@ -1050,8 +1127,11 @@ components:
         completedAt:
           type: string
           format: date-time
+        status:
+          $ref: '#/components/schemas/RunStatus'
         headline:
           type: string
+          description: Present iff status is COMPLETED (STOPPED items have none; the UI shows "Stopped")
         configuration:
           $ref: '#/components/schemas/ScenarioConfiguration'
 
@@ -1136,10 +1216,12 @@ components:
     SearchQueryStatus:
       type: string
       description: |
-        Per planned query (phase-02 news-search.md FR-44): queries are sent to GDELT in at most 4 OR-group requests.
-        FAILED = its group request failed (also after the one 429 retry) or was not sent within the search budget;
-        OK = at least one article of the group answer was attributed to this query; EMPTY = the group answered but
-        no article was attributed to it (or the query text was empty after cleaning). PENDING until SEARCHING ends.
+        Per planned query (phase-02 news-search.md FR-44, FR-48): queries are sent in at most 4 OR-group requests to
+        Google News RSS; a group whose Google request failed is sent once to GDELT. FAILED = its group got no answer
+        from either provider (failed, also after the one GDELT 429 retry, or never sent because of the search budget,
+        the run deadline or a STOP); OK = at least one entry of the group answer was attributed to this query;
+        EMPTY = the group was answered but no entry was attributed to it (or the query text was empty after
+        cleaning). PENDING until SEARCHING ends.
       enum: [PENDING, OK, EMPTY, FAILED]
 
     SearchQuery:
@@ -1276,6 +1358,10 @@ components:
           description: Ids of every query that returned this (normalized) URL, in query order
           items:
             type: string
+        publisherUrl:
+          type: string
+          format: uri
+          description: Publisher site URL of a Google News RSS item (its `<source url>`); absent for GDELT sources (phase-02 news-search.md FR-48)
 
     SourceList:
       type: object

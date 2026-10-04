@@ -66,7 +66,7 @@ async function startAcceptanceRun(page: Page): Promise<string> {
   return page.url().split('/').pop()!;
 }
 
-// @trace FR-10
+// @trace FR-10, FR-45
 test.describe('FR-10 Generate the Future', () => {
   test('connected user starts a run with exactly the panel configuration', async ({ page }) => {
     await connect(page);
@@ -101,12 +101,15 @@ test.describe('FR-10 Generate the Future', () => {
     await evidence(page, 'FR-10', 'not-connected-disabled');
   });
 
-  test('the generate button stays disabled while a run is active', async ({ page }) => {
+  test('the generate button turns into an enabled STOP while a run is active (run-control.md FR-45)', async ({ page }) => {
     await connect(page);
     await page.getByTestId('generate-button').click();
     await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
     const id = page.url().split('/').pop()!;
     await expect(page.getByTestId('progress-view')).toBeVisible();
+    // FR-45: the progress view has the button too; it reads STOP and is enabled
+    await expect(page.getByTestId('progress-view').getByTestId('generate-button')).toHaveText('STOP');
+    await expect(page.getByTestId('generate-button')).toBeEnabled();
 
     // A second start request from the same browser session is rejected while the run is active.
     const r = await page.request.post('/api/runs', {
@@ -115,13 +118,14 @@ test.describe('FR-10 Generate the Future', () => {
     expect(r.status()).toBe(409);
     expect(await r.json()).toEqual({ code: 'RUN_ALREADY_ACTIVE', message: 'A generation is already running' });
 
-    // Client-side (SPA) navigation back to the welcome view, no reload: the button is disabled.
+    // Client-side (SPA) navigation back to the welcome view, no reload: the button still reads STOP and is enabled.
     await page.evaluate(() => {
       history.pushState({}, '', '/');
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
     await expect(page.getByTestId('welcome-view')).toBeVisible();
-    await expect(page.getByTestId('generate-button')).toBeDisabled();
+    await expect(page.getByTestId('generate-button')).toHaveText('STOP');
+    await expect(page.getByTestId('generate-button')).toBeEnabled();
 
     // Reloading /futures/<id> resumes the progress view (generation-runs.md, run view).
     await page.goto(`/futures/${id}`);

@@ -25,12 +25,14 @@ public class GenerationRunRepository {
                       ResearchCounts counts, String failureCode, String failureMessage, Integer suggestedRealism,
                       String headline, OffsetDateTime createdAt, OffsetDateTime updatedAt,
                       OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId, boolean hasOpenCriticIssues,
-                      String model, String failureProviderCode) {
+                      String model, String failureProviderCode, String evidenceNoteKind, Integer evidenceCoreItems,
+                      Integer evidenceCoreNeeded) {
     }
 
     private static final String COLUMNS = "id, generation_id, session_id, kind, parent_run_id, status, stage, "
         + "configuration, research_profile, counts, failure_code, failure_message, suggested_realism, headline, "
-        + "created_at, updated_at, completed_at, search_plan, evidence_pack_id, model, failure_provider_code";
+        + "created_at, updated_at, completed_at, search_plan, evidence_pack_id, model, failure_provider_code, "
+        + "evidence_note_kind, evidence_core_items, evidence_core_needed";
 
     private final JdbcTemplate jdbc;
     private final JsonMapper json;
@@ -70,9 +72,11 @@ public class GenerationRunRepository {
     void insertAlternativeQueued(UUID id, String generationId, UUID sessionId, UUID parentId,
                                  OffsetDateTime now, OffsetDateTime deadline) {
         jdbc.update("insert into generation_run (id, generation_id, session_id, kind, parent_run_id, status, "
-                + "configuration, research_profile, search_plan, counts, evidence_pack_id, deadline_at, created_at, "
+                + "configuration, research_profile, search_plan, counts, evidence_pack_id, suggested_realism, "
+                + "evidence_note_kind, evidence_core_items, evidence_core_needed, deadline_at, created_at, "
                 + "updated_at) select ?, ?, ?, 'ALTERNATIVE', p.id, 'QUEUED', p.configuration, p.research_profile, "
-                + "p.search_plan, p.counts, p.evidence_pack_id, ?, ?, ? from generation_run p where p.id = ?",
+                + "p.search_plan, p.counts, p.evidence_pack_id, p.suggested_realism, p.evidence_note_kind, "
+                + "p.evidence_core_items, p.evidence_core_needed, ?, ?, ? from generation_run p where p.id = ?",
             id, generationId, sessionId, deadline, now, now, parentId);
     }
 
@@ -118,6 +122,21 @@ public class GenerationRunRepository {
     public void storePack(UUID id, UUID packId, ResearchCounts counts, OffsetDateTime now) {
         jdbc.update("update generation_run set evidence_pack_id = ?, counts = cast(? as jsonb), updated_at = ? "
             + "where id = ?", packId, write(counts), now, id);
+    }
+
+    /** Stores the pack, the counts and the evidence note (FR-47) in the caller's transaction (run row locked). */
+    public void storePack(UUID id, UUID packId, ResearchCounts counts, String noteKind, Integer coreItems,
+                          Integer coreNeeded, Integer suggestedRealism, OffsetDateTime now) {
+        jdbc.update("update generation_run set evidence_pack_id = ?, counts = cast(? as jsonb), "
+                + "evidence_note_kind = ?, evidence_core_items = ?, evidence_core_needed = ?, "
+                + "suggested_realism = ?, updated_at = ? where id = ? and status = 'RUNNING'",
+            packId, write(counts), noteKind, coreItems, coreNeeded, suggestedRealism, now, id);
+    }
+
+    /** FR-45: STOPPED when the run is QUEUED or RUNNING; false when it was already terminal. */
+    public boolean stop(UUID id, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'STOPPED', updated_at = ?, completed_at = ? "
+            + "where id = ? and status in ('QUEUED','RUNNING')", now, now, id) == 1;
     }
 
     /** Stage transition that only applies while the run is RUNNING; false when the run was ended meanwhile. */
@@ -176,10 +195,11 @@ public class GenerationRunRepository {
             + "and status in ('QUEUED','RUNNING')", model, now, id) == 1;
     }
 
-    /** The newest COMPLETED runs with a headline of the session, newest first (ties by id desc). */
-    public List<Row> findRecentCompleted(UUID sessionId, int limit) {
-        return jdbc.query("select " + COLUMNS + " from generation_run where session_id = ? and status = 'COMPLETED' "
-            + "and headline is not null order by created_at desc, id desc limit ?", (rs, i) -> mapRow(rs, false),
+    /** The newest COMPLETED (with a headline) and STOPPED runs of the session, newest first (ties by id desc). */
+    public List<Row> findRecent(UUID sessionId, int limit) {
+        return jdbc.query("select " + COLUMNS + " from generation_run where session_id = ? and "
+            + "((status = 'COMPLETED' and headline is not null) or status = 'STOPPED') "
+            + "order by created_at desc, id desc limit ?", (rs, i) -> mapRow(rs, false),
             sessionId, limit);
     }
 
@@ -207,7 +227,8 @@ public class GenerationRunRepository {
             utc(rs.getObject("completed_at", OffsetDateTime.class)),
             rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
             rs.getObject("evidence_pack_id", UUID.class), openCritic,
-            rs.getString("model"), rs.getString("failure_provider_code"));
+            rs.getString("model"), rs.getString("failure_provider_code"), rs.getString("evidence_note_kind"),
+            (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"));
     }
 
     public Optional<Row> find(UUID id, UUID sessionId) {
@@ -230,7 +251,8 @@ public class GenerationRunRepository {
                 utc(rs.getObject("completed_at", OffsetDateTime.class)),
                 rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
                 rs.getObject("evidence_pack_id", UUID.class), rs.getBoolean("open_critic"),
-                rs.getString("model"), rs.getString("failure_provider_code")),
+                rs.getString("model"), rs.getString("failure_provider_code"), rs.getString("evidence_note_kind"),
+                (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed")),
             id, sessionId);
         return rows.stream().findFirst();
     }

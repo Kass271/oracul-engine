@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
 /** Rows 8, 11-14 of research-pipeline.md "Slice 05_search-sources" integration tests (GDELT search stage). */
-// @trace FR-13, FR-44
+// @trace FR-13, FR-44, FR-47
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=10",
@@ -179,16 +179,17 @@ class SourceRetrievalIT extends AbstractRunIT {
     // #12
     @ParameterizedTest(name = "provider unavailable: {0}")
     @MethodSource("unavailableProviders")
-    void everyQueryFailingEndsTheRunWithNewsUnavailable(String name, Function<StubGdelt.Request, StubGdelt.Reply> reply) throws Exception {
+    void everyQueryFailingNoLongerEndsTheRun(String name, Function<StubGdelt.Request, StubGdelt.Reply> reply) throws Exception {
         gdelt.responder = reply;
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
-        assertThat(run.get("status")).as(name).isEqualTo("FAILED");
-        assertThat(run.get("failure")).isEqualTo(json("{\"code\":\"NEWS_UNAVAILABLE\",\"message\":\"" + NEWS_DOWN + "\"}"));
-        assertThat(run.get("stage")).isEqualTo("SEARCHING");
-        assertThat(run.get("stageIndex")).isEqualTo(3);
+        // run-control.md FR-47: every group FAILED is no failure; the run continues speculatively with 0 sources
+        assertThat(run.get("status")).as(name + ": " + run).isEqualTo("COMPLETED");
+        assertThat(absent(run, "failure")).isTrue();
         assertThat(run.get("completedAt")).isNotNull();
+        assertThat(run.get("headline")).isNotNull();
+        assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("searches")).isEqualTo(20);
@@ -201,7 +202,9 @@ class SourceRetrievalIT extends AbstractRunIT {
             assertThat(q.get("articlesReturned")).isEqualTo(0);
         });
         assertThat(json(getSources(sid, id))).isEqualTo(json("{\"items\":[]}"));
-        assertThat(responses.requests).as("expansion only - no later ChatGPT call").hasSize(1);
+        assertThat(responses.requests.stream().map(StubResponses::purpose).toList())
+            .as("no event stages, but the speculative scenario, its critic and the story")
+            .containsExactly("QUERY_EXPANSION", "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
         MvcResult second = startRun(sid, B).andReturn();
         assertThat(second.getResponse().getStatus()).as("slot released").isEqualTo(202);
         // let the follow-up run finish so its requests cannot leak into the next test/invocation
@@ -227,21 +230,19 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(sourceItems(sid, id)).hasSize(4);
     }
 
-    // FR-44 step 5: a second 429 fails the group; every group failing ends the run
+    // FR-44 step 5: a second 429 fails the group; run-control.md FR-47: every group failing does not end the run
     @Test
-    void rateLimitedTwiceOnEveryGroupEndsTheRunWithNewsUnavailable() throws Exception {
+    void rateLimitedTwiceOnEveryGroupFailsTheGroupsButNotTheRun() throws Exception {
         gdelt.responder = req -> new StubGdelt.Reply(429, "text/plain", "Please limit requests to one every 5 seconds.", 0);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
-        assertThat(run.get("status")).isEqualTo("FAILED");
-        assertThat(run.get("failure")).isEqualTo(json("{\"code\":\"NEWS_UNAVAILABLE\",\"message\":\"" + NEWS_DOWN + "\"}"));
-        assertThat(run.get("stage")).isEqualTo("SEARCHING");
-        assertThat(run.get("stageIndex")).isEqualTo(3);
+        assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
+        assertThat(absent(run, "failure")).isTrue();
+        assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
         assertThat(gdelt.requests).as("4 groups x (first attempt + one retry)").hasSize(8);
         assertThat(list(plan(researchBody(sid, id)).get("queries"))).hasSize(20)
             .allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
-        assertThat(responses.requests).as("expansion only - no later ChatGPT call").hasSize(1);
     }
 
     // #13

@@ -157,12 +157,14 @@ test.describe('FR-32 Run failure handling', () => {
     await evidence(page, 'FR-32', 'timeout-message');
   });
 
-  test('FR-32 an unreachable news provider shows its friendly message', async ({ page }) => {
+  // run-control.md FR-47: an unreachable news provider is no failure any more (the run goes on, see search-sources.spec.ts);
+  // an unusable scenario answer still shows its fixed friendly message
+  test('FR-32 an unusable scenario answer shows its friendly message', async ({ page }) => {
     test.setTimeout(120_000);
-    expect((await page.request.post(`${STUB}/__control/news`, { data: { mode: 'down' } })).ok()).toBeTruthy();
+    expect((await page.request.post(`${STUB}/__control/scenario`, { data: { mode: 'invalid' } })).status()).toBe(204);
     await connect(page);
     await page.getByTestId('generate-button').click();
-    await expect(page.getByTestId('failure-message')).toHaveText('ORACUL could not reach its news sources — try again later', {
+    await expect(page.getByTestId('failure-message')).toHaveText('ORACUL could not construct a valid scenario', {
       timeout: 90_000,
     });
   });

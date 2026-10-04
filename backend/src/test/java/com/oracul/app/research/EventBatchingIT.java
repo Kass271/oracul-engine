@@ -8,39 +8,39 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Rows 8 and 13 of research-pipeline.md "Slice 06_events": F240 (205 sources) with default batch sizes (40 sources /
- * 20 events), the source cap lifted to 1000, default concurrency 4.
+ * Rows 8 and 13 of research-pipeline.md "Slice 06_events": F240 with default batch sizes (40 sources / 20 events), the
+ * source cap lifted to 1000, default concurrency 4. Since news-search.md FR-46 the run keeps 30 of the 205 usable sources:
+ * one normalisation batch of 30 sources, 30 events in two classification batches (20 + 10).
  */
-// @trace FR-14, FR-15
+// @trace FR-14, FR-15, FR-46
 @TestPropertySource(properties = {"oracul.research.query-budget=18", "oracul.events.max-sources=1000"})
 class EventBatchingIT extends AbstractEventIT {
 
     // #8 and #13
     @Test
-    void twoHundredAndFiveSourcesAreBatchedAndEveryClassificationIsInRange() throws Exception {
+    void thirtyKeptSourcesAreBatchedAndEveryClassificationIsInRange() throws Exception {
         gdeltF240();
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
-        assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(205);
+        assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(30);
+        assertThat(counts(r.run()).get("articlesConsidered")).isEqualTo(30);
 
         // arrival order of parallel batches is not defined: batches are identified by their "Batch: k of n" line
         List<StubResponses.Request> norm = requests(NORMALIZATION);
-        assertThat(norm).hasSize(6);
+        assertThat(norm).hasSize(1);
         Map<Integer, String> byBatch = normalizationInputsByBatch();
-        assertThat(byBatch.keySet()).containsExactly(1, 2, 3, 4, 5, 6);
-        int[] expectedSizes = {40, 40, 40, 40, 40, 5};
-        for (int k = 1; k <= 6; k++) {
-            String text = byBatch.get(k);
-            assertThat(StubResponses.sourceIds(text)).as("batch " + k).hasSize(expectedSizes[k - 1]);
-            assertThat(text).contains("Batch: " + k + " of 6 | Sources: " + expectedSizes[k - 1]);
-            assertThat(StubResponses.sourceIds(text).get(0)).isEqualTo(String.format("S%03d", (k - 1) * 40 + 1));
-        }
+        assertThat(byBatch.keySet()).containsExactly(1);
+        String text = byBatch.get(1);
+        assertThat(StubResponses.sourceIds(text)).hasSize(30);
+        assertThat(text).contains("Batch: 1 of 1 | Sources: 30");
+        assertThat(StubResponses.sourceIds(text).get(0)).isEqualTo("S001");
+        assertThat(StubResponses.sourceIds(text).get(29)).isEqualTo("S030");
 
         List<StubResponses.Request> cls = requests(CLASSIFICATION);
-        assertThat(cls).hasSize(11);
+        assertThat(cls).hasSize(2);
         List<String> byFirstEvent = inputsByBatch(CLASSIFICATION);
         assertThat(byFirstEvent.stream().map(t -> StubResponses.eventIds(t).size()).toList())
-            .containsExactly(20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 5);
+            .containsExactly(20, 10);
         assertThat(purposes().lastIndexOf(NORMALIZATION)).as("classification starts after every normalisation batch finished")
             .isLessThan(purposes().indexOf(CLASSIFICATION));
 
@@ -49,7 +49,7 @@ class EventBatchingIT extends AbstractEventIT {
         assertThat(responses.maxInFlight(CLASSIFICATION)).isLessThanOrEqualTo(4);
 
         List<Map<String, Object>> events = events(r);
-        assertThat(events).hasSize(205);
+        assertThat(events).hasSize(30);
         for (int i = 0; i < events.size(); i++) {
             Map<String, Object> e = events.get(i);
             assertThat(e.get("id")).isEqualTo(String.format("EV%03d", i + 1));

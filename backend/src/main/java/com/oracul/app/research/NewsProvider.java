@@ -8,7 +8,12 @@ import java.util.List;
 public interface NewsProvider {
 
     /** Raw provider article. Fields may be null. */
-    record Article(String url, String title, String domain, String language, String seendate) {
+    record Article(String url, String title, String domain, String language, String seendate,
+                   java.time.Instant publishedAt, String sourceName, String sourceUrl, boolean google) {
+        /** A GDELT article. */
+        public Article(String url, String title, String domain, String language, String seendate) {
+            this(url, title, domain, language, seendate, null, null, null, false);
+        }
     }
 
     /** {@code rateLimited}: the provider answered 429 (the one case that is retried). */

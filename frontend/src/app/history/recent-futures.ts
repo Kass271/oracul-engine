@@ -45,7 +45,11 @@ const FALLBACK_LABELS: Record<string, string> = {
                 <button mat-menu-item [attr.data-testid]="'recent-future-' + it.id" (click)="select(it)">
                   <span class="entry">
                     <span class="time" [attr.data-testid]="'recent-future-time-' + it.id">{{ time(it) }}</span>
-                    <span class="headline" [attr.data-testid]="'recent-future-headline-' + it.id">{{ it.headline }}</span>
+                    @if (it.status === 'STOPPED') {
+                      <span class="headline" [attr.data-testid]="'recent-future-status-' + it.id">Stopped</span>
+                    } @else {
+                      <span class="headline" [attr.data-testid]="'recent-future-headline-' + it.id">{{ it.headline }}</span>
+                    }
                     <span class="settings" [attr.data-testid]="'recent-future-settings-' + it.id">{{ settings(it) }}</span>
                   </span>
                 </button>

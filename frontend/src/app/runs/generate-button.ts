@@ -10,9 +10,9 @@ import { RunStore } from './run.store';
   imports: [MatButtonModule],
   template: `
     <button mat-flat-button data-testid="generate-button" [disabled]="!enabled()" (click)="generate()">
-      GENERATE THE FUTURE
+      {{ runs.active() ? 'STOP' : 'GENERATE THE FUTURE' }}
     </button>
-    @if (!connection.canGenerate()) {
+    @if (!runs.active() && !connection.canGenerate()) {
       <p class="hint" data-testid="generate-hint">Connect ChatGPT to generate</p>
       @if (connection.state() !== 'LOADING' && connection.state() !== 'CONNECTED') {
         <p class="hint" data-testid="chatgpt-conditions">
@@ -28,14 +28,16 @@ import { RunStore } from './run.store';
 })
 export class GenerateButton {
   protected readonly connection = inject(ConnectionStore);
-  private readonly runs = inject(RunStore);
+  protected readonly runs = inject(RunStore);
   private readonly scenario = inject(ScenarioStore);
 
-  protected readonly enabled = computed(
-    () => this.connection.canGenerate() && !this.runs.starting() && !this.runs.active(),
+  protected readonly enabled = computed(() =>
+    this.runs.active() ? !this.runs.stopping() : this.connection.canGenerate() && !this.runs.starting(),
   );
 
   protected generate(): void {
-    if (this.enabled()) this.runs.start(this.scenario.configuration());
+    if (!this.enabled()) return;
+    if (this.runs.active()) this.runs.stopRun();
+    else this.runs.start(this.scenario.configuration());
   }
 }

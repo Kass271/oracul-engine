@@ -1,0 +1,7 @@
+{
+  "modes": {
+    "e2e": { "files": ["docker-compose.yml", "docker-compose.e2e.yml"] },
+    "run": { "files": ["docker-compose.yml"] }
+  },
+  "urls": { "frontend": "http://localhost:4200", "health": "http://localhost:8080/actuator/health" }
+}

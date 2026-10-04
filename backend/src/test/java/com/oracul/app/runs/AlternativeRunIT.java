@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
 /** generation-runs.md "Slice 17_alternative-future" AlternativeRunIT rows 1 and 3-12 (row 2 is AlternativeRunStagesIT). */
-// @trace FR-30
+// @trace FR-30, FR-45
 class AlternativeRunIT extends AbstractStoryIT {
 
     static final String NOT_COMPLETED_MSG = "Only a completed future can have an alternative";
@@ -371,7 +371,7 @@ class AlternativeRunIT extends AbstractStoryIT {
 
     // #10 row #7 (parameterized over every non-completed state and both missing links)
     @ParameterizedTest(name = "parent {0}")
-    @ValueSource(strings = {"FAILED", "INSUFFICIENT_EVIDENCE", "QUEUED", "RUNNING", "COMPLETED-no-final-attempt", "COMPLETED-no-pack"})
+    @ValueSource(strings = {"FAILED", "INSUFFICIENT_EVIDENCE", "STOPPED", "QUEUED", "RUNNING", "COMPLETED-no-final-attempt", "COMPLETED-no-pack"})
     void aParentThatIsNotCompletedIs409(String kind) throws Exception {
         Ran source = parent();
         String sid = connectedSid();

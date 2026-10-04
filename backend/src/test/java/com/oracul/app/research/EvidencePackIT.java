@@ -10,7 +10,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /** Rows #3, #4, #7, #9-#12 of research-pipeline.md "Slice 07_evidence-pack": the Evidence Pack and getEvidencePack. */
-// @trace FR-18
+// @trace FR-18, FR-47
 class EvidencePackIT extends AbstractEvidenceIT {
 
     // #3
@@ -119,16 +119,20 @@ class EvidencePackIT extends AbstractEvidenceIT {
         assertThat(counts(r.run()).get("eventsSelected")).isEqualTo(0);
         assertThat(counts(r.run()).get("counterSignals")).isEqualTo(0);
         assertThat(r.run().get("evidencePackId")).isEqualTo(pack.get("id"));
+        // run-control.md FR-47: the empty pack is noted at the end, the run is speculative
+        assertThat(noteKind(r.run())).isEqualTo("NO_EVIDENCE");
     }
 
     // #9
     @Test
     void aRunThatFailedBeforeRankingHasNoPack() throws Exception {
+        // run-control.md FR-47: news down no longer fails a run; a rate-limited EVENT_NORMALIZATION call does (before RANKING)
         gdelt.reset();
-        gdelt.responder = req -> StubGdelt.status(503);
+        gdeltArticles(v4());
+        always(NORMALIZATION, StubResponses.status(429, "{}"));
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("FAILED");
-        assertThat(((Map<?, ?>) r.run().get("failure")).get("code")).isEqualTo("NEWS_UNAVAILABLE");
+        assertThat(((Map<?, ?>) r.run().get("failure")).get("code")).isEqualTo("CHATGPT_RATE_LIMITED");
         assertNotReady(getPack(r.sid(), r.id()));
         assertThat(r.run()).doesNotContainKey("evidencePackId");
         assertThat(jdbc.queryForObject("select count(*) from evidence_pack where run_id = cast(? as uuid)", Integer.class, r.id()))

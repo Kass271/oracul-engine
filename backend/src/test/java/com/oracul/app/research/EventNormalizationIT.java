@@ -18,7 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
 /** Rows 1-5, 18-20 of research-pipeline.md "Slice 06_events" integration tests: event normalisation (stage CONNECTING_SIGNALS). */
-// @trace FR-14, FR-38, FR-39
+// @trace FR-14, FR-38, FR-39, FR-47
 class EventNormalizationIT extends AbstractEventIT {
 
     private static final String TASK_LINE =
@@ -301,7 +301,10 @@ class EventNormalizationIT extends AbstractEventIT {
     void noSourcesMeansNoEventRequestAndNoEvents() throws Exception {
         Ran r = run(A);
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
-        assertThat(purposes()).containsOnly(EXPANSION);
+        // run-control.md FR-47: no sources -> no event requests, but the empty pack is written up speculatively
+        assertThat(purposes()).containsExactly(EXPANSION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
+        assertThat(requests(NORMALIZATION)).isEmpty();
+        assertThat(requests(CLASSIFICATION)).isEmpty();
         assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(0);
         assertThat(json(eventsRaw(r.sid(), r.id()))).isEqualTo(json("{\"items\":[]}"));
     }

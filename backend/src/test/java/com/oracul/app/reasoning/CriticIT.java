@@ -399,12 +399,15 @@ class CriticIT extends AbstractStoryIT {
         assertThat(g(2).split("<<<END_ORACUL_UNTRUSTED_DATA>>>", -1)).hasSize(4);
     }
 
-    // #13
+    // #13 (run-control.md FR-47: an empty pack no longer skips the scenario stages; the speculative scenario is criticised)
+    // @trace FR-47
     @Test
-    void anEmptyPackMakesNoCriticCall() throws Exception {
-        Ran r = run(A);
+    void anEmptyPackIsCriticisedLikeAnyOtherPack() throws Exception {
+        Ran r = run(A); // default GDELT {}: empty pack, speculative mode
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
-        assertThat(requests(CRITIC)).isEmpty();
+        assertThat(requests(GEN)).hasSize(1);
+        assertThat(requests(CRITIC)).as("speculative scenario is criticised").hasSize(1);
+        assertThat(requests(STORY)).hasSize(1);
     }
 
     @Test

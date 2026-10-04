@@ -17,7 +17,7 @@ import org.springframework.test.context.TestPropertySource;
  * GET /models ends in the message of its table row; retries only for row 4 (2 retries, backoff 1x then 2x).
  * Exhaustive over the rows, the provider-code sanitizing classes and the three error channels of a stream.
  */
-// @trace FR-39
+// @trace FR-39, FR-47
 @TestPropertySource(properties = {"oracul.openai.retry-delay=PT0.1S", "oracul.openai.timeout=PT0.5S"})
 class ErrorClassificationIT extends AbstractPlanUsageIT {
 
@@ -311,12 +311,14 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
     @ParameterizedTest(name = "expansion {0} falls back to templates")
     @MethodSource("expansionFallback")
     void anyOtherFailureOfTheExpansionFallsBackToTemplatesWithOneAttempt(String name, StubResponses.Reply reply) throws Exception {
-        responses.responder = req -> reply;
+        // run-control.md FR-47: the empty-news run goes on speculatively, so only the expansion gets the failure
+        var fallback = responses.defaultResponder();
+        responses.responder = req -> EXPANSION.equals(StubResponses.purpose(req)) ? reply : fallback.apply(req);
         Ran r = run(A);
         assertThat(r.run().get("status")).as(name + ": " + r.run()).isEqualTo("COMPLETED");
         @SuppressWarnings("unchecked")
         Map<String, Object> plan = (Map<String, Object>) researchBody(r.sid(), r.id()).get("searchPlan");
         assertThat(plan.get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
-        assertThat(responses.requests).as("query expansion is never retried").hasSize(1);
+        assertThat(requests(EXPANSION)).as("query expansion is never retried").hasSize(1);
     }
 }

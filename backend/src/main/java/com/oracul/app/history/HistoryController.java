@@ -25,9 +25,11 @@ public class HistoryController implements HistoryApi {
 
     @Override
     public ResponseEntity<RecentRunList> listRecentRuns() {
-        List<RecentRunSummary> items = runs.getObject().findRecentCompleted(session.getObject().id(), LIMIT).stream()
-            .map(r -> new RecentRunSummary(r.id(), r.generationId(), r.kind(), r.createdAt(), r.headline(),
-                r.configuration()).completedAt(r.completedAt()))
+        List<RecentRunSummary> items = runs.getObject().findRecent(session.getObject().id(), LIMIT).stream()
+            .map(r -> new RecentRunSummary(r.id(), r.generationId(), r.kind(), r.createdAt(),
+                r.configuration()).status(r.status())
+                .headline(r.status() == com.oracul.app.api.model.RunStatus.COMPLETED ? r.headline() : null)
+                .completedAt(r.completedAt()))
             .toList();
         return ResponseEntity.ok(new RecentRunList(items));
     }

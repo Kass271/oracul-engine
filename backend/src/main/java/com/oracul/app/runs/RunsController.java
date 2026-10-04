@@ -61,4 +61,13 @@ public class RunsController implements RunsApi {
     public ResponseEntity<GenerationRun> getRun(java.util.UUID runId) {
         return ResponseEntity.ok(runs.getObject().get(runId, session.getObject().id()));
     }
+
+    @Override
+    public ResponseEntity<GenerationRun> stopRun(java.util.UUID runId) {
+        CurrentSession current = session.getIfAvailable();
+        if (current == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found");
+        }
+        return ResponseEntity.ok(runs.getObject().stop(runId, current.id()));
+    }
 }

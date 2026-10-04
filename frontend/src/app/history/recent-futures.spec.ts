@@ -1,4 +1,4 @@
-// @trace FR-33
+// @trace FR-33, FR-45
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
@@ -187,6 +187,40 @@ describe('slice 15_recent-futures: Recent futures menu', () => {
     await boot();
     await openWith([item(1, {}, { realism: r, darkness: d, optimism: o, horizon: '1d' })]);
     expect(text(`recent-future-settings-${idOf(1)}`)).toBe(`R${r} D${d} O${o} · Tomorrow`);
+  });
+
+  // @trace FR-45
+  it('a STOPPED run shows "Stopped" instead of the headline; time and settings stay', async () => {
+    await boot();
+    const stopped = item(1, { status: 'STOPPED', headline: undefined }, { realism: 7, darkness: 4, optimism: 6, horizon: '5y' });
+    const done = item(2, { status: 'COMPLETED' });
+    await openWith([stopped, done]);
+    expect(entries().map((e) => e.getAttribute('data-testid'))).toEqual([`recent-future-${idOf(1)}`, `recent-future-${idOf(2)}`]);
+    expect(text(`recent-future-status-${idOf(1)}`)).toBe('Stopped');
+    expect(byId(`recent-future-headline-${idOf(1)}`)).toBeNull();
+    expect(byId(`recent-future-time-${idOf(1)}`)).not.toBeNull();
+    expect(text(`recent-future-settings-${idOf(1)}`)).toBe('R7 D4 O6 · 5 years');
+    // the COMPLETED entry keeps its headline and has no status element
+    expect(text(`recent-future-headline-${idOf(2)}`)).toBe('Headline 2');
+    expect(byId(`recent-future-status-${idOf(2)}`)).toBeNull();
+  });
+
+  // @trace FR-45
+  it('clicking a STOPPED entry opens /futures/<id>', async () => {
+    await boot();
+    await openWith([item(1, { status: 'STOPPED', headline: undefined })]);
+    byId(`recent-future-${idOf(1)}`)!.click();
+    await settle();
+    expect(TestBed.inject(Router).url).toBe(`/futures/${idOf(1)}`);
+    http.match(() => true);
+  });
+
+  // @trace FR-45
+  it.each([undefined, 'COMPLETED'] as const)('an item with status %s and a headline shows the headline', async (status) => {
+    await boot();
+    await openWith([item(1, status ? { status } : {})]);
+    expect(text(`recent-future-headline-${idOf(1)}`)).toBe('Headline 1');
+    expect(byId(`recent-future-status-${idOf(1)}`)).toBeNull();
   });
 
   it('renders a headline as text, never as HTML', async () => {

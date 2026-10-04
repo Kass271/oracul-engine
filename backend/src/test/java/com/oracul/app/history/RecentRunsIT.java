@@ -23,7 +23,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MvcResult;
 
 /** recent-futures.md "Slice 15_recent-futures" RecentRunsIT rows 1-8. */
-// @trace FR-33
+// @trace FR-33, FR-45
 class RecentRunsIT extends AbstractRunIT {
 
     private static final OffsetDateTime BASE = OffsetDateTime.of(2026, 1, 1, 8, 0, 0, 0, ZoneOffset.UTC);
@@ -41,7 +41,7 @@ class RecentRunsIT extends AbstractRunIT {
     }
 
     private UUID seed(String sid, UUID id, String status, String headline, OffsetDateTime createdAt, int darkness) {
-        OffsetDateTime completed = "COMPLETED".equals(status) ? createdAt.plusMinutes(1) : null;
+        OffsetDateTime completed = "COMPLETED".equals(status) || "STOPPED".equals(status) ? createdAt.plusMinutes(1) : null;
         // active rows must have a far-future real deadline so no sweeper touches them during the test
         OffsetDateTime deadline = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1);
         jdbc.update("insert into generation_run (id, generation_id, session_id, kind, status, configuration, counts, "
@@ -123,6 +123,57 @@ class RecentRunsIT extends AbstractRunIT {
         }
     }
 
+    // run-control.md FR-45 #7: STOPPED runs are listed with the COMPLETED ones, items carry the status
+    // @trace FR-45
+    @Test
+    void completedAndStoppedRunsAreListedNewestFirstEachWithItsStatus() throws Exception {
+        String sid = newSid();
+        UUID done1 = seed(sid, "COMPLETED", "First headline", BASE.plusMinutes(1), 3);
+        UUID stopped1 = seed(sid, "STOPPED", null, BASE.plusMinutes(2), 7);
+        seed(sid, "FAILED", null, BASE.plusMinutes(3), 5);
+        UUID done2 = seed(sid, "COMPLETED", "Second headline", BASE.plusMinutes(4), 9);
+        UUID stopped2 = seed(sid, "STOPPED", "must not be shown", BASE.plusMinutes(5), 1);
+        seed(sid, "COMPLETED", null, BASE.plusMinutes(6), 5); // interim COMPLETED without headline: still not listed
+        List<Map<String, Object>> items = items(sid);
+        assertThat(ids(items)).containsExactly(stopped2.toString(), done2.toString(), stopped1.toString(), done1.toString());
+        for (Map<String, Object> item : items) {
+            boolean stopped = item.get("id").equals(stopped1.toString()) || item.get("id").equals(stopped2.toString());
+            assertThat(item.get("status")).as("status of " + item.get("id")).isEqualTo(stopped ? "STOPPED" : "COMPLETED");
+            if (stopped) {
+                assertThat(item.get("headline")).as("a STOPPED item has no headline").isNull();
+            } else {
+                assertThat(item.get("headline")).isNotNull();
+            }
+            assertThat(item.get("configuration")).isNotNull();
+            assertThat(item.get("createdAt")).isNotNull();
+            assertThat(item.get("generationId")).isNotNull();
+            MvcResult run = getRun(sid, (String) item.get("id")).andReturn();
+            assertThat(item.get("configuration")).isEqualTo(json(run.getResponse().getContentAsString()).get("configuration"));
+        }
+        assertThat(((Map<?, ?>) items.get(0).get("configuration")).get("darkness")).isEqualTo(1);
+        assertThat(items.get(1).get("headline")).isEqualTo("Second headline");
+    }
+
+    // @trace FR-45
+    @ParameterizedTest(name = "n={0} completed and stopped runs together")
+    @ValueSource(ints = {20, 21, 25})
+    void atMostTwentyCompletedAndStoppedRunsTogetherAreListed(int n) throws Exception {
+        String sid = newSid();
+        List<UUID> created = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            created.add(i % 2 == 0 ? seed(sid, "COMPLETED", "Headline " + i, BASE.plusMinutes(i), 5)
+                : seed(sid, "STOPPED", null, BASE.plusMinutes(i), 5));
+        }
+        List<String> expected = new ArrayList<>();
+        for (int i = n - 1; i >= n - 20; i--) expected.add(created.get(i).toString());
+        List<Map<String, Object>> items = items(sid);
+        assertThat(ids(items)).containsExactlyElementsOf(expected);
+        for (int i = 0; i < 20; i++) {
+            int idx = n - 1 - i;
+            assertThat(items.get(i).get("status")).isEqualTo(idx % 2 == 0 ? "COMPLETED" : "STOPPED");
+        }
+    }
+
     // #4
     @ParameterizedTest(name = "n={0}")
     @ValueSource(ints = {20, 21, 25})
@@ -196,8 +247,8 @@ class RecentRunsIT extends AbstractRunIT {
     @Test
     void anUnexpectedRepositoryFailureIsAnInternalError() throws Exception {
         Method m = Stream.of(GenerationRunRepository.class.getDeclaredMethods())
-            .filter(x -> x.getName().equals("findRecentCompleted")).findFirst()
-            .orElseThrow(() -> new AssertionError("GenerationRunRepository.findRecentCompleted is missing"));
+            .filter(x -> x.getName().startsWith("findRecent")).findFirst()
+            .orElseThrow(() -> new AssertionError("GenerationRunRepository.findRecent... is missing"));
         m.setAccessible(true);
         String sid = newSid();
         Object stub = doThrow(new RuntimeException("boom http://internal.example at com.oracul.app.X")).when(repo);

@@ -12,108 +12,136 @@ shapes so stub-green tests cannot hide a malformed real request again. A README 
 troubleshoot and reset ORACUL without editing anything.
 
 ## Data
+
+### Compose files and stack modes (slice 03 target state)
 | Item | Value | Rules |
 |---|---|---|
-| `docker-compose.yml` | services `db`, `backend`, `frontend`; volume `db-data` | no stub service, no `ORACUL_*` URL overrides → backend defaults (`https://auth.openai.com…`, `https://api.openai.com/v1`, GDELT) |
-| `docker-compose.override.yml` | — | **deleted** (it was auto-merged into every `docker compose up`) |
-| `docker-compose.e2e.yml` | service `stub`; backend env overrides; `db` volume `db-e2e-data` | only used with `-f docker-compose.yml -f docker-compose.e2e.yml` or `COMPOSE_FILE` |
-| volumes | `db-data` (real), `db-e2e-data` (E2E) | the E2E file maps `db-e2e-data:/var/lib/postgresql` for `db`; Compose merges service volumes by container path, so the real `db-data` mapping is replaced, not added |
+| `docker-compose.yml` | `name: oracul-engine`; services `db`, `backend`, `frontend`; volume `db-data` | unchanged; no `stub` service, no `ORACUL_*` variable → backend defaults (`https://auth.openai.com/...`, `https://api.openai.com/v1`, `https://news.google.com`, `https://api.gdeltproject.org`) |
+| `docker-compose.override.yml` | — | **deleted** (Compose merged it into every plain `docker compose up`) |
+| `docker-compose.e2e.yml` | new: the whole content of today's override file (service `stub`, every backend `ORACUL_*` override, `depends_on` incl. `stub`) **plus** `db.volumes: [db-e2e-data:/var/lib/postgresql]`, top-level `volumes: { db-e2e-data: {} }` and the two Google News variables below | used only with `-f docker-compose.yml -f docker-compose.e2e.yml` (or `COMPOSE_FILE=docker-compose.yml:docker-compose.e2e.yml`); Compose merges a service's `volumes` by container path, so `db-e2e-data` replaces `db-data` for `/var/lib/postgresql` (not added) |
+| `.oracul/stack.json` | written in this spec step: mode `e2e` = files `docker-compose.yml`, `docker-compose.e2e.yml`; mode `run` = `docker-compose.yml`; urls frontend `http://localhost:4200`, health `http://localhost:8080/actuator/health`; no profiles; project = compose `name:` (`oracul-engine`) | `node factory-engine/bin/stack.mjs up/e2e` (default `--mode e2e`) starts db + backend + frontend + stub on `db-e2e-data`; `--mode run` starts the real stack; `down` covers both file sets (stub included). `check-stack` stays INVALID until `docker-compose.e2e.yml` exists (developer, GREEN) |
+| volumes | `oracul-engine_db-data` (real), `oracul-engine_db-e2e-data` (E2E) | the real volume is never mounted in mode `e2e` |
 
-### `docker-compose.e2e.yml` backend environment
+### `docker-compose.e2e.yml` backend environment (copied from the override, plus FR-48)
 | Variable | Value |
 |---|---|
-| `ORACUL_CHATGPT_AUTHORIZE_URL` | `http://localhost:4010/api/accounts/authorize` (browser-reachable) |
-| `ORACUL_CHATGPT_TOKEN_URL` | `http://stub:4010/api/accounts/oauth/token` |
-| `ORACUL_CHATGPT_REVOCATION_URL` | `http://stub:4010/api/accounts/oauth/revoke` |
-| `ORACUL_CHATGPT_JWKS_URL` | `http://stub:4010/.well-known/jwks.json` |
+| `ORACUL_CHATGPT_AUTHORIZE_URL` | `http://localhost:4010/oauth/authorize` (browser-reachable) |
+| `ORACUL_CHATGPT_TOKEN_URL` | `http://stub:4010/oauth/token` |
+| `ORACUL_CHATGPT_JWKS_URL` | `http://stub:4010/jwks` |
+| `ORACUL_CHATGPT_ISSUER` | `http://stub:4010` (the stub's `STUB_ISSUER` default) |
+| `ORACUL_CHATGPT_REVOCATION_URL` | `http://stub:4010/oauth/revoke` |
 | `ORACUL_OPENAI_RESPONSES_BASE_URL` | `http://stub:4010/v1` |
 | `ORACUL_NEWS_GDELT_BASE_URL` | `http://stub:4010` |
-| `ORACUL_RUN_PLACEHOLDER_STAGE_DELAY`, `ORACUL_RUN_MIN_STAGE_DURATION`, `ORACUL_EVIDENCE_MIN_CORE_MEDIUM`, `ORACUL_EVIDENCE_MIN_CORE_LOW` | unchanged values from the old override (`PT2S`, `PT2S`, `0`, `0`) |
-`ORACUL_CHATGPT_REDIRECT_URI` is not overridden: E2E uses the real `http://127.0.0.1:4200/callback`. The stub mints ID
-tokens with `iss = https://auth.openai.com`, so `oracul.chatgpt.issuer` keeps its default.
+| `ORACUL_NEWS_GOOGLE_BASE_URL` | `http://stub:4010` (new, FR-48) |
+| `ORACUL_NEWS_GOOGLE_REQUEST_SPACING` | `PT0.2S` (new, FR-48) |
+| `ORACUL_NEWS_REQUEST_SPACING`, `ORACUL_NEWS_RATE_LIMIT_WAIT` | `PT0.5S`, `PT0.5S` (unchanged) |
+| `ORACUL_OPENAI_RETRY_DELAY` | `PT0.2S` (unchanged) |
+| `ORACUL_RUN_PLACEHOLDER_STAGE_DELAY`, `ORACUL_RUN_MIN_STAGE_DURATION` | `PT2S`, `PT2S` (unchanged) |
+| `ORACUL_EVIDENCE_MIN_CORE_MEDIUM`, `ORACUL_EVIDENCE_MIN_CORE_LOW` | `"0"`, `"0"` (unchanged) |
+`ORACUL_CHATGPT_REDIRECT_URI` is not overridden: E2E uses the real `http://127.0.0.1:4200/callback`.
 
 ## Behaviour
 
 ### FR-42 — Opt-in E2E stub with its own data
 - Happy path:
   - Real mode: `docker compose up -d` in `apps/oracul-engine` (no `-f`, no `COMPOSE_FILE`) → `docker compose ps`
-    lists exactly `db`, `backend`, `frontend`; the backend uses the documented OpenAI endpoints; `db` mounts
-    `db-data`.
-  - E2E mode: `docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build` (equivalently
-    `COMPOSE_FILE=docker-compose.yml:docker-compose.e2e.yml`) → also `stub` on port 4010; `db` mounts `db-e2e-data`.
-  - Factory runs: `node factory-engine/bin/stack.mjs up|e2e|down` runs plain `docker compose …` and inherits the
-    environment, so every E2E stack command is run with `COMPOSE_FILE=docker-compose.yml:docker-compose.e2e.yml`
-    exported (see contract-notes "Factory note").
-- Rules — stub (`e2e/stubs/server.mjs`, Node, no npm dependencies, port 4010) serves the documented paths and
-  rejects malformed requests:
+    lists exactly `db`, `backend`, `frontend`; the backend uses the documented OpenAI / Google News / GDELT URLs;
+    `db` mounts `db-data`.
+  - E2E mode: `docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build` → also `stub` on port
+    4010; `db` mounts `db-e2e-data`. The factory runs exactly this through `.oracul/stack.json` mode `e2e`
+    (`stack.mjs up|e2e|down`); no `COMPOSE_FILE` export is needed any more (contract-notes "Stack modes").
+  - `e2e/tests/global-setup.ts` keeps `docker compose restart backend` (restart re-uses the running container and
+    its E2E environment; the project name comes from `name:` in `docker-compose.yml`).
+- Rules — the stub (`e2e/stubs/server.mjs`, Node, no npm dependencies, port 4010) keeps every route, control and
+  mode built in slices 01/02 and enforces the documented request shapes (already implemented, now proven by E2E):
   | Stub endpoint | Accepts | Rejects with |
   |---|---|---|
-  | `GET /api/accounts/authorize` | `response_type=code`; `client_id` = `dynamic_agent_client` **with** `agent_name_hint` (non-empty) or an `oaiapp_…` id **without** `agent_name_hint`; `ext_agent_host_id` matching `^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`; `redirect_uri` matching `^http://127\.0\.0\.1:\d{1,5}/callback$`; `scope` containing all 6 scopes; `resource=https://api.openai.com/v1`; non-empty `state`, `nonce`, `code_challenge`; `code_challenge_method=S256` | `400 {"error":"invalid_authorize_request"}` (no redirect) for any violation (e.g. bare-UUID host id, path `/auth/callback`, `localhost`, missing nonce, `agent_name_hint` with an issued id); request recorded |
-  | ↳ on success | 302 to `redirect_uri?code=stub-code-<n>&state=<state>` plus `&client_id=oaiapp_stub_client` for `dynamic_agent_client`; remembers per code: challenge, nonce, client id, redirect_uri | mode `deny` → `?error=access_denied&state=…`; mode `no_client_id` → no `client_id` on a first registration |
-  | `POST /api/accounts/oauth/token` `authorization_code` | form `code` known and unused, `client_id` = the id issued for that code (never `dynamic_agent_client`), `code_verifier` matching the challenge, `redirect_uri` identical to the authorize one, `resource=https://api.openai.com/v1` | `400 {"error":"invalid_grant"}` (bad code/verifier/redirect, mode `invalid_grant`) · `400 {"error":"invalid_request"}` (missing/wrong `resource` or `client_id`) · mode `token_error` → 500 |
-  | ↳ on success | `200 {access_token, refresh_token, id_token, token_type:"Bearer", expires_in:3600, scope}`; `id_token` RS256-signed with the stub key (`kid` `stub-key-1`), claims `iss=https://auth.openai.com`, `aud=<client id>`, `sub`, `email`, `nonce=<remembered nonce>`, `iat`, `exp=now+3600`; mode `not_eligible` drops `chatgpt.tokens.use.direct` from `scope`; mode `bad_nonce` signs a different nonce | — |
-  | `POST /api/accounts/oauth/token` `refresh_token` | `client_id` = issued id, `refresh_token` issued and not yet used (rotation), `resource` | `400 {"error":"refresh_token_reused"}` for a used token · mode `refresh_error` → `400 {"error":"invalid_grant"}` · mode `refresh_invalid_client` → `401 {"error":"invalid_client"}` · missing `resource` → `400 invalid_request` |
-  | `POST /api/accounts/oauth/revoke` | form `token`, `token_type_hint=refresh_token`, `client_id` | always empty `200`; request recorded |
-  | `GET /.well-known/jwks.json` | — | `200 {"keys":[{kty:"RSA",kid:"stub-key-1",alg:"RS256",use:"sig",n,e}]}` (key generated at stub start) |
-  | `GET /v1/models` | `Authorization: Bearer <issued, unrevoked access token>` | `401` otherwise; answers `{"models":[{"slug":"gpt-5","display_name":"GPT-5","visibility":"list"},{"slug":"stub-model-2","display_name":"Stub 2","visibility":"list"}]}` (control `POST /__control/models` `{"models":[…]}` replaces it until reset) |
-  | `POST /v1/responses` | bearer as above; JSON body with `stream === true` **and** `store === false`; no input item with role `system`; `model` in the current catalogue | missing/foreign bearer → `401 {"error":{"code":"subscription_sharing_invalid_user"}}`; `stream`/`store` wrong or missing → `400 {"error":{"code":"invalid_request","param":"stream"\|"store"}}`; model not in catalogue → `400 {"error":{"code":"subscription_sharing_unsupported_capability","param":"model"}}` |
-  | ↳ on success | `200 text/event-stream`: `response.created`, ≥ 1 `response.output_text.delta`, `response.completed` (with `response.output` message containing the same text); routing by `ORACUL REQUEST <PURPOSE>` as today | modes below |
-  | `POST /__control/openai` | `{"mode": …}` → 204 | modes: `ok`, `not_eligible` (403 `subscription_sharing_user_not_eligible`), `usage_limit` (429 `subscription_sharing_usage_limit_exceeded`), `unavailable` (503 `subscription_sharing_usage_unavailable`), `unavailable_once` (first call 503, then ok), `unsupported_format` (400 `subscription_sharing_unsupported_capability` `param:"text.format"` for bodies with `text.format`, else ok), `route_not_supported` (403), `invalid_user` (401 `subscription_sharing_invalid_user`), `unknown_error` (400 code `stub_mystery_error`), `incomplete` (stream ends with `response.incomplete`), `failed_usage_limit` (stream ends with `response.failed`, code `subscription_sharing_usage_limit_exceeded`), `truncated` (stream ends without a terminal event) |
-  | `POST /__control/mode` | existing control, modes `ok`, `not_eligible`, `deny`, `token_error`, `refresh_error`, plus `invalid_grant`, `no_client_id`, `bad_nonce`, `refresh_invalid_client` | `400 unknown_mode` |
-  | `GET /__control/requests?kind=` | kinds `responses`, `gdelt`, plus `authorize`, `token`, `revoke`, `models` (each with the received query/form/body, rejected ones flagged `rejected: true`) | `400 unknown_kind` |
-  Existing stub controls (`/__control/reset` — also resets the new modes and the catalogue —, `/__control/issued`,
-  `news`, `events`, `scenario`, `critic`, `story`) and fixtures keep working; their 429 answers gain the code
-  `subscription_sharing_usage_limit_exceeded`.
+  | `GET /oauth/authorize` | `response_type=code`; `client_id` = `dynamic_agent_client` **with** non-empty `agent_name_hint`, or `^oaiapp_\w+$` **without** `agent_name_hint`; `ext_agent_host_id` matching `^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`; `redirect_uri` matching `^http://127\.0\.0\.1:\d{1,5}/callback$`; `scope` containing all 6 scopes; `resource=https://api.openai.com/v1`; non-empty `state`, `nonce`, `code_challenge`; `code_challenge_method=S256` | HTTP 400 `{"error":"invalid_authorize_request"}`, no redirect, no code issued |
+  | `POST /v1/responses` | JSON body with `stream === true` **and** `store === false` | HTTP 400 `{"error":{"code":"invalid_request_error","message":"stream must be true and store must be false"}}` (the body is still recorded under kind `responses`) |
+  New in slice 03 (FR-48, see news-search.md): `GET /rss/search`, `GET /rss/articles/<name>`, `POST /__control/rss`,
+  `GET /__control/requests?kind=rss`.
 - Errors:
   - stub not running in E2E mode → backend calls fail → FR-39/FR-36 messages (no generic 500)
-  - E2E run with plain `docker compose up` (no E2E file) → the real-mode stack starts; E2E fails fast at its first
-    `__control` call (connection refused) — documented in the README under "Run the tests"
-  - after any E2E run, the real-mode volume `db-data` contains no `oaiapp_stub_client` (it is never mounted in E2E
-    mode)
+  - E2E run against the real-mode stack (plain `docker compose up`) → E2E fails fast at its first `__control` call
+    (connection refused) — documented in the README under "Run the tests"
+  - after any E2E run, the real-mode volume `db-data` contains no `oaiapp_stub_client` (it is never mounted in mode
+    `e2e`)
+- Changes earlier behaviour: `docker compose up -d` auto-merged `docker-compose.override.yml` (stub + stub URLs, shared volume `db-data`) and the factory needed `COMPOSE_FILE` → plain `up` is real mode (db, backend, frontend only, real URLs); the stub runs only via `docker-compose.e2e.yml` with volume `db-e2e-data`; the factory selects it through `.oracul/stack.json` mode `e2e` (tests: none)
+- Ranges & invariants: none (the request-shape classes are checked by the E2E spec below in a loop; there is no unit/integration layer for the Node stub or compose files)
 
 ### FR-43 — Comprehensive README
-- Happy path: `apps/oracul-engine/README.md` with these `##` sections, in this order:
+- Happy path: `apps/oracul-engine/README.md` (new) starts with `# ORACUL` and has exactly these `##` sections, in this
+  order (other `##` sections may follow after them):
   1. `## Prerequisites` — personal ChatGPT Plus or Pro account; Docker Desktop (Compose v2); free ports 4200 and 8080;
-     browser on the same computer
-  2. `## Run for real` — `docker compose up -d --build`, open http://localhost:4200
+     browser on the same computer; for running the tests only: JDK 17+ (Gradle provisions Java 25) and Node.js 22+
+  2. `## Run for real` — `docker compose up -d --build`, open http://localhost:4200; no `-f` flag and no
+     `docker-compose.e2e.yml` in this section
   3. `## Sign in step by step` — click "Continue with ChatGPT"; sign in on OpenAI's page (Google login is fine); on the
      first time OpenAI shows "Connect your ORACUL to ChatGPT" (what it is: registering this ORACUL installation as an
      app allowed to use your ChatGPT plan; you may edit the name); confirm; you return to ORACUL with "ChatGPT
-     connected"; click GENERATE THE FUTURE. Later sign-ins skip the connect screen. Tokens live only in memory:
-     reconnect after a restart.
+     connected"; click GENERATE THE FUTURE; STOP ends a slow generation. Later sign-ins skip the connect screen. Tokens
+     live only in memory: reconnect after a restart.
   4. `## Run the tests` — backend `cd backend && ./gradlew test`; frontend `cd frontend && npm ci && npm run test:ci`;
      E2E `docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build`, then
-     `cd e2e && npm ci && npx playwright test`, then `docker compose -f docker-compose.yml -f docker-compose.e2e.yml
-     down`; the E2E stack uses its own database
-  5. `## Troubleshooting` — one entry each, each with "Cause" and "Fix": `invalid_authorize_request` on OpenAI's page;
-     "Your ChatGPT plan is not eligible for ORACUL"; "ChatGPT usage limit reached"; port 4200 or 8080 already in use;
-     Docker disk full; "ChatGPT registration is no longer valid" / resetting the registration (Reset ChatGPT
-     connection in the header menu); resetting the database (`docker compose down -v`, note: deletes all stored
-     futures)
+     `cd e2e && npm ci && npx playwright install chromium && npx playwright test`, then
+     `docker compose -f docker-compose.yml -f docker-compose.e2e.yml down`; states that the E2E stack uses its own
+     database (`db-e2e-data`) and that E2E against the plain stack fails at the first stub call
+  5. `## Troubleshooting` — one `###` entry each, each containing a line starting with `Cause:` and a line starting
+     with `Fix:`: `invalid_authorize_request` on OpenAI's page; "Your ChatGPT plan is not eligible for ORACUL"; "ChatGPT
+     usage limit reached"; port 4200 or 8080 already in use; Docker disk full; "ChatGPT registration is no longer
+     valid" / resetting the registration (Reset ChatGPT connection in the header menu); resetting the database
+     (`docker compose down -v`, deletes all stored futures)
   6. `## Stop and reset` — `docker compose down`; `docker compose down -v` (deletes futures and the registration);
      Reset ChatGPT connection in the UI
 - Rules:
   - Every command is copy-paste runnable from `apps/oracul-engine` on a fresh clone with Docker running; no step edits a
-    file, an env var, a database row or an API key; ORACUL never asks for an API key.
-  - Commands use `docker compose` (v2), not `docker-compose`.
+    file, an env var, a database row or an API key; ORACUL never asks for an API key; the words "API key" appear only
+    in a sentence saying none is needed.
+  - Commands use `docker compose` (v2), never `docker-compose ` (with a space, the v1 binary).
   - URLs: app http://localhost:4200, callback http://127.0.0.1:4200/callback (explained: OpenAI only accepts the
     loopback address; do not change it).
-- Errors: none at runtime (documentation). A README check in the release QA walks every command on a fresh clone.
+- Errors: none at runtime (documentation). The release QA walks every command on a fresh clone.
+- Changes earlier behaviour: none
+- Ranges & invariants: none
 
 ### NFR-8 — Real-service checks (planning hook)
-- Check 1 after the sign-in slice, check 2 after the release (fresh install, empty registration): performed by the
-  user on their real ChatGPT account; evidence files `docs/phase-02_codex-provider/04_build/<sign-in slice>/real-check.md`
-  and `docs/phase-02_codex-provider/05_release/real-check.md` with: date, ORACUL commit/state, steps done, what OpenAI
-  showed ("Connect your ORACUL to ChatGPT" or the reauthorization selector), ORACUL header text after return, run id
-  and headline of one generated future (real text, not stub lorem), model slug shown in the metadata, result
-  PASS/FAIL, and the user's confirmation. The phase is GREEN only after check 2 is PASS.
+- Check 1 after the sign-in slice (done, `04_build/01_signin-fix/real-check.md`), check 2 after the release (fresh
+  install, empty registration): performed by the user on their real ChatGPT account; evidence
+  `docs/phase-02_codex-provider/05_release/real-check.md` with date, ORACUL commit, steps, what OpenAI showed, ORACUL
+  header text after return, run id and headline of one generated future (real text, not stub lorem), model slug,
+  PASS/FAIL and the user's confirmation. The phase is GREEN only after check 2 is PASS.
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |
 |---|---|---|---|---|
-| — | — | — | no API change (compose files, stub, README) | — |
+| — | — | — | no API change (compose files, stack modes, stub, README) | — |
 
 ## UI
-- Route: none (no UI change). `data-testid`s used by E2E for these FRs are those of chatgpt-connection.md and
-  chatgpt-inference.md.
+- Route: none (no UI change). `data-testid`s used by E2E for these FRs are those of chatgpt-connection.md,
+  chatgpt-inference.md and run-control.md.
 - States: n/a.
+
+## Slice 03_run-modes-readme — FR-42 / FR-43 test contract
+- `e2e/tests/run-modes.spec.ts` (`// @trace FR-42`), Node `fs` text checks of the app folder (`new URL('../../', import.meta.url)`),
+  no YAML library:
+  - `docker-compose.override.yml` does not exist; `docker-compose.yml` contains no `stub:` service, no `4010` and no
+    `ORACUL_`; `docker-compose.e2e.yml` exists and contains `stub:`, `db-e2e-data:/var/lib/postgresql`, every
+    variable of the table above; `.oracul/stack.json` parses with mode `e2e` files
+    `["docker-compose.yml","docker-compose.e2e.yml"]` and mode `run` files `["docker-compose.yml"]`.
+  - live stub: in a loop over the reject classes, each alone with all other parameters valid, `GET
+    http://localhost:4010/oauth/authorize?…` answers 400 `{"error":"invalid_authorize_request"}` and no `Location`:
+    bare UUID host id, host id `urn:uuid:` + upper-case hex, redirect path `/auth/callback`, redirect host
+    `localhost`, missing `nonce`, `client_id=oaiapp_x` with `agent_name_hint`, `dynamic_agent_client` without
+    `agent_name_hint`, missing `resource`, `code_challenge_method=plain`; the fully valid request answers 302 to
+    `http://127.0.0.1:4200/callback?code=…`.
+  - live stub: `POST http://localhost:4010/v1/responses` without `stream`, with `stream:false`, without `store`, with
+    `store:true` → each 400.
+  - real-mode isolation: the stack under test has the backend wired to the stub (a sign-in through the UI reaches
+    `oaiapp_stub_client`), which together with the file checks proves the stub client id is only ever written to
+    `db-e2e-data`.
+- `e2e/tests/readme.spec.ts` (`// @trace FR-43`), Node `fs` text checks of `README.md`: the six `##` headings in the
+  order above (first six `##` lines); the Troubleshooting section has the seven entries, each with `Cause:` and `Fix:`;
+  the README contains `docker compose up -d --build`, `docker compose down -v`, `./gradlew test`, `npm run test:ci`,
+  `-f docker-compose.yml -f docker-compose.e2e.yml`, `http://127.0.0.1:4200/callback`, "Connect your ORACUL to
+  ChatGPT"; it never contains `docker-compose ` (v1 with a space), `.env`, `export ` or `psql`; "Run for real" contains
+  no `-f`.

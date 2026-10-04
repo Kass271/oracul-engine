@@ -1,4 +1,4 @@
-// @trace FR-10
+// @trace FR-10, FR-45
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
@@ -179,14 +179,15 @@ describe('slice 04_run-start', () => {
     expect(disabled('generate-button')).toBe(false);
   });
 
-  // @trace FR-10
-  it('an active run disables the button on the welcome view', async () => {
+  // @trace FR-10, FR-45
+  it('an active run turns the button into an enabled STOP on the welcome view (run-control.md FR-45 #1)', async () => {
     await boot();
     await generate();
     await router.navigateByUrl('/');
     await tick(0);
     expect(byId('welcome-view')).not.toBeNull();
-    expect(disabled('generate-button')).toBe(true);
+    expect(text('generate-button')).toBe('STOP');
+    expect(disabled('generate-button')).toBe(false);
   });
 
   // @trace FR-10
@@ -198,6 +199,7 @@ describe('slice 04_run-start', () => {
     await tick(0);
     await router.navigateByUrl('/');
     await tick(0);
+    expect(text('generate-button')).toBe('GENERATE THE FUTURE');
     expect(disabled('generate-button')).toBe(false);
   });
 

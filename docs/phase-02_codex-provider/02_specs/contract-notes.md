@@ -1,11 +1,12 @@
 # Contract notes — phase-02_codex-provider
 
-Decisions behind the phase-02 changes to `api/openapi.yaml` (version 0.4.0 → 0.5.0). Phase-01 conventions
+Decisions behind the phase-02 changes to `api/openapi.yaml` (version 0.4.0 → 0.5.0 in the spec step, 0.5.0 → 0.6.0
+in the slice-03 spec delta). Phase-01 conventions
 (`docs/phase-01_mvp/02_specs/contract-notes.md`) stay in force: ApiError `{code, message}` for every 4xx/5xx, tags =
 capabilities, UUID ids, ISO-8601 UTC, no schema named `Error`. Capability specs of this phase:
 `chatgpt-connection.md` (FR-35, FR-36, FR-37, FR-41; NFR-9), `chatgpt-inference.md` (FR-38, FR-39, FR-40),
-`run-modes.md` (FR-42, FR-43; NFR-8), `news-search.md` (FR-44, added by the approved scope change for slice
-02_plan-usage-calls).
+`run-modes.md` (FR-42, FR-43; NFR-8), `news-search.md` (FR-44, FR-46, FR-48 — added by approved scope changes),
+`run-control.md` (FR-45, FR-47 — added by the approved scope change for slice 03_run-modes-readme).
 
 Sources: developers.openai.com/siwc/token-sharing-open-source/ sign-in, profiles-and-sessions, errors-and-recovery,
 models-and-inference, token-reference, preview-limitations, and https://auth.openai.com/.well-known/openid-configuration
@@ -17,6 +18,8 @@ models-and-inference, token-reference, preview-limitations, and https://auth.ope
 | new | `DELETE /api/auth/chatgpt/registration` `resetChatGptRegistration` (tag `chatgpt`) → 204 · 409 `RUN_IN_PROGRESS` · 500 | yes (addition) |
 | description only | `startChatGptSignIn`, `completeChatGptSignIn` (new outcomes `not_verified`, `expired`), `disconnectChatGpt` (best-effort revocation) | yes — still 302 / 204 only |
 | new response | `startRun`, `startAlternativeRun` gain `503` (`ChatGptUnavailable`) and the 401 example `CHATGPT_REGISTRATION_INVALID` | yes (additional status) |
+| new (0.6.0) | `POST /api/runs/{runId}/stop` `stopRun` (tag `runs`) → 200 `GenerationRun` · 404 `RUN_NOT_FOUND` · 500 | yes (addition) |
+| description only (0.6.0) | `listRecentRuns` (also STOPPED runs), `startAlternativeRun` (STOPPED parent → 409; note copied), `listRunSources` (≤ 30), `getEvidencePack`, `getStructuredScenario`, `getFutureResult` (STOPPED / empty-pack wording) | yes — same statuses |
 | none removed | every phase-01 operation and operationId is kept | — |
 
 Reset is a `DELETE` on the registration resource (the stored issued client id), separate from `DELETE
@@ -30,10 +33,20 @@ Reset is a `DELETE` on the registration resource (the stored issued client id), 
 | `RunFailure` | + optional `providerCode` (pattern `^[A-Za-z0-9_.:-]{1,64}$`) |
 | `ScenarioMetadata` | + optional `model` (1–128 chars) |
 | responses | + `ChatGptUnavailable` (503), + `RunInProgress` (409) |
+| `RunStatus` (0.6.0) | + `STOPPED` (terminal); `INSUFFICIENT_EVIDENCE` kept for stored runs, no longer produced |
+| `GenerationRun` (0.6.0) | + optional `evidenceNote` (`EvidenceNote`); `suggestedRealism` also set for an INSUFFICIENT_EVIDENCE note |
+| `EvidenceNote`, `EvidenceNoteKind` (0.6.0) | new: `{kind: INSUFFICIENT_EVIDENCE \| NO_EVIDENCE, message, coreItems, coreNeeded}`, all required |
+| `RecentRunSummary` (0.6.0) | + optional `status` (always sent: COMPLETED or STOPPED); `headline` no longer required (absent for STOPPED) |
+| `Source` (0.6.0) | + optional `publisherUrl` (uri; Google News sources) |
+| `RunFailureCode` (0.6.0) | description only: `NEWS_UNAVAILABLE`, `INSUFFICIENT_EVIDENCE` no longer produced (kept for stored runs) |
+| `ResearchCounts`, `SearchQueryStatus` (0.6.0) | description only: ≤ 30 kept sources; Google News RSS first, GDELT fallback |
 
 Enum additions break exhaustive `switch`es in generated-model consumers (`RunFailures.message`, frontend
 `Record<ChatGptConnectionState, …>`); the implementing slice updates them — they are compile errors, not runtime risks.
 `CHATGPT_RATE_LIMITED` keeps its name for the usage-limit case (no rename, so stored runs stay readable).
+`STOPPED` breaks no exhaustive switch today (no `Record<RunStatus, …>` / `switch` over `RunStatus`); the
+`RecentRunSummary.headline` relaxation keeps every existing fixture valid (`status` is optional in the schema for the
+same reason, like `hasOpenCriticIssues`). No schema, property or enum value is renamed or removed in 0.6.0.
 
 ## Error codes added
 | Source | HTTP | code | message |
@@ -106,20 +119,20 @@ Run failures (not HTTP errors) are listed in `chatgpt-inference.md` FR-39 and in
     an AND of words cannot sit inside an OR). This narrows multi-word queries to exact phrases; it could not be
     tried live (every analyst call on 2026-10-04 was answered 429), so NFR-8 check 2 is the proof. GDELT does not say
     which OR element matched, so per-query attribution is derived from the article title (news-search.md step 7).
-21. **NEWS_UNAVAILABLE (FR-44)** = every GDELT request failed or could not be sent. A request answered with zero
+21. **NEWS_UNAVAILABLE (FR-44)** — superseded in slice 03 by FR-47 (no news never ends a run; the code is no longer produced). = every GDELT request failed or could not be sent. A request answered with zero
     articles counts as "news source reached"; an all-empty search continues as in phase-01 (FR-31).
 22. **Search time budget** `oracul.news.search-budget` PT75S inside the 180 s run deadline; spacing, 429 wait,
     timeout and budget are configurable (`ORACUL_NEWS_*`), the E2E stack shortens spacing and 429 wait to 0.5 s.
     No contract change: `counts.searches` keeps counting planned queries; `SearchQueryStatus` gains a description.
 
-## Factory note (no factory change made)
-`factory-engine/bin/stack.mjs` runs plain `docker compose up/down` in the app folder. After FR-42 that starts the
-**real** stack. Docker Compose honours `COMPOSE_FILE`, and `stack.mjs` passes its environment through, so every E2E
-stack command must run with `COMPOSE_FILE=docker-compose.yml:docker-compose.e2e.yml` exported (e.g.
-`COMPOSE_FILE=docker-compose.yml:docker-compose.e2e.yml node factory-engine/bin/stack.mjs e2e --detach`). The same
-variable is needed for `stack.mjs down`, otherwise the `stub` container is left running as an orphan. Workflows that
-call `stack.mjs` without it will run Playwright against the real stack and fail at the first stub `__control` call.
-This is reported to the orchestrator; it is not patched here.
+## Stack modes (slice 03, replaces the earlier "Factory note")
+The factory now reads `.oracul/stack.json` (`factory-engine/checks/lib/stack.mjs`), so the open item of the plan
+("Before 03_run-modes-readme — user decision required") is resolved by the user's factory change of 2026-10-04: the
+analyst wrote `.oracul/stack.json` with mode `e2e` = `docker-compose.yml` + `docker-compose.e2e.yml` (the stub stack
+on volume `db-e2e-data`) and mode `run` = `docker-compose.yml` (real mode). `stack.mjs up|e2e` default to mode `e2e`,
+`down` takes both modes down; no `COMPOSE_FILE` / `COMPOSE_PROJECT_NAME` export is needed any more. Until the
+developer creates `docker-compose.e2e.yml` and deletes `docker-compose.override.yml` (GREEN of slice 03),
+`check-stack` reports the missing file and `stack.mjs` refuses — E2E runs only after GREEN anyway.
 
 ## External endpoints (all configurable — NFR-7 / NFR-9)
 | Property | Default | Used by |
@@ -134,9 +147,43 @@ This is reported to the orchestrator; it is not patched here.
 | `oracul.openai.responses-base-url` | `https://api.openai.com/v1` (`/responses`, `/models`) | FR-38, FR-39 |
 | `oracul.openai.model` | `gpt-5` (preferred) | FR-38 |
 | `oracul.openai.stream-timeout` | `PT120S` | FR-38 |
-| `oracul.news.gdelt.base-url` | `https://api.gdeltproject.org` (spacing / timeout / 429 wait / budget see news-search.md) | FR-44 |
+| `oracul.news.gdelt.base-url` | `https://api.gdeltproject.org` (spacing / timeout / 429 wait / budget see news-search.md) | FR-44, FR-48 fallback |
+| `oracul.news.google.base-url` | `https://news.google.com` (`/rss/search`; spacing `PT1S`, timeout `PT10S`) | FR-48 |
 
 ## Database
 Flyway `V9__run_model_and_provider_code.sql`: `ALTER TABLE generation_run ADD COLUMN model VARCHAR(128) NULL, ADD
 COLUMN failure_provider_code VARCHAR(64) NULL`. No credential column (NFR-1 pattern check still applies).
 `chatgpt_client_registration` is unchanged (the `urn:uuid:` prefix is added on the wire, not stored).
+Flyway `V10__run_control_and_publisher_url.sql` (slice 03): `ALTER TABLE generation_run ADD COLUMN evidence_note_kind
+VARCHAR(32) NULL, ADD COLUMN evidence_core_items INTEGER NULL, ADD COLUMN evidence_core_needed INTEGER NULL`;
+`ALTER TABLE source ADD COLUMN publisher_url TEXT NULL`. `status` stays VARCHAR(32) without a check constraint, so
+`STOPPED` needs no DDL; the partial unique index `one_active_run_per_session` (QUEUED, RUNNING) already treats it as
+inactive.
+
+## Analyst decisions of the slice-03 spec delta (to confirm with the slice)
+23. **Stop is an action sub-resource** `POST /api/runs/{runId}/stop` (like `/alternatives`), idempotent: a terminal
+    run answers 200 with its unchanged body, so a stop that races the run's end never shows an error (FR-45 #5).
+24. **STOPPED is a status, not a failure** (no `RunFailure`), so the failure view and its "Try again" are not shown;
+    the stopped view carries its own generate button.
+25. **The generate button moves into the progress and stopped views** as well (the progress view had no button, so
+    "the generate button reads STOP" needs it there).
+26. **Article-page fetches check the run guard** before each fetch, so "no further news requests" also covers
+    READING_SOURCES after a STOP.
+27. **Evidence note is persisted at RANKING** (three columns) instead of being recomputed from the configured
+    thresholds at read time, so a later threshold change cannot change an old run's note; alternatives copy it.
+28. **NO_EVIDENCE wins** over INSUFFICIENT_EVIDENCE (an empty pack at realism 10 shows only the speculative note,
+    without LOWER REALISM — lowering realism cannot create news).
+29. **Speculative mode** = empty pack (core + supporting + counter-signals = 0), not "zero sources": a run whose
+    sources all became excluded events is just as ungrounded.
+30. **The 30-source cap is applied before article fetching** with a topic round robin ranked by source quality then
+    provider order (the only ranking available before events exist); the constant is not configurable so FR-46's
+    "never above 30" holds for every run.
+31. **Google News sources**: the article fetch follows HTTP redirects from the Google link; real Google usually
+    answers its own page (JavaScript redirect), so real sources usually keep the Google link with the RSS `source`
+    name and the new `publisherUrl` (FR-48 #2 fallback). A resolved URL already used by an earlier source keeps the
+    Google link (unique `(run_id, url)`).
+32. **Google failures fall back per group, empty answers do not**: a Google answer with zero items is a valid "no
+    news" answer (EMPTY), only a failed request goes to GDELT.
+33. **In-process and E2E stubs answer Google with a failure / mirror by default**: ITs default to Google 503 so every
+    existing GDELT IT keeps its behaviour through the fallback; the E2E stub mirrors the GDELT stub's answers so the
+    acceptance counts stay 20 / 100 (and 81 usable → 30 kept).

@@ -31,6 +31,10 @@ public class ArticleMetadataFetcher {
     }
 
     private static final int MAX_REDIRECTS = 3;
+
+    /** Page metadata together with the final URL and the number of redirects followed to reach it. */
+    public record Fetched(Metadata metadata, String finalUrl, int redirects) {
+    }
     private static final Pattern META = Pattern.compile("<meta\\s+([^>]*?)/?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern ATTR = Pattern.compile(
         "([a-zA-Z:_-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))");
@@ -55,7 +59,12 @@ public class ArticleMetadataFetcher {
 
     /** Empty on any failure (timeout, unreachable, non-2xx, not HTML, too many redirects). */
     public Optional<Metadata> fetch(String url) {
-        Future<Optional<Metadata>> future = inner.submit(() -> fetchBlocking(url));
+        return fetchDetailed(url, MAX_REDIRECTS).map(Fetched::metadata);
+    }
+
+    /** Like {@link #fetch} with a redirect limit; also reports the final URL and how many redirects were followed. */
+    public Optional<Fetched> fetchDetailed(String url, int maxRedirects) {
+        Future<Optional<Fetched>> future = inner.submit(() -> fetchBlocking(url, maxRedirects));
         try {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -68,10 +77,10 @@ public class ArticleMetadataFetcher {
         }
     }
 
-    private Optional<Metadata> fetchBlocking(String url) {
+    private Optional<Fetched> fetchBlocking(String url, int maxRedirects) {
         try {
             URI target = URI.create(url);
-            for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+            for (int hop = 0; hop <= maxRedirects; hop++) {
                 HttpRequest request = HttpRequest.newBuilder(target).timeout(timeout)
                     .header("Accept", "text/html,application/xhtml+xml").GET().build();
                 HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -91,7 +100,7 @@ public class ArticleMetadataFetcher {
                         return Optional.empty();
                     }
                     byte[] bytes = in.readNBytes(maxBytes);
-                    return Optional.of(parse(new String(bytes, charset(type))));
+                    return Optional.of(new Fetched(parse(new String(bytes, charset(type))), target.toString(), hop));
                 }
             }
             return Optional.empty();

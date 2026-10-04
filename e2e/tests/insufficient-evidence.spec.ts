@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { evidence } from './evidence';
 
 const STUB = 'http://localhost:4010';
-const MESSAGE10 = 'ORACUL found insufficient current evidence to construct this scenario at Realism 10.';
+const NOTE10 = "Realism 10 couldn't be fully met: only 2 core evidence items (needs 5). This future is less grounded.";
+const NO_EVIDENCE = 'No current news could be used — this future is speculative, not grounded in evidence.';
 const MESSAGE1 = 'ORACUL found insufficient current evidence to construct this scenario at Realism 1.';
 const FIXED_ID = '22222222-2222-2222-2222-222222222222';
 
@@ -74,9 +75,9 @@ function purposeOf(request: any): string | undefined {
   return /ORACUL REQUEST ([A-Z_]+)/.exec(text)?.[1];
 }
 
-// @trace FR-31
-test.describe('FR-31 Insufficient evidence', () => {
-  test('FR-31 Realism 10 with 2 core items ends in the insufficient view and LOWER REALISM starts a Realism 8 run', async ({ page }) => {
+// @trace FR-47
+test.describe('FR-47 Always generate, note insufficient evidence at the end', () => {
+  test('FR-47 Realism 10 with 2 core items completes with the note and LOWER REALISM starts a Realism 8 run', async ({ page }) => {
     test.setTimeout(240_000);
     expect((await page.request.post(`${STUB}/__control/events`, { data: { mode: 'sparse' } })).status()).toBe(204);
     await connect(page);
@@ -85,45 +86,88 @@ test.describe('FR-31 Insufficient evidence', () => {
     await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
     const id = page.url().split('/').pop()!;
 
-    // acceptance 1
-    await expect(page.getByTestId('insufficient-view')).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByTestId('insufficient-message')).toHaveText(MESSAGE10);
+    // the run is never stopped by the lack of evidence: result view first, the note below it
+    await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByTestId('evidence-note')).toBeVisible();
+    await expect(page.getByTestId('evidence-note-message')).toHaveText(NOTE10);
     await expect(page.getByTestId('lower-realism')).toBeVisible();
     await expect(page.getByTestId('lower-realism')).toBeEnabled();
     await expect(page.getByTestId('lower-realism')).toHaveText('LOWER REALISM');
-    for (const absent of ['progress-view', 'failure-view', 'result-view']) {
+    for (const absent of ['progress-view', 'failure-view', 'insufficient-view']) {
       await expect(page.getByTestId(absent)).toHaveCount(0);
     }
-    await evidence(page, 'FR-31', 'insufficient-view');
+    await evidence(page, 'FR-47', 'insufficient-evidence-note');
 
     const run = await (await page.request.get(`/api/runs/${id}`)).json();
-    expect(run.status).toBe('INSUFFICIENT_EVIDENCE');
-    expect(run.failure.code).toBe('INSUFFICIENT_EVIDENCE');
+    expect(run.status).toBe('COMPLETED');
+    expect(run.failure ?? null).toBeNull();
+    expect(run.headline).toBeTruthy();
+    expect(run.evidenceNote).toEqual({ kind: 'INSUFFICIENT_EVIDENCE', message: NOTE10, coreItems: 2, coreNeeded: 5 });
     expect(run.suggestedRealism).toBe(8);
     const pack = await (await page.request.get(`/api/runs/${id}/evidence-pack`)).json();
     expect(pack.core).toHaveLength(2);
     const result = await page.request.get(`/api/runs/${id}/result`);
-    expect(result.status()).toBe(409);
-    expect((await result.json()).code).toBe('RESULT_NOT_READY');
+    expect(result.status()).toBe(200);
     const purposes = (await recorded(page)).map(purposeOf);
-    for (const forbidden of ['SCENARIO_GENERATION', 'SCENARIO_CRITIC', 'STORY_WRITING']) {
-      expect(purposes, 'no story generated').not.toContain(forbidden);
+    for (const needed of ['SCENARIO_GENERATION', 'SCENARIO_CRITIC', 'STORY_WRITING']) {
+      expect(purposes, 'the future is written from the evidence there is').toContain(needed);
     }
 
-    // acceptance 2
+    // LOWER REALISM starts a new run with realism 8
     const posted = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/runs'));
     await page.getByTestId('lower-realism').click();
     expect((await posted).postDataJSON()).toEqual(A);
     await expect(page.getByTestId('value-realism')).toHaveText('8');
+    await expect.poll(() => page.url().split('/').pop(), { timeout: 15_000 }).not.toBe(id);
     await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
     const newId = page.url().split('/').pop()!;
-    expect(newId).not.toBe(id);
-    await evidence(page, 'FR-31', 'lower-realism-started');
+    await evidence(page, 'FR-47', 'lower-realism-started');
     const next = await (await page.request.get(`/api/runs/${newId}`)).json();
     expect(next.configuration.realism).toBe(8);
     await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 90_000 });
+    // Realism 8 needs no core item in the E2E stack: no note this time
+    await expect(page.getByTestId('evidence-note')).toHaveCount(0);
   });
 
+  test('FR-47 no news at all: a speculative future with the NO_EVIDENCE note and no LOWER REALISM', async ({ page }) => {
+    test.setTimeout(240_000);
+    expect((await page.request.post(`${STUB}/__control/rss`, { data: { mode: 'down' } })).status()).toBe(204);
+    expect((await page.request.post(`${STUB}/__control/news`, { data: { mode: 'down' } })).status()).toBe(204);
+    await connect(page);
+    await configureA10(page);
+    await page.getByTestId('generate-button').click();
+    await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
+    const id = page.url().split('/').pop()!;
+
+    await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 90_000 });
+    await page.getByTestId('open-sources').click();
+    await expect(page.getByTestId('sources-empty')).toHaveText('No sources');
+    await expect(page.getByTestId('evidence-note-message')).toHaveText(NO_EVIDENCE);
+    await expect(page.getByTestId('lower-realism')).toHaveCount(0);
+    await expect(page.getByTestId('failure-view')).toHaveCount(0);
+    await evidence(page, 'FR-47', 'no-evidence-note');
+
+    const run = await (await page.request.get(`/api/runs/${id}`)).json();
+    expect(run.status).toBe('COMPLETED');
+    expect(run.failure ?? null).toBeNull();
+    expect(run.evidenceNote).toEqual({ kind: 'NO_EVIDENCE', message: NO_EVIDENCE, coreItems: 0, coreNeeded: 5 });
+    expect(run.suggestedRealism ?? null).toBeNull();
+    const result = await (await page.request.get(`/api/runs/${id}/result`)).json();
+    expect(result.sources).toEqual([]);
+    // exactly one SCENARIO_GENERATION request, carrying the speculative TASK line
+    const generations = (await recorded(page)).filter((r) => purposeOf(r) === 'SCENARIO_GENERATION');
+    expect(generations).toHaveLength(1);
+    expect(JSON.stringify(generations[0])).toContain(
+      'The Evidence Pack is empty: no current news could be used. Write a fully speculative scenario',
+    );
+    // news never reached the run, yet both providers were asked
+    expect((await (await page.request.get(`${STUB}/__control/requests?kind=rss`)).json()).requests).toHaveLength(4);
+    expect((await (await page.request.get(`${STUB}/__control/requests?kind=gdelt`)).json()).requests).toHaveLength(4);
+  });
+});
+
+// @trace FR-31
+test.describe('FR-31 Insufficient evidence (stored runs keep their view)', () => {
   test('FR-31 Realism 1 has no LOWER REALISM button', async ({ page }) => {
     const run = {
       id: FIXED_ID,

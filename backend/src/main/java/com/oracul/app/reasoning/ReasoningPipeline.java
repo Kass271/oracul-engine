@@ -39,8 +39,6 @@ public class ReasoningPipeline {
     public enum Result {
         /** The run was ended (FAILED) or abandoned; later stages must not run. */
         STOPPED,
-        /** The pack is empty: no scenario was generated, stages 8-10 stay placeholders. */
-        EMPTY_PACK,
         /** A scenario was accepted; stage 10 follows. */
         ACCEPTED
     }
@@ -110,9 +108,6 @@ public class ReasoningPipeline {
         EvidencePack pack = packs.findById(row.evidencePackId()).orElseThrow();
 
         long started = begin(runId, RunStage.EXPLORING_FUTURES);
-        if (pack.getCore().isEmpty() && pack.getSupporting().isEmpty() && pack.getCounterSignals().isEmpty()) {
-            return Result.EMPTY_PACK;
-        }
         State st = new State();
         boolean alternative = row.kind() == com.oracul.app.api.model.RunKind.ALTERNATIVE;
         List<AvoidedFutures.AvoidedFuture> avoided = alternative ? avoidedFutures.load(runId) : List.of();

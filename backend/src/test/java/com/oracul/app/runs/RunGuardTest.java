@@ -32,7 +32,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * Only the contract {@code com.oracul.app.runs.RunGuard#check(UUID)} is assumed: a boolean (true = pass), or void that
  * throws when the check fails. The bean is reached by reflection so RED compiles; the run rows are plain SQL.
  */
-// @trace FR-14, FR-15
+// @trace FR-14, FR-15, FR-45
 @SpringBootTest
 @Import({TestcontainersConfiguration.class, RunGuardTest.FixedClockConfig.class})
 class RunGuardTest {
@@ -128,7 +128,7 @@ class RunGuardTest {
     }
 
     @ParameterizedTest(name = "status {0} fails even before the deadline")
-    @ValueSource(strings = {"QUEUED", "COMPLETED", "INSUFFICIENT_EVIDENCE", "FAILED"})
+    @ValueSource(strings = {"QUEUED", "COMPLETED", "INSUFFICIENT_EVIDENCE", "FAILED", "STOPPED"})
     void everyNonRunningStatusFails(String status) {
         assertThat(passes(insertRun(status, NOW.plusSeconds(100)))).isFalse();
     }

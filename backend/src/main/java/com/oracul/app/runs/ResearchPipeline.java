@@ -16,7 +16,6 @@ import com.oracul.app.research.EventRanker;
 import com.oracul.app.research.EvidencePackRepository;
 import com.oracul.app.research.EvidencePackService;
 import com.oracul.app.research.EvidenceSelector;
-import com.oracul.app.research.EvidenceSufficiency;
 import com.oracul.app.research.MinCoreThresholds;
 import com.oracul.app.research.EventNormalizer;
 import com.oracul.app.research.EventRepository;
@@ -44,7 +43,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class ResearchPipeline {
 
     static final String SESSION_EXPIRED_MESSAGE = RunFailures.message(com.oracul.app.api.model.RunFailureCode.CHATGPT_SESSION_EXPIRED);
-    static final String NEWS_UNAVAILABLE_MESSAGE = RunFailures.message(com.oracul.app.api.model.RunFailureCode.NEWS_UNAVAILABLE);
 
     private final GenerationRunRepository runs;
     private final SourceRepository sources;
@@ -125,13 +123,6 @@ public class ResearchPipeline {
             return false;
         }
         ResearchCounts counts = new ResearchCounts(outcome.searches(), outcome.articlesRetrieved(), 0, 0, 0, 0, 0);
-        if (outcome.allFailed()) {
-            tx.executeWithoutResult(s -> {
-                runs.storeSearchResults(runId, outcome.plan(), counts, now());
-                runs.markFailed(runId, "NEWS_UNAVAILABLE", NEWS_UNAVAILABLE_MESSAGE, now());
-            });
-            return false;
-        }
         runs.storeSearchResults(runId, outcome.plan(), counts, now());
         remainder(started);
 
@@ -140,7 +131,7 @@ public class ResearchPipeline {
         if (started < 0) {
             return false;
         }
-        List<SourceRepository.Stored> found = retrieval.readSources(outcome, cfg.getHorizon());
+        List<SourceRepository.Stored> found = retrieval.readSources(outcome, cfg.getHorizon(), () -> guard.check(runId));
         ResearchCounts withSources = new ResearchCounts(counts.getSearches(), counts.getArticlesRetrieved(),
             found.size(), 0, 0, 0, 0);
         Boolean read = tx.execute(s -> {
@@ -232,7 +223,8 @@ public class ResearchPipeline {
             withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), selected.size(),
             selection.counterSignals().size(), 0);
         int realism = cfg.getRealism();
-        java.util.concurrent.atomic.AtomicBoolean insufficient = new java.util.concurrent.atomic.AtomicBoolean();
+        int total = selection.core().size() + selection.supporting().size() + selection.counterSignals().size();
+        var decision = EvidenceNotes.decide(selection.core().size(), total, realism, minCore);
         Boolean packed = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
                 s.setRollbackOnly();
@@ -240,19 +232,17 @@ public class ResearchPipeline {
             }
             events.updateRanking(runId, finalEvents);
             packs.insert(runId, pack, now());
-            runs.storePack(runId, packId, withPack, now());
-            if (!EvidenceSufficiency.sufficient(selection.core().size(), realism, minCore)) {
-                insufficient.set(true);
-                runs.markInsufficientEvidence(runId, RunFailures.insufficientEvidence(realism),
-                    EvidenceSufficiency.suggestedRealism(realism).stream().boxed().findFirst().orElse(null), now());
+            if (decision.isPresent()) {
+                var d = decision.get();
+                runs.storePack(runId, packId, withPack, d.kind().getValue(), d.coreItems(), d.coreNeeded(),
+                    d.suggestedRealism(), now());
+            } else {
+                runs.storePack(runId, packId, withPack, now());
             }
             return true;
         });
         if (!Boolean.TRUE.equals(packed)) {
             abandon(runId);
-            return false;
-        }
-        if (insufficient.get()) {
             return false;
         }
         remainder(started);

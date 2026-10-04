@@ -21,7 +21,7 @@ import org.springframework.test.context.TestPropertySource;
  * phase-02 news-search.md FR-44 through a whole run (acceptance body A: 20 queries, 4 groups of 5): sources in group then
  * response order with attributed queryIds, which classes of group failure end the run, and what is logged.
  */
-// @trace FR-44
+// @trace FR-44, FR-47
 @ExtendWith(OutputCaptureExtension.class)
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
@@ -101,12 +101,13 @@ class NewsSearchRunIT extends AbstractRunIT {
             Arguments.of("3 groups FAILED + 1 answered empty", 3, "{}", "COMPLETED", 0),
             Arguments.of("3 groups FAILED + 1 with articles", 3, "ARTICLES", "COMPLETED", 1),
             Arguments.of("2 groups FAILED + 2 answered", 2, "ARTICLES", "COMPLETED", 2),
-            Arguments.of("all 4 groups FAILED", 4, "{}", "FAILED", 0));
+            // run-control.md FR-47: no news at all is no failure any more; the run goes on speculatively
+            Arguments.of("all 4 groups FAILED", 4, "{}", "COMPLETED", 0));
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("groupFailureClasses")
-    void theRunFailsWithNewsUnavailableOnlyWhenEveryGroupFailed(String name, int failedGroups, String restAnswer, String status,
+    void noClassOfGroupFailureEndsTheRun(String name, int failedGroups, String restAnswer, String status,
                                                                int sources) throws Exception {
         String base = gdelt.baseUrl() + "/articles/";
         gdelt.responder = req -> req.number() <= failedGroups ? StubGdelt.status(503)
@@ -123,14 +124,14 @@ class NewsSearchRunIT extends AbstractRunIT {
             if (failed) assertThat(q.get(i).get("status")).as("Q" + (i + 1)).isEqualTo("FAILED");
             else assertThat(q.get(i).get("status")).as("Q" + (i + 1)).isIn("OK", "EMPTY");
         }
-        if ("FAILED".equals(status)) {
-            assertThat(run.get("failure")).isEqualTo(json("{\"code\":\"NEWS_UNAVAILABLE\",\"message\":\"" + NEWS_DOWN + "\"}"));
-            assertThat(run.get("stage")).isEqualTo("SEARCHING");
-            assertThat(run.get("stageIndex")).isEqualTo(3);
-            assertThat(responses.requests).as("expansion only, no further ChatGPT call").hasSize(1);
-        } else {
-            assertThat(absent(run, "failure")).isTrue();
-            assertThat(sourceItems(sid, (String) run.get("id"))).hasSize(sources);
+        assertThat(absent(run, "failure")).isTrue();
+        assertThat(sourceItems(sid, (String) run.get("id"))).hasSize(sources);
+        if (sources == 0) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> note = (Map<String, Object>) run.get("evidenceNote");
+            assertThat(note).as("no source at all: speculative run with the NO_EVIDENCE note").isNotNull();
+            assertThat(note.get("kind")).isEqualTo("NO_EVIDENCE");
+            assertThat(run.get("headline")).isNotNull();
         }
     }
 

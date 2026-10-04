@@ -21,6 +21,8 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
+// news-search.md FR-48: no 1 s wait between Google requests in ITs (a subclass may pin its own spacing)
+@org.springframework.test.context.TestPropertySource(properties = "oracul.news.google.request-spacing=PT0S")
 abstract class AbstractNewsSearchIT {
 
     @Autowired
@@ -31,6 +33,8 @@ abstract class AbstractNewsSearchIT {
     @DynamicPropertySource
     static void gdeltBaseUrl(DynamicPropertyRegistry r) {
         r.add("oracul.news.gdelt.base-url", StubGdelt.INSTANCE::baseUrl);
+        // news-search.md FR-48: the Google News RSS requests go to the stub too (default answer 503: every group falls back to GDELT)
+        r.add("oracul.news.google.base-url", StubGdelt.INSTANCE::baseUrl);
     }
 
     @Autowired

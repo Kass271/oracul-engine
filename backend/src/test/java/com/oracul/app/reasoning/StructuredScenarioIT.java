@@ -134,23 +134,41 @@ class StructuredScenarioIT extends AbstractReasoningIT {
         assertThat(finalAttempt(r.id())).isNull();
     }
 
-    // #16 (the pinned-run case is StructuredScenarioPendingIT)
+    // #16 (the pinned-run case is StructuredScenarioPendingIT); run-control.md FR-47: an empty pack writes a speculative scenario
+    // @trace FR-47
     @Test
-    void anEmptyPackCompletesWithoutAScenario() throws Exception {
+    void anEmptyPackWritesASpeculativeScenario() throws Exception {
         Ran r = run(A); // default GDELT {}: no sources, no events, empty pack
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
-        assertThat(requests(GEN)).isEmpty();
-        assertThat(attemptRows(r.id())).isZero();
-        assertScenarioNotReady(getStructured(r.sid(), r.id()));
+        assertThat(requests(GEN)).hasSize(1);
+        assertThat(attemptRows(r.id())).isEqualTo(1);
+        Map<String, Object> rec = structured(r);
+        assertThat(rec.get("accepted")).isEqualTo(true);
+        assertThat(rec.get("attempt")).isEqualTo(1);
+        // the default scenario cites E001, which the empty pack does not have: removed, the chain is [SPECULATION, FUTURE_EVENT]
+        assertThat(JsonPath.<String>read(structuredRaw(r), "$.guardReports[0].outcome")).isEqualTo("PASS_WITH_REMOVALS");
+        assertThat(counts(r.run()).get("sourcesUsed")).isEqualTo(0);
     }
 
-    // #16
+    // #16 (run-control.md FR-47: news down is no failure any more; a run without scenario needs another failure)
+    // @trace FR-47
     @Test
-    void aRunWithoutNewsHasNoScenario() throws Exception {
+    void aRunWithoutNewsStillWritesASpeculativeScenario() throws Exception {
         gdelt.responder = req -> StubGdelt.status(503);
         Ran r = run(A);
+        assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
+        assertThat(r.run().get("failure")).isNull();
+        assertThat(noteKind(r.run())).isEqualTo("NO_EVIDENCE");
+        assertThat(structured(r).get("accepted")).isEqualTo(true);
+    }
+
+    // #16 a run that fails before EXPLORING_FUTURES has no scenario
+    @Test
+    void aRunThatFailedBeforeScenarioGenerationHasNoScenario() throws Exception {
+        always(EXPANSION, StubResponses.error(401, "invalid_token"));
+        Ran r = run(A);
         assertThat(r.run().get("status")).isEqualTo("FAILED");
-        assertThat(((Map<?, ?>) r.run().get("failure")).get("code")).isEqualTo("NEWS_UNAVAILABLE");
+        assertThat(requests(GEN)).isEmpty();
         assertScenarioNotReady(getStructured(r.sid(), r.id()));
     }
 

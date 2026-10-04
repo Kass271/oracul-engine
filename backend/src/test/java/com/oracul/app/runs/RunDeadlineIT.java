@@ -3,6 +3,7 @@ package com.oracul.app.runs;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubResponses;
 import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -10,7 +11,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** generation-runs.md "Slice 11_run-failures" RunDeadlineIT rows 1-7: scheduler sweep, boundary, no further work. */
-// @trace FR-32
+// @trace FR-32, FR-47
 // @trace NFR-2
 class RunDeadlineIT extends AbstractDeadlineIT {
 
@@ -102,8 +103,11 @@ class RunDeadlineIT extends AbstractDeadlineIT {
         assertThat(completed.get("status")).isEqualTo("COMPLETED");
         Map<String, Object> completedBefore = row((String) completed.get("id"));
 
-        gdelt.reset();
-        gdelt.responder = req -> StubGdelt.status(503);
+        // run-control.md FR-47: news down no longer fails a run; an unparsable scenario answer does (INVALID_SCENARIO)
+        freshStubs();
+        var normal = responses.defaultResponder(); // freshStubs() reset the stub responder: script the failure directly
+        responses.responder = req -> "SCENARIO_GENERATION".equals(StubResponses.purpose(req))
+            ? StubResponses.completed("not json") : normal.apply(req);
         String failedSid = connectedSid();
         Map<String, Object> failed = runWith(failedSid, A).run();
         assertThat(failed.get("status")).isEqualTo("FAILED");
@@ -120,7 +124,7 @@ class RunDeadlineIT extends AbstractDeadlineIT {
         assertThat(row((String) completed.get("id"))).isEqualTo(completedBefore);
         assertThat(row((String) failed.get("id"))).isEqualTo(failedBefore);
         assertThat(runOf(failedSid, (String) failed.get("id")).get("failure")).isEqualTo(json(
-            "{\"code\":\"NEWS_UNAVAILABLE\",\"message\":\"ORACUL could not reach its news sources — try again later\"}"));
+            "{\"code\":\"INVALID_SCENARIO\",\"message\":\"ORACUL could not construct a valid scenario\"}"));
         assertTimedOut(runOf(activeSid, activeId), "RESEARCH_STRATEGY", 2);
     }
 

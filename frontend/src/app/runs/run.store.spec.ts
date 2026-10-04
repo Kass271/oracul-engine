@@ -1,4 +1,4 @@
-// @trace FR-10, FR-24, FR-33
+// @trace FR-10, FR-24, FR-33, FR-45
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
@@ -239,7 +239,7 @@ describe('slice 04_run-start', () => {
   });
 
   // @trace FR-24
-  it.each(['COMPLETED', 'INSUFFICIENT_EVIDENCE', 'FAILED'])('polling stops when the status is %s', async (status) => {
+  it.each(['COMPLETED', 'INSUFFICIENT_EVIDENCE', 'FAILED', 'STOPPED'])('polling stops when the status is %s', async (status) => {
     await boot();
     await generate();
     await tick(POLL_MS);
@@ -248,21 +248,24 @@ describe('slice 04_run-start', () => {
     expect(pendingPolls()).toBe(0);
   });
 
-  // @trace FR-24
-  it('polling is app-wide: leaving the run view keeps polling and keeps the generate button disabled', async () => {
+  // @trace FR-24, FR-45
+  it('polling is app-wide: leaving the run view keeps polling and keeps the generate button a STOP button', async () => {
     await boot();
     await generate();
     await router.navigateByUrl('/');
     await tick(0);
     expect(byId('welcome-view')).not.toBeNull();
-    expect(disabled('generate-button')).toBe(true);
+    expect(text('generate-button')).toBe('STOP');
+    expect(disabled('generate-button')).toBe(false);
     await tick(POLL_MS);
     http.expectOne(isRunGet).flush(runAt(2));
     await tick(0);
-    expect(disabled('generate-button')).toBe(true);
+    expect(text('generate-button')).toBe('STOP');
+    expect(disabled('generate-button')).toBe(false);
     await tick(POLL_MS);
     http.expectOne(isRunGet).flush(runAt(10, 'COMPLETED'));
     await tick(0);
+    expect(text('generate-button')).toBe('GENERATE THE FUTURE');
     expect(disabled('generate-button')).toBe(false);
   });
 

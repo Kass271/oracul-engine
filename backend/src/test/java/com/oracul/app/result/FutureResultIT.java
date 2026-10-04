@@ -71,14 +71,18 @@ class FutureResultIT extends AbstractStoryIT {
         assertThat(meta.get("wildcards")).isEqualTo(List.of());
     }
 
-    // #12 (empty pack)
+    // #12 (empty pack; run-control.md FR-47: speculative mode writes a story and a result with no sources)
+    // @trace FR-47
     @Test
-    void aRunWithAnEmptyPackHasNoResult() throws Exception {
-        Ran r = run(A); // default GDELT {}: COMPLETED without headline and story
-        assertThat(r.run().get("status")).isEqualTo("COMPLETED");
-        assertThat(absent(r.run(), "headline")).isTrue();
-        assertThat(requests(STORY)).isEmpty();
-        assertResultNotReady(getResult(r.sid(), r.id()));
+    void aRunWithAnEmptyPackHasASpeculativeResultWithoutSources() throws Exception {
+        Ran r = run(A); // default GDELT {}: COMPLETED with headline and story
+        assertStoryCompleted(r.run());
+        assertThat(requests(STORY)).hasSize(1);
+        assertThat(storyRows(r.id())).isEqualTo(1);
+        Map<String, Object> res = result(r);
+        assertThat(list(res.get("sources"))).isEmpty();
+        assertThat(map(res.get("story")).get("headline")).isEqualTo("Stub headline from the future");
+        assertThat(num(counts(r.run()).get("articlesConsidered"))).isZero();
     }
 
     // #12 (rejected scenario)

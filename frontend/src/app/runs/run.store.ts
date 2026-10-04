@@ -37,6 +37,7 @@ export class RunStore {
   readonly starting = signal(false);
   readonly notFound = signal(false);
   readonly unavailable = signal(false);
+  readonly stopping = signal(false);
   readonly active = computed(() => {
     const s = this.run()?.status;
     return s === 'QUEUED' || s === 'RUNNING';
@@ -108,6 +109,28 @@ export class RunStore {
     if (this.runId) this.schedule();
   }
 
+  stopRun(): void {
+    const id = this.runId;
+    if (!id || this.stopping() || !this.active()) return;
+    this.stopping.set(true);
+    this.api.stopRun({ runId: id }).subscribe({
+      next: (run) => {
+        this.stopping.set(false);
+        if (this.runId !== id) return;
+        this.stop();
+        this.run.set(run);
+        if (run.status === 'QUEUED' || run.status === 'RUNNING') this.schedule();
+      },
+      error: (err: unknown) => {
+        this.stopping.set(false);
+        const body = err instanceof HttpErrorResponse ? err.error : null;
+        const isApiError =
+          body && typeof body === 'object' && typeof body.code === 'string' && typeof body.message === 'string';
+        this.showError(isApiError ? body.message : GENERIC_ERROR);
+      },
+    });
+  }
+
   stop(): void {
     this.clear();
     this.epoch++;
@@ -121,6 +144,7 @@ export class RunStore {
     this.failures = 0;
     this.runId = null;
     this.panelPending = false;
+    this.stopping.set(false);
   }
 
   private clear(): void {
@@ -178,9 +202,9 @@ export class RunStore {
 
   private showError(text: string): void {
     this.snack?.dismiss();
-    document.querySelectorAll('.mat-mdc-snack-bar-container').forEach((el) => {
-      if (el.querySelector('[data-testid="run-error-message"]')) el.remove();
-    });
-    this.snack = this.snackBar.openFromComponent(RunErrorMessage, { duration: 6000, data: text });
+    // Drop only the old message node; the container stays so MatSnackBar's own
+    // exit animation and afterDismissed still fire and the new one opens and closes.
+    document.querySelectorAll('[data-testid="run-error-message"]').forEach((el) => el.remove());
+    this.snack = this.snackBar.openFromComponent(RunErrorMessage, { duration: 6000, data: text, verticalPosition: 'top' });
   }
 }

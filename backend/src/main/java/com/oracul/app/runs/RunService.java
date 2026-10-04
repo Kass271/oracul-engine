@@ -105,6 +105,14 @@ public class RunService {
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found")));
     }
 
+    /** FR-45: stops an active run; a terminal run is returned unchanged. */
+    public GenerationRun stop(UUID id, UUID sessionId) {
+        runs.find(id, sessionId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found"));
+        runs.stop(id, clock.instant().truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC));
+        return get(id, sessionId);
+    }
+
     private String nextGenerationId(OffsetDateTime now) {
         String base = "ORC-" + ID_FORMAT.format(now);
         String candidate = base;
@@ -147,6 +155,10 @@ public class RunService {
             run.setFailure(failure);
         }
         run.setSuggestedRealism(r.suggestedRealism());
+        if (r.evidenceNoteKind() != null) {
+            run.setEvidenceNote(EvidenceNotes.note(com.oracul.app.api.model.EvidenceNoteKind.fromValue(r.evidenceNoteKind()),
+                r.configuration().getRealism(), r.evidenceCoreItems(), r.evidenceCoreNeeded()));
+        }
         run.setHeadline(r.headline());
         run.setHasOpenCriticIssues(r.hasOpenCriticIssues());
         run.setCreatedAt(r.createdAt());

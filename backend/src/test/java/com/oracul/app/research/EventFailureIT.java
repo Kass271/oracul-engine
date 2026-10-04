@@ -13,8 +13,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.TestPropertySource;
 
 /** Rows 14-17 of research-pipeline.md "Slice 06_events": ChatGPT transport failures of EVENT_NORMALIZATION / EVENT_CLASSIFICATION. */
-// @trace FR-14, FR-15, FR-38, FR-39
-@TestPropertySource(properties = {"oracul.research.query-budget=18", "oracul.events.max-sources=1000"}) // F240 for row 35
+// @trace FR-14, FR-15, FR-38, FR-39, FR-46
+// F240 for row 35; news-search.md FR-46 keeps 30 sources, batches of 5 keep the 6 normalisation batches
+@TestPropertySource(properties = {"oracul.research.query-budget=18", "oracul.events.max-sources=1000",
+    "oracul.events.normalization-batch-size=5"})
 class EventFailureIT extends AbstractEventIT {
 
     static final String RATE_LIMITED = "ChatGPT usage limit reached — try again later";

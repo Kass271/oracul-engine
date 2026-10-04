@@ -7,11 +7,12 @@ const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error', 'refresh_invalid_client', 'refresh_unavailable'];
 const REFRESH_FAILURE_MODES = ['refresh_error', 'refresh_invalid_client', 'refresh_unavailable'];
 const NEWS_MODES = ['ok', 'down', 'rate-limited-once', 'rate-limited', 'partial'];
+const RSS_MODES = ['ok', 'empty', 'down', 'malformed'];
 const MODELS_MODES = ['ok', 'no-preferred', 'empty', 'unauthorized', 'unavailable'];
 const RESPONSES_MODES = ['ok', 'incomplete', 'failed', 'no-completed', 'not-eligible', 'usage-limit', 'unavailable', 'unavailable-twice', 'route-not-supported', 'unsupported-capability', 'invalid-user', 'unknown-code'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', newsCalls: 0, models: 'ok', responsesMode: 'ok', responsesModeCalls: 0, events: 'ok', scenario: 'ok', scenarioCalls: 0, alternativeCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [], models: [] } };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', newsCalls: 0, models: 'ok', responsesMode: 'ok', responsesModeCalls: 0, events: 'ok', scenario: 'ok', scenarioCalls: 0, alternativeCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, rss: 'ok', requests: { responses: [], gdelt: [], rss: [], models: [] } };
 
 function reset() {
   state.mode = 'ok';
@@ -33,6 +34,8 @@ function reset() {
   state.storyCalls = 0;
   state.requests.responses.length = 0;
   state.requests.gdelt.length = 0;
+  state.requests.rss.length = 0;
+  state.rss = 'ok';
   state.requests.models.length = 0;
 }
 
@@ -53,6 +56,7 @@ const readBody = (req) =>
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sha1 = (v) => createHash('sha1').update(v).digest('hex');
 const seendate = () => new Date(Date.now() - 86_400_000).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+const xmlEsc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const dataBlock = (text, name) => {
   const open = `<<<ORACUL_UNTRUSTED_DATA name="${name}">>>`;
   const start = text.indexOf(open);
@@ -214,6 +218,17 @@ export const routes = {
     if (!NEWS_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
     state.news = mode;
     state.newsCalls = 0;
+    empty(res, 204);
+  },
+  'POST /__control/rss': async (req, res, url, body) => {
+    let mode;
+    try {
+      mode = JSON.parse(body || '{}').mode;
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!RSS_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    state.rss = mode;
     empty(res, 204);
   },
   'POST /__control/models': async (req, res, url, body) => {
@@ -439,6 +454,43 @@ export const routes = {
     });
     json(res, 200, { articles });
   },
+  // Google News RSS 2.0 stub (news-search.md FR-48): the decoded q is "(<e1> OR <e2> ...) when:<N>d" (or one element);
+  // every element is answered with the 5 entries the GDELT stub gives, the first is shared by all (dedup).
+  'GET /rss/search': async (req, res, url) => {
+    const q = url.searchParams.get('q') ?? '';
+    state.requests.rss.push({ q, params: Object.fromEntries(url.searchParams), at: Date.now() });
+    const n = state.requests.rss.length;
+    const feed = (items) =>
+      `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Google News</title><link>https://news.google.com</link>${items.join('')}</channel></rss>`;
+    const rssHead = { 'content-type': 'application/rss+xml; charset=utf-8' };
+    if (state.rss === 'down') return json(res, 503, { error: 'unavailable' });
+    if (state.rss === 'malformed') {
+      res.writeHead(200, rssHead);
+      return res.end('<rss><channel><item><title>broken');
+    }
+    if (state.rss === 'empty') {
+      res.writeHead(200, rssHead);
+      return res.end(feed([]));
+    }
+    let group = q.replace(/ when:\d+d$/, '').trim();
+    if (group.startsWith('(') && group.endsWith(')')) group = group.slice(1, -1);
+    const elements = group.split(' OR ').map((e) => e.trim().replace(/^"(.*)"$/, '$1'));
+    const base = 'http://stub:4010/rss/articles';
+    const pubDate = new Date(Date.now() - 86_400_000).toUTCString();
+    const items = elements.flatMap((element) => {
+      const key = sha1(element).slice(0, 8);
+      return [`${base}/shared?utm_source=${n}`, ...[2, 3, 4, 5].map((a) => `${base}/${key}-${a}`)].map((u, i) => {
+        const title = i === 0 ? 'Shared stub article' : `${element} stub article ${key}-${i + 1}`;
+        return `<item><title>${xmlEsc(`${title} - Reuters`)}</title><link>${xmlEsc(u)}</link><pubDate>${pubDate}</pubDate><source url="https://www.reuters.com">Reuters</source></item>`;
+      });
+    });
+    res.writeHead(200, rssHead);
+    res.end(feed(items));
+  },
+  'GET /rss/articles/*': async (req, res, url) => {
+    res.writeHead(302, { location: `http://stub:4010/articles/${url.pathname.slice('/rss/articles/'.length)}` });
+    res.end();
+  },
   'GET /articles/*': async (req, res, url) => {
     const name = url.pathname.slice('/articles/'.length);
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -507,7 +559,7 @@ export const routes = {
 
 export const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  const handler = routes[`${req.method} ${url.pathname}`] ?? (url.pathname.startsWith('/articles/') ? routes[`${req.method} /articles/*`] : undefined);
+  const handler = routes[`${req.method} ${url.pathname}`] ?? (url.pathname.startsWith('/articles/') ? routes[`${req.method} /articles/*`] : url.pathname.startsWith('/rss/articles/') ? routes[`${req.method} /rss/articles/*`] : undefined);
   if (!handler) return json(res, 404, { error: 'not_found' });
   try {
     await handler(req, res, url, await readBody(req));

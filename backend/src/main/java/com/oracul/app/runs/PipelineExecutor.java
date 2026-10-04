@@ -101,14 +101,6 @@ public class PipelineExecutor {
                 story.run(runId, sessionId);
                 return;
             }
-            RunStage[] stages = RunStage.values();
-            for (int i = 6; i < stages.length; i++) {
-                if (!runs.markStageIfRunning(runId, stages[i], now())) {
-                    return; // ended by another writer: the task ends silently
-                }
-                pause();
-            }
-            runs.markCompleted(runId, RunStage.WRITING_STORY, now());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (RuntimeException e) {

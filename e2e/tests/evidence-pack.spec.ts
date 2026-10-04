@@ -68,31 +68,37 @@ function allItems(pack: any): any[] {
 // @trace FR-16
 // @trace FR-17
 // @trace FR-18
+// @trace FR-46
 test.describe('FR-16 / FR-17 / FR-18 Ranking, evidence selection and the Evidence Pack', () => {
-  test('mode evidence: 25 items with diversity caps, counter-signals and the exact prompt text', async ({ page }) => {
+  test('mode evidence: 15 events from the 30 kept sources give 10 core + 5 counter-signal items with diversity caps and the exact prompt text', async ({ page }) => {
     test.setTimeout(90_000);
     const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'evidence' } });
     expect(mode.status()).toBe(204);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    expect(run.counts.eventsSelected).toBe(25);
+    // news-search.md FR-46: 30 sources -> 15 events (5 dark, 5 mid, 5 bright). Darkness 9 / optimism 2: the bright ones are
+    // the counter-signal candidates, the other 10 fill the core (limit 10), nothing is left for SUPPORTING.
+    expect(run.counts.articlesConsidered).toBe(30);
+    expect(run.counts.uniqueEvents).toBe(15);
+    expect(run.counts.eventsSelected).toBe(15);
     expect(run.counts.counterSignals).toBe(5);
     expect(run.evidencePackId).toBeTruthy();
 
     const pack = await getPack(page, id);
     expect(pack.id).toBe(run.evidencePackId);
     expect(pack.core).toHaveLength(10);
-    expect(pack.supporting).toHaveLength(10);
+    expect(pack.supporting).toHaveLength(0);
     expect(pack.counterSignals).toHaveLength(5);
     const items = allItems(pack);
-    expect(items.map((i) => i.evidenceId)).toEqual(Array.from({ length: 25 }, (_, n) => `E${String(n + 1).padStart(3, '0')}`));
+    expect(items.map((i) => i.evidenceId)).toEqual(Array.from({ length: 15 }, (_, n) => `E${String(n + 1).padStart(3, '0')}`));
     expect(pack.core.every((i: any) => i.section === 'CORE')).toBe(true);
     expect(pack.supporting.every((i: any) => i.section === 'SUPPORTING')).toBe(true);
     expect(pack.counterSignals.every((i: any) => i.section === 'COUNTER_SIGNAL')).toBe(true);
 
     const events = await listEvents(page, id);
     const byId = new Map<string, any>(events.map((e) => [e.id, e]));
-    for (const item of pack.core) expect(byId.get(item.eventId).classification.risk).toBe(1.0);
+    for (const item of pack.core) expect([1.0, 0.5]).toContain(byId.get(item.eventId).classification.risk);
+    expect(pack.core.filter((i: any) => byId.get(i.eventId).classification.risk === 1.0)).toHaveLength(5);
     for (const item of pack.counterSignals) expect(byId.get(item.eventId).classification.opportunity).toBe(0.8);
 
     // diversity: at most 2 per primary entity, at most 3 per publisher
@@ -117,14 +123,14 @@ test.describe('FR-16 / FR-17 / FR-18 Ranking, evidence selection and the Evidenc
       'Realism: 8 | Darkness: 9 | Optimism: 2 | Horizon: 5 years',
       'New pandemic: 8 | Humanoid robot boom: 6',
       '[E001] ',
-      '[E025] ',
+      '[E015] ',
       'COUNTER-SIGNALS',
     ]) {
       expect(pack.promptText).toContain(part);
     }
 
     const selected = events.filter((e) => e.selection);
-    expect(selected).toHaveLength(25);
+    expect(selected).toHaveLength(15);
     expect(new Map(selected.map((e) => [e.id, e.selection.evidenceId]))).toEqual(
       new Map(items.map((i) => [i.eventId, i.evidenceId])),
     );

@@ -1,10 +1,14 @@
-# Auto-merged by `docker compose up`: E2E stubs. For real use: `docker compose -f docker-compose.yml up -d`.
+# E2E mode: adds the OpenAI/news stub and its own database volume (db-e2e-data).
+# Use only with: docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
 services:
   stub:
     build:
       context: e2e/stubs
     ports:
       - "4010:4010"
+  db:
+    volumes:
+      - db-e2e-data:/var/lib/postgresql
   backend:
     environment:
       ORACUL_CHATGPT_AUTHORIZE_URL: http://localhost:4010/oauth/authorize
@@ -14,6 +18,8 @@ services:
       ORACUL_CHATGPT_REVOCATION_URL: http://stub:4010/oauth/revoke
       ORACUL_OPENAI_RESPONSES_BASE_URL: http://stub:4010/v1
       ORACUL_NEWS_GDELT_BASE_URL: http://stub:4010
+      ORACUL_NEWS_GOOGLE_BASE_URL: http://stub:4010
+      ORACUL_NEWS_GOOGLE_REQUEST_SPACING: PT0.2S
       ORACUL_NEWS_REQUEST_SPACING: PT0.5S
       ORACUL_NEWS_RATE_LIMIT_WAIT: PT0.5S
       ORACUL_OPENAI_RETRY_DELAY: PT0.2S
@@ -26,3 +32,5 @@ services:
         condition: service_healthy
       stub:
         condition: service_started
+volumes:
+  db-e2e-data: {}

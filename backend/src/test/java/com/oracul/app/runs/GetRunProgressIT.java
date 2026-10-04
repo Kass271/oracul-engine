@@ -13,7 +13,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 /** getRun row #3: observed stage transitions are monotonic and use the fixed (stage, index, label) rows. */
 // @trace FR-24
-@TestPropertySource(properties = "oracul.run.placeholder-stage-delay=PT1S")
+@TestPropertySource(properties = "oracul.run.min-stage-duration=PT1S")
 class GetRunProgressIT extends AbstractRunIT {
 
     private static final List<List<Object>> TABLE = List.of(

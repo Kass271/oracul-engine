@@ -3,6 +3,7 @@ import { MatListModule } from '@angular/material/list';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 
 import type { RunStage } from '../api/models/run-stage';
+import { GenerateButton } from './generate-button';
 import { RunStore } from './run.store';
 
 const STEPS: { stage: RunStage; label: string }[] = [
@@ -20,7 +21,7 @@ const STEPS: { stage: RunStage; label: string }[] = [
 
 @Component({
   selector: 'app-progress-view',
-  imports: [MatProgressBarModule, MatListModule],
+  imports: [MatProgressBarModule, MatListModule, GenerateButton],
   template: `
     <div class="progress" data-testid="progress-view">
       <p class="stage" data-testid="progress-stage">{{ label() }}</p>
@@ -30,6 +31,7 @@ const STEPS: { stage: RunStage; label: string }[] = [
           <mat-list-item [attr.data-testid]="'progress-step-' + s.stage" [attr.data-state]="s.state">{{ s.label }}</mat-list-item>
         }
       </mat-list>
+      <app-generate-button />
     </div>
   `,
   styles: `

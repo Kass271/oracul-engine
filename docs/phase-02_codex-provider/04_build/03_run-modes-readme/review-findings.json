@@ -1,0 +1,95 @@
+{
+  "slice": "03_run-modes-readme",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "README.md",
+      "line": 45,
+      "fr": "FR-43",
+      "problem": "Round 4: fixed. README lines 45, 51 and 58 now use a single subshell '(cd X && ...)'; zsh -n and bash -n accept the block, and backend/gradlew, frontend test:ci, docker-compose.e2e.yml exist. Round 3: still open, now broken in a different way. The fix wrapped the commands in a double parenthesis: '((cd backend && ./gradlew test))' (line 45), '((cd frontend && npm ci && npm run test:ci))' (line 51) and the E2E test line 58 '((cd e2e && npm ci && ... && npx playwright test))'. In bash and zsh, '((' at the start of a command is an arithmetic command, not two nested subshells. Checked on this Mac: zsh prints 'bad math expression: operator expected at `backend &&...'' (exit 2), and /bin/bash 3.2 and sh print '((: cd backend && pwd: syntax error in expression' (exit 1). Nothing runs. So none of the three test commands works as written on macOS's default shells, and FR-43 acceptance 3 ('when I run them as written on a fresh clone, then they work') is still not met. In the E2E block the stack starts, the tests never run, and the down line then stops it, so the user sees an error and no test result.",
+      "fix": "Use one pair of parentheses: '(cd backend && ./gradlew test)', '(cd frontend && npm ci && npm run test:ci)', '(cd e2e && npm ci && npx playwright install chromium && npx playwright test)'. If nesting is ever needed, write '( (' with a space. Then run each block in zsh and in bash from the app folder to confirm.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "e2e/tests/readme.spec.ts",
+      "line": 147,
+      "fr": "FR-43",
+      "problem": "Missing exhaustive test for the area 'README commands are runnable as written'. The test only checks that the command text is present and has no placeholders. It never checks that the commands, run one after another from the app folder, refer to paths that exist. Because of that, the broken E2E block in R1 (the down line runs inside e2e/) and the chained 'cd backend' then 'cd frontend' blocks pass.",
+      "fix": "Add a test that walks every fenced code block line by line in order (one simulated shell starting at the app folder). Track the working directory through top-level 'cd X' and 'cd X && …' (a '( … )' subshell does not change it). For every line, assert that each cd target and each '-f <file>' exists relative to the tracked directory (fs.existsSync).",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/progress-view.ts",
+      "line": 34,
+      "fr": "FR-45",
+      "problem": "After a failed stop, run-control.md FR-45 says 'the button reads STOP and is enabled again' so the user can retry. On the progress view, though, the STOP button is the last element below the 10 steps, at the bottom centre of a 1280x720 viewport. The run-error-message snackbar (bottom centre, 6 s) opens right on top of it. The QA screenshot docs/phase-02_codex-provider/05_release/qa/screenshots/FR-45-stop-failed.png shows the snackbar covering the STOP button. The E2E test confirms it too: run-control.spec.ts lines 183-186 say the snackbar 'still covers the button' and press it with dispatchEvent. So a real user cannot press STOP again for up to 6 s after an error.",
+      "fix": "Make sure the error snackbar never covers the generate/STOP button. For example, open the run error snackbars with verticalPosition 'top' in RunStore.showError, or give the progress/stopped views enough bottom space (or a panelClass offset) that the snackbar sits below the button. Check that it works at 1280x720.",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "e2e/tests/run-control.spec.ts",
+      "line": 186,
+      "fr": "FR-45",
+      "problem": "The failing-stop E2E presses STOP again with dispatchEvent('click') (lines 186 and 194). This skips Playwright's actionability check (visible, not covered), so the test proves the button is enabled in the DOM but not that a user can click it. That is exactly what hides R3. Separately, the area 'error snackbar lifecycle' is not covered end to end: nothing checks that the button can be clicked once the snackbar is gone.",
+      "fix": "Once R3 is fixed, use a real page.getByTestId('generate-button').click() for both retries (no dispatchEvent). Then the test fails whenever the snackbar covers the button.",
+      "status": "fixed"
+    },
+    {
+      "id": "R5",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "frontend/src/app/runs/stop-run.spec.ts",
+      "line": 425,
+      "fr": "FR-45",
+      "problem": "Builder-flagged test, judged valid. This slice rewrote RunStore.showError (run.store.ts lines 203-209). It now dismisses the old snackbar, removes the old run-error-message node by hand and opens a new one with duration 6000, and its comment claims the new snackbar 'opens and closes'. No unit test checks that a snackbar ever closes. The only replacement test (generate-button.spec.ts 'replaced, not stacked') checks the count right after the second error. So a regression where a replaced snackbar never closes would pass. That regression is possible because MatSnackBar only enters the new snackbar after the old one's afterDismissed, and the old code removed the container. A stuck snackbar would cover the STOP button for good (see R3). Missing exhaustive test for the area 'consecutive stop/generate errors at any spacing'.",
+      "fix": "Add a parameterized fake-timer test in stop-run.spec.ts (it.each over the gap between two errors: 0 ms or overlapping, about 6.05 s during the exit animation, and 6.5 s after the first one closed; for each, the second error comes from a stop failure and from a generate failure). Open the first error snackbar, advance by the gap, trigger the second error, and expect exactly one run-error-message with the second text. Then advance 6 s plus the exit fallback (about 250 ms) and expect no run-error-message and no .mat-mdc-snack-bar-container left.",
+      "status": "fixed"
+    },
+    {
+      "id": "R6",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/StopRunIT.java",
+      "line": 451,
+      "fr": "FR-45",
+      "problem": "The race-invariant test is weaker than the spec. run-control.md says a stop that loses the race against completion is 'answered with the COMPLETED body', never both. In the COMPLETED branch the test accepts answer.status in (COMPLETED, STOPPED). A stop that answers 200 STOPPED while the row ends COMPLETED with a story is exactly the 'both' outcome the invariant forbids, and this test lets it through. The current code cannot produce it (stop is a conditional UPDATE; StoryWriter inserts the story and completes in one transaction after SELECT … FOR UPDATE), but the test would not catch a regression.",
+      "fix": "In the COMPLETED branch assert answer.get(\"status\") equals \"COMPLETED\" and answer.get(\"headline\") equals end.get(\"headline\"). In the STOPPED branch keep answer STOPPED. Optionally count both outcomes over the rounds and log them, so it is visible that the race really happens.",
+      "status": "fixed"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/runs/RunService.java",
+      "line": 157,
+      "fr": "FR-45",
+      "problem": "The stopRun description in api/openapi.yaml says that for a STOPPED run 'failure, headline and suggestedRealism stay absent'. storePack writes suggested_realism at RANKING together with an INSUFFICIENT_EVIDENCE note, and toApi copies r.suggestedRealism() for every status. So a run stopped after RANKING returns suggestedRealism (and, per run-control.md, its evidenceNote). The UI does not show it in the stopped view, so there is no visible effect.",
+      "fix": "Either omit suggestedRealism in toApi when the status is STOPPED, or change the openapi description to match run-control.md: present only when RANKING had committed an INSUFFICIENT_EVIDENCE note.",
+      "status": "open"
+    },
+    {
+      "id": "R8",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "e2e/tests/readme.spec.ts",
+      "line": 75,
+      "fr": "FR-43",
+      "problem": "Round 4: fixed. readme.spec.ts now runs every bash block in real zsh and bash (-e -c) inside a temp app layout with stub docker/npm/npx/gradlew that log cwd and args, asserts exit 0, the command count and the expected cwd per tool; walkBlock also reports '(('. Missing exhaustive test for the area 'README code blocks run in a real shell': every fenced block, run from the app folder in zsh and bash, must exit 0 and run each command in the intended directory. walkBlock only simulates a shell. It reads every '(' as a subshell push, so it accepts '((cd backend && ./gradlew test))', which zsh and bash parse as an arithmetic expression and reject (see R1). The test 'every cd target and every compose -f file exists…' passes on a README whose three test commands all fail. Any other shell-syntax mistake (arithmetic, unbalanced quotes, a wrong operator) would also get past a simulator.",
+      "fix": "Run the blocks for real in a sandbox. Make a temp dir that mirrors the app folder (backend/ with an executable stub gradlew, frontend/, e2e/, docker-compose.yml and docker-compose.e2e.yml). Put a temp bin dir first on PATH with stub docker, npm and npx scripts that append '<cwd> <args>' to a log. Run each README block with spawnSync('zsh', ['-e', '-c', block]) and with spawnSync('bash', ['-e', '-c', block]), cwd = the temp app folder. Assert exit 0, and assert the log lists every expected command with the expected cwd (gradlew in backend, npm/npx in frontend or e2e, docker compose in the app folder for both up and down). Optionally also make walkBlock report a segment that starts with '((' or '$(('.",
+      "status": "fixed"
+    }
+  ]
+}

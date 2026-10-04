@@ -44,6 +44,9 @@ public final class EvidenceGuard {
             known.add(i.getEvidenceId());
             counterIds.add(i.getEvidenceId());
         }
+        // FR-47: an empty pack means speculative mode (three differences, see below)
+        boolean speculative = pack.getCore().isEmpty() && pack.getSupporting().isEmpty()
+            && pack.getCounterSignals().isEmpty();
         ScenarioWindow window = ScenarioWindow.of(pack);
         List<GuardViolation> violations = new ArrayList<>();
         boolean regeneration = false;
@@ -125,7 +128,7 @@ public final class EvidenceGuard {
 
         // 4./5. causal chain
         List<CausalStep> chain = new ArrayList<>();
-        String shape = shapeError(scenario);
+        String shape = shapeError(scenario, speculative);
         if (shape != null) {
             violations.add(violation(GuardViolationType.CAUSAL_CHAIN_INVALID, null, null, "causal chain: " + shape,
                 GuardAction.REGENERATION_REQUESTED));
@@ -161,7 +164,7 @@ public final class EvidenceGuard {
                 chain.add(copy(s));
             }
             boolean anyFact = chain.stream().anyMatch(s -> s.getInformationClass() == InformationClass.FACT);
-            if (!anyFact) {
+            if (!anyFact && !speculative) {
                 violations.add(violation(GuardViolationType.CAUSAL_CHAIN_INVALID, null, null,
                     "causal chain: no FACT step remains", GuardAction.REGENERATION_REQUESTED));
                 regeneration = true;
@@ -189,7 +192,7 @@ public final class EvidenceGuard {
         GuardOutcome outcome;
         if (violations.isEmpty()) {
             outcome = GuardOutcome.PASS;
-        } else if (regeneration || facts.isEmpty()) {
+        } else if (regeneration || (facts.isEmpty() && !speculative)) {
             outcome = GuardOutcome.FAIL;
         } else {
             outcome = GuardOutcome.PASS_WITH_REMOVALS;
@@ -226,14 +229,14 @@ public final class EvidenceGuard {
     }
 
     /** First broken chain shape rule, or null. */
-    private static String shapeError(StructuredScenario s) {
+    private static String shapeError(StructuredScenario s, boolean speculative) {
         List<CausalStep> chain = s.getCausalChain();
         for (int i = 0; i < chain.size(); i++) {
             if (chain.get(i).getOrder() == null || chain.get(i).getOrder() != i + 1) {
                 return "order must be 1..n";
             }
         }
-        if (chain.isEmpty() || chain.get(0).getInformationClass() != InformationClass.FACT) {
+        if (chain.isEmpty() || (!speculative && chain.get(0).getInformationClass() != InformationClass.FACT)) {
             return "first step must be FACT";
         }
         for (int i = 1; i < chain.size(); i++) {
