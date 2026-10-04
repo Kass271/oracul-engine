@@ -136,16 +136,16 @@ tests) stay in force.
   - Given any run, when I read its counts or the WHY THESE NEWS panel, then the number of kept sources is never above 30
   - Given the search returns 30 or fewer usable sources, when retrieval ends, then all of them are kept
 
-### FR-47 — Generate despite insufficient evidence for the chosen Realism, with a notice
+### FR-47 — Always generate; note insufficient evidence at the end
 - UI: yes
-- Corrects: FR-31 (insufficient evidence no longer ends the run)
-- Description: If the evidence is below what the chosen Realism needs, ORACUL still generates the future from the evidence it has, never inventing evidence, and tells the user at the end that the Realism level could not be fully met.
+- Corrects: FR-31 (insufficient evidence no longer ends the run), FR-13 / FR-44 (no news found no longer ends the run with NEWS_UNAVAILABLE)
+- Description: A lack of evidence never stops a run. If the evidence is below what the chosen Realism needs, or the news search finds nothing at all, ORACUL still generates the future from whatever evidence it has (never inventing evidence or sources) and shows a note at the end.
 - Acceptance:
   - Given Realism 10 and only 2 core evidence items (5 needed), when the run evaluates evidence, then the run continues and ends COMPLETED with a story built only from the available evidence
-  - Given such a run, when the result is shown, then I see a notice "Realism 10 couldn't be fully met: only 2 core evidence items (needs 5). This future is less grounded." with a "LOWER REALISM" button
-  - Given I click "LOWER REALISM" in the notice, when it applies, then Realism decreases by 2 and a new run starts
-  - Given the evidence meets the chosen Realism, when the result is shown, then no realism notice appears
-  - Given the search yields zero usable evidence items, when the run evaluates evidence, then the run fails with "No current news found — try again or change the scenario" and no story is generated
+  - Given such a run, when the result is shown, then I see the note "Realism 10 couldn't be fully met: only 2 core evidence items (needs 5). This future is less grounded." with a "LOWER REALISM" button
+  - Given the news search returns no usable sources (including GDELT refusing or timing out on every request), when the run continues, then it ends COMPLETED with a fully speculative future, the SOURCES view is empty, and the note reads "No current news could be used — this future is speculative, not grounded in evidence."
+  - Given I click "LOWER REALISM" in the note, when it applies, then Realism decreases by 2 and a new run starts
+  - Given the evidence meets the chosen Realism, when the result is shown, then no note appears
 
 ## Non-functional
 

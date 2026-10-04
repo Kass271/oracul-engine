@@ -46,3 +46,9 @@ errors-and-recovery, models-and-inference, token-reference, preview-limitations.
 |---|---|---|
 | 1 | User request: "User should be able stop process of creating future and run new one. Also limit the sources not more than 30. Even though realism is make it impossible do it, but with notification in the end about realsim". Approve FR-45 (STOP + new run), FR-46 (≤30 sources), FR-47 (generate despite insufficient evidence for the Realism, end notice with LOWER REALISM; corrects FR-31), built in slice 03? | Approve as written (Rec.) |
 | 2 | FR-47 edge case: zero usable evidence? | Still fail clearly (Rec.) — "No current news found — try again or change the scenario" |
+
+## Round 5 — 2026-10-04
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Correction of Round 4 #2 by the user: "if insufficent evedence it just do it!!! not stopped, just in the end make note about this" | FR-47 rewritten: a lack of evidence never stops a run — insufficient evidence for the Realism, zero evidence and no news at all (GDELT down) all still generate the future from what exists, with a note at the end. Corrects FR-31 and the NEWS_UNAVAILABLE run failure (FR-13/FR-44). |
