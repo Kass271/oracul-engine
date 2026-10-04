@@ -1,0 +1,40 @@
+{
+  "slice": "16_quick-regeneration",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "dimension": "spec-compliance",
+      "file": "frontend/src/app/runs/quick-actions.ts",
+      "line": 8,
+      "fr": "FR-29",
+      "problem": "The spec test contract (generation-runs.md, 'Slice 16_quick-regeneration', Frontend) requires a pure helper exported from quick-actions.ts: `export type QuickAction = 'MORE_REALISTIC' | 'DARKER' | 'MORE_OPTIMISTIC' | 'MORE_EXTREME'` and `export function quickTarget(action: QuickAction, value: number): number | null`. The file has only a private `type Action = 'realism-up' | ...` and a private `target()` method, so nothing is exported. Slice 17 adds `quick-alternative` to this same component and expects the contract API to exist.",
+      "fix": "Export `QuickAction` and `quickTarget(action, value)` as specified (+2 clamped to 10 / null at 10; MORE_EXTREME −3 clamped to 1 / null at 1). Have the component call `quickTarget(action, this.scenario.<control>())` instead of its private `target()`.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "frontend/src/app/runs/quick-actions.spec.ts",
+      "line": 42,
+      "fr": "FR-29",
+      "problem": "Contract test 1 says `quickTarget` for 4 actions x v = 1..10 (40 cases) is tested directly. `quickTarget` is now exported (R1 fixed), but quick-actions.spec.ts still does not import it; the 40-case table is only covered through UI clicks against the spec's own copy of the table (CASES).",
+      "fix": "Once R1 is fixed, add `it.each(CASES)` that imports `quickTarget` and compares `quickTarget(action, v)` with `def.target(v)`.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/QuickRegenerationIT.java",
+      "line": 15,
+      "fr": "FR-29",
+      "problem": "The contract asks for `// @trace FR-29`. The tag was left out on purpose (comment: red-check would reject a backend test that is green by design). That explanation is honest, but the trace matrix will not show this backend proof of acceptance 3.",
+      "fix": "Leave as is, or add the tag after the slice closes if the trace tool allows regression guards.",
+      "status": "open"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import { routes } from '../app.routes';
 import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-state';
 import type { FutureResult } from '../api/models/future-result';
 import type { GenerationRun } from '../api/models/generation-run';
+import { ConnectionStore } from '../chatgpt/connection.store';
 import { ScenarioStore } from '../scenario/scenario.store';
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
@@ -598,5 +599,111 @@ describe('slice 15_recent-futures: navigating between /futures/:runId inside the
     expect(store.darkness()).toBe(4);
     expect(text('story-headline')).toBe(headline(A));
     http.verify();
+  });
+});
+
+// @trace FR-29
+describe('slice 16_quick-regeneration', () => {
+  const ID = '11111111-2222-3333-4444-555555555555';
+  const NEW_ID = '99999999-2222-3333-4444-555555555555';
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  const cfg = (darkness: number) => ({
+    realism: 8,
+    darkness,
+    optimism: 5,
+    horizon: '1y',
+    wildcards: [],
+    customWildcards: [],
+    output: { story: true, illustration: false },
+  });
+  const runGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}`);
+  const resultGet = (r: { url: string; method: string }): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${ID}/result`);
+  const runsPost = (r: { url: string; method: string }): boolean => r.method === 'POST' && r.url.endsWith('/api/runs');
+  const el = (): HTMLElement => harness.routeNativeElement as HTMLElement;
+  const count = (id: string): number => el().querySelectorAll(`[data-testid="${id}"]`).length;
+
+  async function render(): Promise<void> {
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+  }
+
+  function completedRun(): GenerationRun {
+    return {
+      ...queued(),
+      id: ID,
+      status: 'COMPLETED',
+      stage: 'WRITING_STORY',
+      stageLabel: 'Writing from the future…',
+      stageIndex: 10,
+      headline: 'Quick base headline',
+      configuration: cfg(5),
+      completedAt: '2026-10-02T18:43:10Z',
+    } as unknown as GenerationRun;
+  }
+
+  function futureResult(): FutureResult {
+    return {
+      runId: ID,
+      generationId: GENERATION_ID,
+      labels: ['AI-GENERATED FUTURE SCENARIO', 'POSSIBLE FUTURE — NOT CURRENT NEWS'],
+      story: { headline: 'Quick base headline', dateline: 'ORACUL FUTURE — March 1, 2027', futureDate: '2027-03-01', body: 'a\n\nb\n\nc' },
+      metadata: { configuration: cfg(5), horizonLabel: '1 year', wildcards: [], counts: COUNTS },
+      causalChain: [],
+      sources: [],
+      research: { intents: [], counts: COUNTS },
+      openCriticIssues: [],
+    } as unknown as FutureResult;
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+    vi.useRealTimers();
+  });
+
+  it('a COMPLETED run shows quick-actions inside result-view', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(runGet).flush(completedRun());
+    await render();
+    http.expectOne(resultGet).flush(futureResult());
+    await render();
+    expect(el().querySelectorAll('[data-testid="result-view"] [data-testid="quick-actions"]').length).toBe(1);
+  });
+
+  it.each(['QUEUED', 'FAILED', 'INSUFFICIENT_EVIDENCE'])('a %s run shows no quick-actions', async (status) => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(runGet).flush({ ...queued(), id: ID, status, failure: { code: 'X', message: 'm' } } as unknown as GenerationRun);
+    await render();
+    expect(count('quick-actions')).toBe(0);
+    expect(count('result-view')).toBe(0);
+  });
+
+  it('click quick-darker with darkness 5 sends darkness 7, shows the new run and keeps 7 in the panel', async () => {
+    harness = await RouterTestingHarness.create(`/futures/${ID}`);
+    http.expectOne(runGet).flush(completedRun());
+    await render();
+    http.expectOne(resultGet).flush(futureResult());
+    await render();
+    TestBed.inject(ConnectionStore).canGenerate.set(true);
+    await render();
+    expect(TestBed.inject(ScenarioStore).darkness()).toBe(5);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    (el().querySelector('[data-testid="quick-darker"]') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    const req = http.expectOne(runsPost);
+    expect(req.request.body).toEqual(cfg(7));
+    req.flush({ ...queued(), id: NEW_ID, configuration: cfg(7) }, { status: 202, statusText: 'Accepted' });
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    expect(TestBed.inject(Router).url).toBe(`/futures/${NEW_ID}`);
+    expect(count('progress-view')).toBe(1);
+    expect(TestBed.inject(ScenarioStore).darkness()).toBe(7);
   });
 });

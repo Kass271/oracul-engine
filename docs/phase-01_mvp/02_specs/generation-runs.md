@@ -112,6 +112,9 @@ ALTERNATIVE runs skip stages 1–6 (they jump from QUEUED to stage 7).
   optimism 10, MORE REALISTIC at realism 10, MORE EXTREME at realism 1), when a run is active, or when `canGenerate` is
   false. Clamping: 9 + 2 → 10; 2 − 3 → 1.
 - Errors: same as FR-10 (`startRun`); on error the panel keeps the updated value and the snackbar shows the message.
+- Precise test contract: "Slice 16_quick-regeneration — FR-29 test contract" below (wins where more precise).
+- Changes earlier behaviour: none (additive: `result-view` gains the `quick-actions` bar; no API, error code, ordering or outbound call of an earlier slice changes; existing result/run-view specs never click inside `result-view` buttons other than `open-why` / `open-sources` / `open-why-news` and assert no button count; the only new outbound call is the `POST /api/runs` a quick button sends on click) (tests: none)
+- Ranges & invariants: each control value v is an integer 1..10 (the ScenarioStore never holds anything else); per action the target is DARKER / MORE OPTIMISTIC / MORE REALISTIC: v 1..8 → v + 2, v 9 → 10 (clamped), v 10 → disabled (no change, no request); MORE EXTREME: v 4..10 → v − 3, v 2..3 → 1 (clamped), v 1 → disabled; `quickTarget(action, v)` is tested for all 4 actions × v = 1…10 (40 cases) and equals the table; invariants: the request body of a quick click deep-equals the panel configuration before the click with exactly one field (the action's control) replaced by the target — horizon, wildcards (order and intensities), customWildcards and output unchanged; the panel after the click equals that body (also after a 4xx/5xx answer); a button is enabled iff its value is not at the bound and `canGenerate()` and not `starting()` and not `active()`; one click sends at most one `POST /api/runs` and a disabled button sends none and changes nothing; the previous run is never modified (status COMPLETED, headline, configuration, completedAt unchanged) and stays listed by `listRecentRuns`.
 
 ### FR-30 — Alternative future
 - Happy path: ALTERNATIVE FUTURE (`quick-alternative`) → `POST /api/runs/{runId}/alternatives` → 202 GenerationRun with
@@ -715,3 +718,95 @@ candidates).
 New in use: `insufficient-view`, `insufficient-message`, `lower-realism`. Reused: `generate-button`,
 `slider-realism-input`, `value-realism`, `slider-darkness-input`, `slider-optimism-input`, `horizon-option-<code>`,
 `wildcard-toggle-<wildcardId>`, `wildcard-intensity-<wildcardId>-input`, `run-error-message`, `progress-view`, `failure-view`, `result-view`.
+
+## Slice 16_quick-regeneration — FR-29 test contract
+
+Delivers the quick regeneration bar on the result view. Frontend only: no migration, no change to
+`api/openapi.yaml` (it reuses `startRun`), no new `ApiError.code`. Not in this slice: ALTERNATIVE FUTURE
+(`quick-alternative`, slice 17 adds it to the same component), mobile layout (FR-34). Where this section is more
+precise than "Behaviour" or "UI", this section wins.
+
+### Frontend (`src/app/runs/quick-actions.ts`, selector `app-quick-actions`)
+- Rendered by `FutureResultComponent` inside `result-view` (after `app-scenario-metadata`, before `app-why-sources`),
+  so it exists only when a COMPLETED run's result is loaded; never in `progress-view`, `insufficient-view`,
+  `failure-view`, `result-loading` or `welcome-view`. No inputs: it reads `ScenarioStore`, `RunStore`, `ConnectionStore`.
+- Markup: container `<div data-testid="quick-actions">` with exactly 4 `mat-stroked-button`s in this order:
+  | data-testid | text (exact) | control | target |
+  |---|---|---|---|
+  | `quick-more-realistic` | MORE REALISTIC | realism | `min(10, v + 2)` |
+  | `quick-darker` | DARKER | darkness | `min(10, v + 2)` |
+  | `quick-more-optimistic` | MORE OPTIMISTIC | optimism | `min(10, v + 2)` |
+  | `quick-more-extreme` | MORE EXTREME | realism | `max(1, v − 3)` |
+- Pure helper exported from `quick-actions.ts`:
+  `export type QuickAction = 'MORE_REALISTIC' | 'DARKER' | 'MORE_OPTIMISTIC' | 'MORE_EXTREME';`
+  `export function quickTarget(action: QuickAction, value: number): number | null` — the target of the table, or
+  `null` when `value` is already at the bound (10 for the three "+2" actions, 1 for MORE EXTREME).
+- `v` is the **current panel value** (`ScenarioStore.realism()` / `darkness()` / `optimism()`). On `/futures/:runId`
+  opened through `RunStore.open` the panel already holds that run's configuration (slice 15); after a `start()` it holds
+  the configuration that was started. Panel edits made while the result is shown are part of the next quick run.
+- Button state (native `disabled` attribute): disabled iff `quickTarget(action, v) === null` or
+  `!ConnectionStore.canGenerate()` or `RunStore.starting()` or `RunStore.active()`.
+- Click on an enabled button, in this order: `ScenarioStore.setRealism|setDarkness|setOptimism(target)`, then
+  `RunStore.start(ScenarioStore.configuration())`. The handler re-checks the disabled conditions and does nothing
+  (no store change, no request) when one holds.
+  - 202 → (existing `RunStore.start` flow) URL `/futures/<newId>` (`replaceUrl`), center shows `progress-view` of the
+    new run, then its result when COMPLETED; the panel keeps the target value (no `ScenarioStore.load` after `start`).
+  - error → snackbar `run-error-message` with `ApiError.message` (or "Something went wrong — try again" when the body
+    is not an ApiError), e.g. 409 → "A generation is already running", 401 → "Connect ChatGPT to generate" plus
+    `ConnectionStore.load()`; URL and `result-view` of the previous run stay; the panel keeps the target value; the
+    buttons are enabled again (by the rule above).
+- Examples: darkness 5 → DARKER → panel and body darkness 7; darkness 9 → 10; darkness 10 → `quick-darker` disabled;
+  realism 2 → MORE EXTREME → 1; realism 1 → `quick-more-extreme` disabled, `quick-more-realistic` enabled;
+  realism 10 → `quick-more-realistic` disabled, `quick-more-extreme` enabled (→ 7).
+
+### Frontend unit tests (Vitest; `// @trace FR-29`)
+- `src/app/runs/quick-actions.spec.ts`:
+  1. `quickTarget` for all 4 actions × v = 1…10 (parameterized, 40 cases) equals the table (`null` at the bound).
+  2. Rendering (component created with `provideRouter`, `provideHttpClient`, `provideHttpClientTesting`; panel via
+     `ScenarioStore.load`, connection via `ConnectionStore.canGenerate.set(true)`): 4 buttons with the exact texts in
+     table order; no `quick-alternative`.
+  3. Per action, parameterized over v = 1…10 with every other control at 5: enabled iff the target is not null; click
+     → exactly one `POST /api/runs` whose body deep-equals the start configuration with only that control replaced by
+     the target, and `ScenarioStore.configuration()` equals that body; at the bound: click → 0 requests, panel unchanged.
+     The start configuration includes horizon `5y`, wildcards `[{biology-new-pandemic, 8}, {robotics-humanoid-boom, 6}]`
+     and one custom wildcard so the "only one field changes" invariant is checked on a full body.
+  4. `canGenerate` false → all 4 disabled, click → 0 requests.
+  5. While the POST is pending (`starting()`) all 4 disabled; a second click → still exactly 1 request.
+  6. `RunStore.run()` QUEUED/RUNNING (`active()`) → all 4 disabled.
+  7. 202 → router URL `/futures/<newId>`; panel darkness still 7.
+  8. 409 `RUN_ALREADY_ACTIVE` → `run-error-message` "A generation is already running"; panel darkness 7; buttons enabled
+     again; URL unchanged. Status 0 / non-ApiError 500 → "Something went wrong — try again".
+- `src/app/runs/run-view.spec.ts` (new `describe('slice 16_quick-regeneration')` only): `/futures/<id>` with a COMPLETED
+  run (headline set) and its `getFutureResult` flushed → `quick-actions` inside `result-view`; QUEUED, FAILED and
+  INSUFFICIENT_EVIDENCE runs → `quick-actions` count 0; with the run configuration darkness 5 (loaded into the panel by
+  `open`), click `quick-darker` → `POST /api/runs` body = configuration with darkness 7; flush 202 with a new QUEUED run
+  → `progress-view` visible, URL `/futures/<newId>`, `ScenarioStore.darkness()` 7.
+
+### Backend test (`backend/src/test/java/com/oracul/app/runs/QuickRegenerationIT.java`, extends `AbstractRunIT`; `// @trace FR-29`)
+No product change; proves acceptance 3 on the API. `connectedSid()`; insert run 1 with `jdbc` for that session as in
+`RecentRunsIT.seed` (status COMPLETED, headline "Quick base headline", configuration `B` = darkness 5, created_at
+now − 1 h, completed_at set); `startOk(sid, B with "darkness":7)` → 202 `kind` STANDARD, `configuration.darkness` 7,
+`configuration` otherwise deep-equal to `B`, `parentRunId` absent, `id` ≠ run 1; `awaitTerminal`; then run 1's row is
+unchanged (status, headline, configuration jsonb, completed_at, updated_at as inserted) and `GET /api/runs` (same
+cookie) contains run 1's `id` with headline "Quick base headline" and `configuration.darkness` 5.
+
+### E2E (`e2e/tests/quick-regeneration.spec.ts`; `// @trace FR-29`; serial; `resetStub` and `connect` as in `recent-futures.spec.ts`; fresh context per test; `test.setTimeout(120_000)`)
+1. Acceptance 1 + 3: connect; panel defaults (darkness 5); `generate-button` → wait for `result-view` (timeout 60 s),
+   remember run 1 id from the URL; `quick-actions` visible with 4 enabled buttons; click `quick-darker` with
+   `page.waitForRequest` on `POST /api/runs` → `postDataJSON()` deep-equals `B` with darkness 7;
+   `slider-darkness-input` value `7`; URL becomes `/futures/<run2>` (≠ run 1); `GET /api/runs/<run2>` →
+   `configuration.darkness` 7. Evidence `FR-29 quick-darker-started`. Wait for `result-view` of run 2 (timeout 60 s).
+   Open `recent-futures-button` → `recent-future-<run2>` first, `recent-future-<run1>` present with settings
+   `R8 D5 O5 · 1 year`; click it → URL `/futures/<run1>`, `result-view` visible, `meta-darkness` "Darkness 5/10".
+   Evidence `FR-29 previous-result-in-recent-futures`.
+2. Acceptance 2 + clamp: connect; set `slider-darkness-input` `9`; generate, wait for `result-view`; click
+   `quick-darker` → request body darkness 10 (clamped); wait for `result-view` of the new run; `quick-darker` is
+   disabled; `quick-more-realistic`, `quick-more-optimistic`, `quick-more-extreme` enabled;
+   `slider-darkness-input` value `10`. Evidence `FR-29 darker-disabled-at-10`.
+   (E2E uses only darkness changes: realism 10 would hit the E2E sufficiency threshold for high realism.)
+
+### data-testid (this slice)
+New in use: `quick-actions`, `quick-more-realistic`, `quick-darker`, `quick-more-optimistic`, `quick-more-extreme`.
+Reused: `result-view`, `generate-button`, `slider-darkness-input`, `progress-view`, `run-error-message`,
+`recent-futures-button`, `recent-future-<runId>`, `recent-future-settings-<runId>`, `meta-darkness`,
+`chatgpt-status`, `chatgpt-connect`.

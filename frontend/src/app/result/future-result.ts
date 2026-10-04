@@ -5,6 +5,7 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 
 import type { FutureResult } from '../api/models/future-result';
 import { ResultService } from '../api/services/result.service';
+import { QuickActions } from '../runs/quick-actions';
 import { RunFailure } from '../runs/run-failure';
 import { FutureStoryComponent } from './future-story';
 import { ScenarioMetadataComponent } from './scenario-metadata';
@@ -14,7 +15,7 @@ const GENERIC_ERROR = 'Something went wrong — try again';
 
 @Component({
   selector: 'app-future-result',
-  imports: [MatProgressBarModule, RunFailure, FutureStoryComponent, ScenarioMetadataComponent, WhySourcesComponent],
+  imports: [MatProgressBarModule, QuickActions, RunFailure, FutureStoryComponent, ScenarioMetadataComponent, WhySourcesComponent],
   template: `
     @if (error(); as message) {
       <app-run-failure [message]="message" />
@@ -23,6 +24,7 @@ const GENERIC_ERROR = 'Something went wrong — try again';
         <app-future-story [story]="r.story" [labels]="r.labels" />
         <app-scenario-metadata [metadata]="r.metadata" [issues]="r.openCriticIssues ?? []" />
         <app-why-sources [causalChain]="r.causalChain ?? []" [sources]="r.sources ?? []" [futureDate]="r.story.futureDate" [research]="r.research" />
+        <app-quick-actions />
       </div>
     } @else {
       <div class="loading" data-testid="result-loading">
