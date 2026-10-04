@@ -116,6 +116,37 @@ tests) stay in force.
   - Given some GDELT requests fail and others return sources, when the stage ends, then the run continues with the sources it got; only when no request returns any source does the run fail with "ORACUL could not reach its news sources — try again later"
   - Given the whole search, when it runs, then it finishes within the run's time budget so the later stages still have time to complete
 
+### FR-45 — Stop a generation and start a new one
+- UI: yes
+- Description: While a future is being generated the user can stop it and then start a new one, instead of waiting for a slow run to end.
+- Acceptance:
+  - Given a run is in progress, when I look at the generate button, then it reads "STOP" instead of "GENERATE"
+  - Given a run is in progress, when I click "STOP", then the run ends with status "Stopped", ORACUL sends no further ChatGPT or news requests for it, and the controls are enabled again
+  - Given a stopped run, when I click "GENERATE", then a new run starts with the current settings
+  - Given a stopped run, when I open Recent futures, then it is listed as "Stopped"
+  - Given a run that has already finished, when a stop request for it arrives, then nothing changes and the UI shows the run's final state
+  - Given a run was stopped, when I use "Reset ChatGPT connection", then the reset is allowed
+
+### FR-46 — At most 30 sources per run
+- UI: no
+- Corrects: FR-13 (number of kept sources)
+- Description: A run keeps at most 30 news sources, so generation is faster and the evidence is focused.
+- Acceptance:
+  - Given the news search returns more than 30 usable sources, when retrieval ends, then at most 30 are kept: the best-ranked ones, keeping the spread over search topics and each source's query attribution
+  - Given any run, when I read its counts or the WHY THESE NEWS panel, then the number of kept sources is never above 30
+  - Given the search returns 30 or fewer usable sources, when retrieval ends, then all of them are kept
+
+### FR-47 — Generate despite insufficient evidence for the chosen Realism, with a notice
+- UI: yes
+- Corrects: FR-31 (insufficient evidence no longer ends the run)
+- Description: If the evidence is below what the chosen Realism needs, ORACUL still generates the future from the evidence it has, never inventing evidence, and tells the user at the end that the Realism level could not be fully met.
+- Acceptance:
+  - Given Realism 10 and only 2 core evidence items (5 needed), when the run evaluates evidence, then the run continues and ends COMPLETED with a story built only from the available evidence
+  - Given such a run, when the result is shown, then I see a notice "Realism 10 couldn't be fully met: only 2 core evidence items (needs 5). This future is less grounded." with a "LOWER REALISM" button
+  - Given I click "LOWER REALISM" in the notice, when it applies, then Realism decreases by 2 and a new run starts
+  - Given the evidence meets the chosen Realism, when the result is shown, then no realism notice appears
+  - Given the search yields zero usable evidence items, when the run evaluates evidence, then the run fails with "No current news found — try again or change the scenario" and no story is generated
+
 ## Non-functional
 
 ### NFR-8 — Real-service check gates GREEN

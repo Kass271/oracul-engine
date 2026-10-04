@@ -39,3 +39,10 @@ errors-and-recovery, models-and-inference, token-reference, preview-limitations.
 | # | Question | Answer |
 |---|---|---|
 | 1 | Real check 1 showed real GDELT answering 429 "Please limit requests to one every 5 seconds" (and an 18 s answer), so every real run fails with NEWS_UNAVAILABLE. Add FR-44 "Real news search within GDELT's limits" (≤4 merged OR-group requests, one at a time ≥5 s apart, 30 s timeout, one retry after 429, partial results kept, inside the run budget), built in slice 02? | Add FR-44 to slice 02 (Rec.) |
+
+## Round 4 — 2026-10-04 (before slice 03)
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | User request: "User should be able stop process of creating future and run new one. Also limit the sources not more than 30. Even though realism is make it impossible do it, but with notification in the end about realsim". Approve FR-45 (STOP + new run), FR-46 (≤30 sources), FR-47 (generate despite insufficient evidence for the Realism, end notice with LOWER REALISM; corrects FR-31), built in slice 03? | Approve as written (Rec.) |
+| 2 | FR-47 edge case: zero usable evidence? | Still fail clearly (Rec.) — "No current news found — try again or change the scenario" |
