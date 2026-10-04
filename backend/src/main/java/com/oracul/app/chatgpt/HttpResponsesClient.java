@@ -57,11 +57,17 @@ public class HttpResponsesClient {
     private static final String FALLBACK_SENTENCE =
         "Answer with exactly one JSON object and nothing else (no Markdown fence). It must validate against this JSON Schema: ";
 
-    private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "responses-watchdog");
-        t.setDaemon(true);
-        return t;
-    });
+    private static final ScheduledExecutorService WATCHDOG = newWatchdog();
+
+    private static ScheduledExecutorService newWatchdog() {
+        java.util.concurrent.ScheduledThreadPoolExecutor e = new java.util.concurrent.ScheduledThreadPoolExecutor(1, r -> {
+            Thread t = new Thread(r, "responses-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        e.setRemoveOnCancelPolicy(true);
+        return e;
+    }
 
     private final ChatGptAuthService auth;
     private final HttpClient http;

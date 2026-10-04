@@ -1,7 +1,6 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { evidence } from './evidence';
-
-const STUB = 'http://localhost:4010';
+import { STUB, awaitStatus, connect, configureAcceptance, failedRun, post, recorded, startAcceptanceRun } from './plan-usage-helpers';
 
 const M_NO_MODEL = 'ChatGPT offers no model for this account — check your plan, then try again';
 const M_INCOMPLETE = 'ChatGPT did not finish the answer — please try again';
@@ -14,11 +13,6 @@ const M_REGISTRATION_INVALID = 'ChatGPT registration is no longer valid — use 
 
 test.describe.configure({ mode: 'serial' });
 
-async function post(request: APIRequestContext, path: string, data: unknown): Promise<void> {
-  const r = await request.post(`${STUB}${path}`, { data });
-  expect(r.ok(), `${path} ${JSON.stringify(data)} -> ${r.status()}`).toBeTruthy();
-}
-
 test.beforeEach(async ({ request }) => {
   const r = await request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
@@ -27,57 +21,6 @@ test.beforeEach(async ({ request }) => {
   await post(request, '/__control/responses', { mode: 'ok' });
   await post(request, '/__control/mode', { mode: 'ok' });
 });
-
-async function connect(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.getByTestId('chatgpt-status')).toHaveText('Not connected');
-  await page.getByTestId('chatgpt-connect').click();
-  await expect(page.getByTestId('chatgpt-status')).toHaveText('ChatGPT connected');
-}
-
-/** Acceptance configuration A of generation-runs.md "Slice 04_run-start" through the panel. */
-async function configureAcceptance(page: Page): Promise<void> {
-  await page.getByTestId('slider-darkness-input').fill('9');
-  await page.getByTestId('slider-optimism-input').fill('2');
-  await page.getByTestId('horizon-option-5y').click();
-  for (const [category, id, intensity] of [
-    ['biology', 'biology-new-pandemic', '8'],
-    ['robotics', 'robotics-humanoid-boom', '6'],
-  ]) {
-    await page.getByTestId(`wildcard-category-header-${category}`).click();
-    await page.getByTestId(`wildcard-toggle-${id}`).getByRole('switch').click();
-    await page.getByTestId(`wildcard-intensity-${id}-input`).fill(intensity);
-  }
-}
-
-async function startAcceptanceRun(page: Page): Promise<string> {
-  await connect(page);
-  await configureAcceptance(page);
-  await page.getByTestId('generate-button').click();
-  await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
-  return page.url().split('/').pop()!;
-}
-
-async function awaitStatus(page: Page, id: string, wanted: string, timeout: number) {
-  await expect
-    .poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).status, { timeout, intervals: [500] })
-    .toBe(wanted);
-  return (await page.request.get(`/api/runs/${id}`)).json();
-}
-
-async function recorded(page: Page, kind: 'responses' | 'models'): Promise<any[]> {
-  const res = await page.request.get(`${STUB}/__control/requests?kind=${kind}`);
-  expect(res.status()).toBe(200);
-  const body = await res.json();
-  return Array.isArray(body) ? body : body.requests;
-}
-
-/** Runs the acceptance configuration with a stub mode already set and waits for the failure view. */
-async function failedRun(page: Page): Promise<any> {
-  const id = await startAcceptanceRun(page);
-  await expect(page.getByTestId('failure-view')).toBeVisible({ timeout: 60_000 });
-  return (await page.request.get(`/api/runs/${id}`)).json();
-}
 
 // @trace FR-38
 test.describe('FR-38 Documented plan-usage Responses call', () => {
@@ -132,19 +75,6 @@ test.describe('FR-38 Documented plan-usage Responses call', () => {
     const run = await failedRun(page);
     await expect(page.getByTestId('failure-message')).toHaveText(M_INCOMPLETE);
     expect(run.failure.code).toBe('CHATGPT_INCOMPLETE');
-  });
-
-  test('FR-38 a text.format rejection is repeated once without text.format and the run completes', async ({ page, request }) => {
-    test.setTimeout(120_000);
-    await post(request, '/__control/responses', { mode: 'unsupported-capability' });
-    const id = await startAcceptanceRun(page);
-    await awaitStatus(page, id, 'COMPLETED', 60_000);
-    const requests = await recorded(page, 'responses');
-    expect(requests.some((b) => b.text?.format)).toBe(true); // the rejected first attempt
-    expect(requests.filter((b) => !b.text).length).toBeGreaterThan(0); // the fallback bodies
-    // after the first fallback no call carries text.format again: exactly one rejected round trip
-    expect(requests.filter((b) => b.text?.format)).toHaveLength(1);
-    for (const b of requests.filter((x) => !x.text)) expect(b.instructions).toContain('Answer with exactly one JSON object');
   });
 });
 

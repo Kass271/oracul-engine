@@ -11,10 +11,11 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -30,16 +31,28 @@ public final class RawHttpGet {
     }
 
     private static final int MAX_BODY = 16 * 1024 * 1024;
-    private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "raw-get-watchdog");
-        t.setDaemon(true);
-        return t;
-    });
+    private static final ScheduledExecutorService WATCHDOG = newWatchdog();
+
+    private static ScheduledExecutorService newWatchdog() {
+        ScheduledThreadPoolExecutor e = new ScheduledThreadPoolExecutor(1, r -> {
+            Thread t = new Thread(r, "raw-get-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        e.setRemoveOnCancelPolicy(true);
+        return e;
+    }
 
     private RawHttpGet() {
     }
 
     public static Response get(URI uri, Map<String, String> headers, Duration timeout) throws IOException {
+        return get(uri, headers, timeout, (SSLSocketFactory) SSLSocketFactory.getDefault());
+    }
+
+    /** Test seam: same as the public overload but with an explicit TLS trust source (package-private). */
+    static Response get(URI uri, Map<String, String> headers, Duration timeout, SSLSocketFactory tlsFactory)
+        throws IOException {
         long deadline = System.nanoTime() + timeout.toNanos();
         Socket socket = new Socket();
         ScheduledFuture<?> watchdog = WATCHDOG.schedule(() -> {
@@ -57,8 +70,14 @@ public final class RawHttpGet {
             socket.setSoTimeout(millis);
             Socket wire = socket;
             if (tls) {
-                SSLSocket ssl = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault())
-                    .createSocket(socket, uri.getHost(), port, true);
+                SSLSocket ssl = (SSLSocket) tlsFactory.createSocket(socket, uri.getHost(), port, true);
+                SSLParameters params = ssl.getSSLParameters();
+                params.setEndpointIdentificationAlgorithm("HTTPS");
+                if (!isIpLiteral(uri.getHost())) {
+                    params.setServerNames(java.util.List.of(new javax.net.ssl.SNIHostName(uri.getHost())));
+                }
+                ssl.setSSLParameters(params);
+                // verifies chain and hostname; nothing is written before this succeeds
                 ssl.startHandshake();
                 wire = ssl;
             }
@@ -84,6 +103,10 @@ public final class RawHttpGet {
                 // nothing left to release
             }
         }
+    }
+
+    private static boolean isIpLiteral(String host) {
+        return host.indexOf(':') >= 0 || host.matches("[0-9.]+");
     }
 
     private static Response parse(byte[] raw) throws IOException {

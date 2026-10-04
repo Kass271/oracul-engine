@@ -4,6 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.KeyStore;
+import java.util.List;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
@@ -14,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
+// @trace FR-38
 // @trace FR-39
 // @trace FR-44
 class RawHttpGetTest {
@@ -126,6 +137,130 @@ class RawHttpGetTest {
                 .isInstanceOf(IOException.class);
             assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(2));
             assertThat(s.connections.get()).isEqualTo(1);
+        }
+    }
+
+    // ---- TLS: chain and hostname are verified before any application byte (the Authorization header) is sent ----
+
+    private static final char[] PW = "changeit".toCharArray();
+
+    private static KeyStore generate(Path dir, String name, String san) throws Exception {
+        Path file = dir.resolve(name + ".p12");
+        Process p = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "keytool").toString(),
+            "-genkeypair", "-alias", name, "-keyalg", "RSA", "-keysize", "2048", "-validity", "2",
+            "-dname", "CN=" + name, "-ext", "san=" + san, "-storetype", "PKCS12",
+            "-keystore", file.toString(), "-storepass", "changeit", "-keypass", "changeit")
+            .redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor()).as(out).isZero();
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        try (InputStream in = Files.newInputStream(file)) {
+            ks.load(in, PW);
+        }
+        return ks;
+    }
+
+    private static SSLContext serverContext(KeyStore ks) throws Exception {
+        KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(ks, PW);
+        SSLContext ctx = SSLContext.getInstance("TLS");
+        ctx.init(kmf.getKeyManagers(), null, null);
+        return ctx;
+    }
+
+    /** Trusts exactly the certificate of {@code ks} (self-signed, so it is its own CA). */
+    private static SSLSocketFactory trusting(KeyStore ks) throws Exception {
+        KeyStore trust = KeyStore.getInstance("PKCS12");
+        trust.load(null, null);
+        trust.setCertificateEntry("ca", ks.getCertificateChain(ks.aliases().nextElement())[0]);
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(trust);
+        SSLContext ctx = SSLContext.getInstance("TLS");
+        ctx.init(null, tmf.getTrustManagers(), null);
+        return ctx.getSocketFactory();
+    }
+
+    private static final class TlsServer implements AutoCloseable {
+        final SSLServerSocket socket;
+        final AtomicInteger appBytes = new AtomicInteger();
+        final AtomicReference<String> request = new AtomicReference<>();
+
+        TlsServer(KeyStore ks) throws Exception {
+            socket = (SSLServerSocket) serverContext(ks).getServerSocketFactory().createServerSocket(0, 5,
+                java.net.InetAddress.getByName("127.0.0.1"));
+            Thread t = new Thread(() -> {
+                while (!socket.isClosed()) {
+                    try (Socket c = socket.accept()) {
+                        byte[] buf = new byte[4096];
+                        int n = c.getInputStream().read(buf);
+                        if (n > 0) {
+                            appBytes.addAndGet(n);
+                            request.set(new String(buf, 0, n, StandardCharsets.ISO_8859_1));
+                            c.getOutputStream().write(bytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"));
+                            c.getOutputStream().flush();
+                        }
+                    } catch (Exception e) {
+                        // failed handshake or closed server
+                    }
+                }
+            });
+            t.setDaemon(true);
+            t.start();
+        }
+
+        URI uri(String host) {
+            return URI.create("https://" + host + ":" + socket.getLocalPort() + "/v1/x");
+        }
+
+        @Override
+        public void close() throws IOException {
+            socket.close();
+        }
+    }
+
+    @Test
+    void tlsWithTrustedCertificateMatchingTheHostSucceedsByDnsAndByIp(@org.junit.jupiter.api.io.TempDir Path dir)
+        throws Exception {
+        KeyStore ks = generate(dir, "good", "dns:localhost,ip:127.0.0.1");
+        try (TlsServer s = new TlsServer(ks)) {
+            for (String host : List.of("localhost", "127.0.0.1")) {
+                RawHttpGet.Response r = RawHttpGet.get(s.uri(host), Map.of("Authorization", "Bearer secret"),
+                    Duration.ofSeconds(10), trusting(ks));
+                assertThat(r.status()).isEqualTo(200);
+                assertThat(r.body()).isEqualTo("ok");
+                assertThat(s.request.get()).contains("Authorization: Bearer secret");
+            }
+        }
+    }
+
+    @Test
+    void tlsWithTrustedCertificateForAnotherHostFailsAndSendsNoApplicationBytes(@org.junit.jupiter.api.io.TempDir Path dir)
+        throws Exception {
+        KeyStore ks = generate(dir, "wrong", "dns:other.example.test");
+        try (TlsServer s = new TlsServer(ks)) {
+            for (String host : List.of("localhost", "127.0.0.1")) {
+                assertThatThrownBy(() -> RawHttpGet.get(s.uri(host), Map.of("Authorization", "Bearer secret"),
+                    Duration.ofSeconds(10), trusting(ks))).isInstanceOf(IOException.class);
+            }
+            Thread.sleep(300); // let the server thread finish reading the aborted connections
+            assertThat(s.appBytes.get()).isZero();
+            assertThat(s.request.get()).isNull();
+        }
+    }
+
+    @Test
+    void tlsWithUntrustedCertificateFailsAndSendsNoApplicationBytes(@org.junit.jupiter.api.io.TempDir Path dir)
+        throws Exception {
+        KeyStore ks = generate(dir, "untrusted", "dns:localhost,ip:127.0.0.1");
+        try (TlsServer s = new TlsServer(ks)) {
+            assertThatThrownBy(() -> RawHttpGet.get(s.uri("localhost"), Map.of("Authorization", "Bearer secret"),
+                Duration.ofSeconds(10), (SSLSocketFactory) SSLSocketFactory.getDefault()))
+                .isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> RawHttpGet.get(s.uri("localhost"), Map.of("Authorization", "Bearer secret"),
+                Duration.ofSeconds(10), trusting(generate(dir, "other-ca", "dns:localhost"))))
+                .isInstanceOf(IOException.class);
+            Thread.sleep(300);
+            assertThat(s.appBytes.get()).isZero();
         }
     }
 }

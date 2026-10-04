@@ -1,0 +1,110 @@
+{
+  "slice": "02_plan-usage-calls",
+  "round": 3,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/common/RawHttpGet.java",
+      "line": 60,
+      "fr": "FR-38",
+      "problem": "The TLS branch wraps the socket with SSLSocketFactory.getDefault().createSocket(socket, host, port, true) and calls startHandshake() without enabling endpoint identification. A raw JSSE SSLSocket checks the certificate chain but NOT the hostname (SSLParameters.endpointIdentificationAlgorithm is null). Reviewer check on JDK 25.0.4: a handshake with wrong.host.badssl.com (certificate for a different name) succeeds, and endpointId=null. RawHttpGet carries 'Authorization: Bearer <access token>' to https://api.openai.com/v1/models (HttpResponsesClient.get, line 752) and fetches GDELT. So anyone on the network path with any publicly trusted certificate for any domain can read the ChatGPT access token and fake the model catalogue or news answers. The JDK HttpClient used before this change checks hostnames by default, so this is a regression.",
+      "fix": "Before startHandshake(): SSLParameters p = ssl.getSSLParameters(); p.setEndpointIdentificationAlgorithm(\"HTTPS\"); ssl.setSSLParameters(p);. Keep SNI by passing uri.getHost(), as the code already does.",
+      "status": "fixed",
+      "resolution": "Round 3: fixed. RawHttpGet now sets SSLParameters.endpointIdentificationAlgorithm=HTTPS and SNI (for non-IP hosts) before startHandshake(); the request (with Authorization) is written only after the handshake succeeds. Reviewer scratch check: with a trusted certificate for other.example.test served on localhost/127.0.0.1, get() throws 'No subject alternative DNS name matching localhost' and the server receives 0 bytes."
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/common/RawHttpGetTest.java",
+      "line": 19,
+      "fr": "FR-38",
+      "problem": "RawHttpGetTest only tests plain http:// servers. The https branch is never run in any test: handshake, SNI, hostname check, and the watchdog closing a TLS socket. Because of this, the missing hostname check (R1) passed with 95% coverage. Missing exhaustive test for the RawHttpGet TLS area, which must cover: a certificate for the right host is accepted; a certificate that is trusted but for a different hostname is rejected with an IOException and no request bytes, so no header, is written; an untrusted certificate is rejected.",
+      "fix": "Add a parameterized test with a local TLS server (self-signed keystore made in the test, and an SSLContext/trust store installed for the test). It should cover: matching hostname -> 200; mismatched hostname (for example a certificate for 'other.test' served on 'localhost') -> IOException, and the server never receives the Authorization header; an untrusted certificate -> IOException.",
+      "status": "fixed",
+      "resolution": "Round 3: fixed. RawHttpGetTest adds TLS tests for a matching SAN (by DNS and IP), a trusted certificate for another host (IOException, 0 application bytes), and an untrusted certificate (default trust store and another CA). Reviewer mutation check in a scratch copy with the setEndpointIdentificationAlgorithm line removed: both hosts return 200 and the server receives 236 bytes including the Authorization header, so the wrong-host test would fail as intended."
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "dimension": "tests",
+      "file": "e2e/tests/plan-usage-calls.spec.ts",
+      "line": 137,
+      "fr": "FR-38",
+      "problem": "The code follows the spec: chatgpt-inference.md Data table and FR-38 step 4 say structuredOutputSupported stays false 'for the backend's lifetime'. The E2E suite does not handle that state, though. The test 'a text.format rejection is repeated once…' turns the flag off in the shared Docker backend, and the E2E stack has no way to turn it back on (resetStructuredOutput() exists only for in-process ITs). Effects: (a) the suite cannot be repeated. On a reused backend, the FR-38 acceptance test (line 95 expects key 'text') fails, and so does the fallback test itself (line 143 expects one body with text.format). (b) Every spec file that runs after plan-usage-calls.spec.ts in alphabetical order runs in fallback mode without notice: quick-regeneration, recent-futures, run-failures, run-start, scenario-controls, search-sources, smoke, validated-scenario, why-*, wildcards. So the structured text.format path is not tested end-to-end for those FRs. A green result that depends on test order and a fresh container is not reliable evidence.",
+      "fix": "Run the fallback scenario against a backend that is restarted afterwards. One option is its own Playwright project that runs last (projects + dependencies), with a globalTeardown/globalSetup step that restarts the backend container (docker compose restart backend, then wait for /actuator/health or the app URL). Another is a globalSetup that always restarts the backend before the suite and puts the fallback test in a file that sorts last. Do not change the FR-38 assertions: they are correct for a fresh backend.",
+      "status": "fixed",
+      "resolution": "Round 3: fixed. The fallback scenario is moved to plan-usage-fallback.spec.ts in its own 'fallback-last' project (dependencies: ['chromium']; chromium ignores the file). global-setup.ts runs 'docker compose restart backend' (fixed project name oracul-engine) and waits for /actuator/health on the exposed port 8080. FR-38 assertions are unchanged; helpers are moved to plan-usage-helpers.ts."
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SourceRetrieval.java",
+      "line": 64,
+      "fr": "FR-44",
+      "problem": "allFailed() is true only when every planned query is FAILED. A query whose element is empty (for example the text '()' or '\"OR\"', which QueryExpander's non-blank check allows) is EMPTY. So if every GDELT group FAILED, the run still continues with 0 sources instead of failing with NEWS_UNAVAILABLE. The spec invariant is 'NEWS_UNAVAILABLE iff every group FAILED'. In practice this is rare.",
+      "fix": "Track whether at least one group was answered, and fail when no group was answered and at least one group was planned.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/HttpResponsesClient.java",
+      "line": 60,
+      "fr": "FR-38",
+      "problem": "Both watchdogs (HttpResponsesClient WATCHDOG and RawHttpGet WATCHDOG) use Executors.newSingleThreadScheduledExecutor and cancel with task.cancel(false). Cancelled tasks stay in the queue until their delay ends (removeOnCancelPolicy is false), and each one keeps the response InputStream or Socket reachable for up to stream-timeout (120 s) or the query timeout. Stall handling itself works: the reviewer checked on JDK 25 that closing the body unblocks a read on a stalled stream after about 1 s.",
+      "fix": "Use a ScheduledThreadPoolExecutor with setRemoveOnCancelPolicy(true) (daemon thread factory as now).",
+      "status": "fixed",
+      "resolution": "Round 3: fixed. Both watchdogs are ScheduledThreadPoolExecutor(1, daemon factory) with setRemoveOnCancelPolicy(true)."
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/run-failure.ts",
+      "line": 25,
+      "fr": "FR-39",
+      "problem": "The spec says failure-reconnect is '<a mat-flat-button href=\"/api/auth/chatgpt/authorize\">', but the code uses mat-stroked-button. The reconnect step is the primary action of this state and should not look the same as the secondary usage link.",
+      "fix": "Use mat-flat-button for failure-reconnect.",
+      "status": "open"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/chatgpt/HttpResponsesClient.java",
+      "line": 74,
+      "fr": "FR-38",
+      "problem": "Entries in sessionModels are only replaced by the next resolveModel of the same session and never removed. The map grows by one entry for every session that ever ran, for the whole life of the backend.",
+      "fix": "Remove the entry when the run task ends (finally in PipelineExecutor.execute), or use a bounded or expiring map.",
+      "status": "open"
+    },
+    {
+      "id": "R8",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/NewsSearchTimingIT.java",
+      "line": 28,
+      "fr": "FR-44",
+      "problem": "The news-search.md test contract asks for a serial scheduler with an injected Clock and sleeper, so that spacing, timeout boundary (29.9 s / 30 s) and budget are tested exactly. SourceRetrieval uses System.nanoTime and Thread.sleep, and the tests run on scaled-down real time with 60 ms tolerance. The tests cover the behaviour, but not at the exact boundaries the spec names, and they can be flaky on a slow CI.",
+      "fix": "Optional: give the Scheduler a nano-clock and sleeper seam and add deterministic boundary tests.",
+      "status": "open"
+    },
+    {
+      "id": "R9",
+      "severity": "low",
+      "dimension": "tests",
+      "file": "e2e/tests/global-setup.ts",
+      "line": 13,
+      "fr": "FR-38",
+      "problem": "If 'docker compose restart backend' fails, globalSetup only logs a warning and continues. The suite then runs against a backend that may still have the text.format fallback flag set from an earlier run. The FR-38 acceptance assertion (key 'text') would then fail loudly, so this does not give a false green, but the cause is hidden in the log.",
+      "fix": "Optional: throw on a failed restart unless E2E_SKIP_BACKEND_RESTART is set, so the opt-out is explicit.",
+      "status": "open"
+    }
+  ]
+}
