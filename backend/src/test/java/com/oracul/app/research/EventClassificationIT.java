@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /** Rows 9-13 of research-pipeline.md "Slice 06_events": semantic classification, validation, retry, exclusion. */
-// @trace FR-15
+// @trace FR-15, FR-38
 class EventClassificationIT extends AbstractEventIT {
 
     private Ran runV4(String... classificationAnswers) throws Exception {
@@ -82,7 +82,10 @@ class EventClassificationIT extends AbstractEventIT {
         assertThat(calls).hasSize(1);
         StubResponses.Request req = calls.get(0);
         Map<String, Object> body = JsonPath.read(req.body(), "$");
-        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store");
+        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store", "stream");
+        // @trace FR-38
+        assertThat(body.get("stream")).isEqualTo(true);
+        assertThat(req.headers().get("accept")).isEqualTo("text/event-stream");
         assertThat(body.get("store")).isEqualTo(false);
         assertThat(req.body()).doesNotContain("\"tools\"").doesNotContain("tool_choice").doesNotContain("web_search");
         assertThat(instructionsOf(req)).isEqualTo(CLASSIFICATION_INSTRUCTIONS);

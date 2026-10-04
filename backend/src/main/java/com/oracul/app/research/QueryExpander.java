@@ -46,7 +46,7 @@ public class QueryExpander {
         }
     }
 
-    /** May throw ApiException (session expired); every other failure yields the template plan. */
+    /** May throw ChatGptCallException (session expired, registration invalid, plan not eligible); every other failure yields the template plan. */
     public SearchPlan expand(UUID sessionId, ResearchProfile profile, ScenarioConfiguration cfg, SearchPlan template) {
         String input = QueryExpansionPrompt.input(new QueryExpansionPrompt.ResearchProfileView(cfg,
             horizonLabels.get(cfg.getHorizon().getValue()), profile.getTopics()), template);

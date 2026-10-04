@@ -13,12 +13,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.TestPropertySource;
 
 /** Rows 14-17 of research-pipeline.md "Slice 06_events": ChatGPT transport failures of EVENT_NORMALIZATION / EVENT_CLASSIFICATION. */
-// @trace FR-14, FR-15
+// @trace FR-14, FR-15, FR-38, FR-39
 @TestPropertySource(properties = {"oracul.research.query-budget=18", "oracul.events.max-sources=1000"}) // F240 for row 35
 class EventFailureIT extends AbstractEventIT {
 
-    static final String RATE_LIMITED = "ChatGPT plan limit reached — try again later";
-    static final String UNAVAILABLE = "ChatGPT is unavailable right now — try again later";
+    static final String RATE_LIMITED = "ChatGPT usage limit reached — try again later";
+    static final String UNAVAILABLE = "ChatGPT is temporarily unavailable — try again in a few minutes";
+    static final String INCOMPLETE = "ChatGPT did not finish the answer — please try again";
     static final String EXPIRED = "ChatGPT session expired — please reconnect";
     static final String PROVIDER_BODY = "{\"error\":\"PROVIDER-SECRET-BODY\"}";
 
@@ -30,9 +31,15 @@ class EventFailureIT extends AbstractEventIT {
     }
 
     private void assertFailed(Ran r, String code, String message, String purpose, int requestsOfPurpose) throws Exception {
+        assertFailed(r, code, message, null, purpose, requestsOfPurpose);
+    }
+
+    private void assertFailed(Ran r, String code, String message, String providerCode, String purpose, int requestsOfPurpose)
+        throws Exception {
         Map<String, Object> run = r.run();
         assertThat(run.get("status")).as("run: " + run).isEqualTo("FAILED");
-        assertThat(run.get("failure")).isEqualTo(json("{\"code\":\"" + code + "\",\"message\":\"" + message + "\"}"));
+        assertThat(run.get("failure")).isEqualTo(json("{\"code\":\"" + code + "\",\"message\":\"" + message + "\""
+            + (providerCode == null ? "" : ",\"providerCode\":\"" + providerCode + "\"") + "}"));
         assertThat(run.get("stage")).isEqualTo("CONNECTING_SIGNALS");
         assertThat(run.get("stageIndex")).isEqualTo(5);
         assertThat(run.get("completedAt")).isNotNull();
@@ -91,25 +98,28 @@ class EventFailureIT extends AbstractEventIT {
         assertFailed(r, "CHATGPT_RATE_LIMITED", RATE_LIMITED, CLASSIFICATION, 2);
     }
 
-    // #15
-    @ParameterizedTest(name = "HTTP 500 twice on {0}: failed with CHATGPT_UNAVAILABLE after one retry")
+    // #15 (FR-39 row 4: at most 2 retries, 3 identical requests)
+    @ParameterizedTest(name = "HTTP 500 always on {0}: failed with CHATGPT_UNAVAILABLE after two retries")
     @ValueSource(strings = {NORMALIZATION, CLASSIFICATION})
-    void serverErrorTwiceFailsTheRunAfterOneRetry(String purpose) throws Exception {
+    void serverErrorAlwaysFailsTheRunAfterTwoRetries(String purpose) throws Exception {
         prepare(purpose);
         always(purpose, StubResponses.status(500, PROVIDER_BODY));
         Ran r = run(A);
-        assertFailed(r, "CHATGPT_UNAVAILABLE", UNAVAILABLE, purpose, 2);
+        assertFailed(r, "CHATGPT_UNAVAILABLE", UNAVAILABLE, purpose, 3);
+        List<StubResponses.Request> calls = requests(purpose);
+        assertThat(calls.get(1).body()).as("identical body on retry").isEqualTo(calls.get(0).body());
+        assertThat(calls.get(2).body()).isEqualTo(calls.get(0).body());
         assertSlotReleased(r);
     }
 
     // #15 connection closed
-    @ParameterizedTest(name = "connection closed twice on {0}: CHATGPT_UNAVAILABLE")
+    @ParameterizedTest(name = "connection closed always on {0}: CHATGPT_UNAVAILABLE after 3 requests")
     @ValueSource(strings = {NORMALIZATION, CLASSIFICATION})
-    void connectionErrorsTwiceFailTheRun(String purpose) throws Exception {
+    void connectionErrorsAlwaysFailTheRun(String purpose) throws Exception {
         prepare(purpose);
         always(purpose, new StubResponses.Reply(0, "", 0));
         Ran r = run(A);
-        assertFailed(r, "CHATGPT_UNAVAILABLE", UNAVAILABLE, purpose, 2);
+        assertFailed(r, "CHATGPT_UNAVAILABLE", UNAVAILABLE, purpose, 3);
     }
 
     // #16
@@ -126,58 +136,48 @@ class EventFailureIT extends AbstractEventIT {
         assertThat(requests(purpose)).hasSize(2);
     }
 
-    // #17
-    @ParameterizedTest(name = "401 always on {0} and refresh refused: CHATGPT_SESSION_EXPIRED")
+    // #17 (FR-39 row 1): a 401 never refreshes and never retries
+    @ParameterizedTest(name = "401 on {0}: CHATGPT_SESSION_EXPIRED without refresh or retry")
     @ValueSource(strings = {NORMALIZATION, CLASSIFICATION})
-    void anUnrecoverableSessionFailsTheRun(String purpose) throws Exception {
+    void a401EndsTheSessionWithoutRefreshOrRetry(String purpose) throws Exception {
         prepare(purpose);
         String sid = connectedSid();
-        stub.responder = req -> "refresh_token".equals(req.form().get("grant_type"))
-            ? StubOpenAi.status(400, "{\"error\":\"invalid_grant\"}")
-            : stub.ok(3600, StubOpenAi.ALL_SCOPES, true);
+        int refreshesBefore = stub.grant("refresh_token").size();
         always(purpose, StubResponses.status(401, PROVIDER_BODY));
         Ran r = runWith(sid, A);
         assertFailed(r, "CHATGPT_SESSION_EXPIRED", EXPIRED, purpose, 1);
+        assertThat(stub.grant("refresh_token")).as("no refresh after a 401").hasSize(refreshesBefore);
         String conn = mvc.perform(get("/api/auth/chatgpt/connection").cookie(new Cookie("ORACUL_SID", sid)))
             .andReturn().getResponse().getContentAsString();
         assertThat(json(conn).get("state")).isEqualTo("SESSION_EXPIRED");
     }
 
-    // 401 / 403 table row: one token refresh + one retry
-    @ParameterizedTest(name = "HTTP {0} once: token refreshed once, call retried")
-    @ValueSource(ints = {401, 403})
-    void aRejectedTokenIsRefreshedOnceAndTheCallRetried(int status) throws Exception {
-        for (String purpose : List.of(NORMALIZATION)) {
-            gdeltArticles(v4());
-            String sid = connectedSid();
-            int refreshesBefore = stub.grant("refresh_token").size();
-            scriptReplies(purpose, StubResponses.status(status, PROVIDER_BODY), StubResponses.completed(N_V4));
-            script(CLASSIFICATION, C_V4);
-            Ran r = runWith(sid, A);
-            assertCompletedAsV4(r);
-            assertThat(requests(purpose)).hasSize(2);
-            assertThat(stub.grant("refresh_token")).as("exactly one refresh").hasSize(refreshesBefore + 1);
-            assertThat(requests(purpose).get(1).headers().get("authorization"))
-                .isNotEqualTo(requests(purpose).get(0).headers().get("authorization"));
-        }
+    // FR-39 row 6: a 403 without a code is an unexpected error (http_403): no refresh, no retry, credentials kept
+    @ParameterizedTest(name = "403 without code on {0}: CHATGPT_UNEXPECTED_ERROR http_403")
+    @ValueSource(strings = {NORMALIZATION, CLASSIFICATION})
+    void a403WithoutACodeIsAnUnexpectedError(String purpose) throws Exception {
+        prepare(purpose);
+        String sid = connectedSid();
+        int refreshesBefore = stub.grant("refresh_token").size();
+        always(purpose, StubResponses.status(403, PROVIDER_BODY));
+        Ran r = runWith(sid, A);
+        assertFailed(r, "CHATGPT_UNEXPECTED_ERROR", "ChatGPT returned an unexpected error (http_403) — please try again",
+            "http_403", purpose, 1);
+        assertThat(stub.grant("refresh_token")).as("no refresh after a 403").hasSize(refreshesBefore);
+        String conn = mvc.perform(get("/api/auth/chatgpt/connection").cookie(new Cookie("ORACUL_SID", sid)))
+            .andReturn().getResponse().getContentAsString();
+        assertThat(json(conn).get("state")).isEqualTo("CONNECTED");
     }
 
-    // 200 with status != completed is a content problem, not a transport failure
+    // FR-38 / FR-39 row 7: a 200 answer with status incomplete fails the run after one request (no content retry)
     @Test
-    void anIncompleteClassificationResponseIsAContentFailureNotATransportFailure() throws Exception {
+    void anIncompleteClassificationResponseFailsTheRunWithChatGptIncomplete() throws Exception {
         gdeltArticles(v4());
         script(NORMALIZATION, N_V4);
         StubResponses.Reply incomplete = new StubResponses.Reply(200, "{\"id\":\"resp_1\",\"status\":\"incomplete\",\"output\":[]}", 0);
         always(CLASSIFICATION, incomplete);
         Ran r = run(A);
-        assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
-        assertThat(requests(CLASSIFICATION)).hasSize(2);
-        List<Map<String, Object>> events = events(r);
-        assertThat(events).hasSize(2).allSatisfy(e -> {
-            assertThat(e.get("excludedReason")).isEqualTo("CLASSIFICATION_FAILED");
-            assertThat(omitted(e, "classification")).isTrue();
-        });
-        assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(2);
+        assertFailed(r, "CHATGPT_INCOMPLETE", INCOMPLETE, CLASSIFICATION, 1);
     }
 
     // #35: a transport failure of one parallel batch stops the stage: batches that have not started never start

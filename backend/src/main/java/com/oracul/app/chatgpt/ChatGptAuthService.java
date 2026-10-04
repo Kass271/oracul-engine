@@ -272,6 +272,9 @@ public class ChatGptAuthService {
             if (flag == Flag.SESSION_EXPIRED) {
                 throw expired();
             }
+            if (flag == Flag.REGISTRATION_INVALID) {
+                throw registrationInvalid();
+            }
             SessionCredentials creds = store.credentials(sessionId);
             if (creds == null) {
                 throw new ApiException(HttpStatus.UNAUTHORIZED, "CHATGPT_NOT_CONNECTED",
@@ -285,37 +288,70 @@ public class ChatGptAuthService {
         }
     }
 
-    /** Forced refresh after the API rejected the access token (401/403); expired session when it fails. */
-    public SessionCredentials refreshAfterRejection(UUID sessionId) {
-        synchronized (lockFor(sessionId)) {
-            SessionCredentials creds = store.credentials(sessionId);
-            if (creds == null) {
-                throw expired();
-            }
-            return refresh(creds);
-        }
-    }
+    /** The token answer codes that end the session (FR-40). */
+    private static final Set<String> SESSION_CODES = Set.of("invalid_grant", "invalid_refresh_token", "token_expired",
+        "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused");
 
+    /** Refreshes the token set; FR-40 decides from the answer what happens to the session. */
     private SessionCredentials refresh(SessionCredentials creds) {
-        ChatGptTokenClient.TokenResponse token = null;
-        if (creds.refreshToken() != null) {
-            Map<String, String> form = new LinkedHashMap<>();
-            form.put("grant_type", "refresh_token");
-            form.put("refresh_token", creds.refreshToken().value());
-            form.put("client_id", creds.clientId());
-            token = tokens.post(form);
+        if (creds.refreshToken() == null) {
+            return endSession(creds, Flag.SESSION_EXPIRED, expired());
         }
+        Map<String, String> form = new LinkedHashMap<>();
+        form.put("grant_type", "refresh_token");
+        form.put("refresh_token", creds.refreshToken().value());
+        form.put("client_id", creds.clientId());
+        form.put("resource", props.resource());
+        ChatGptTokenClient.Result result = tokens.exchange(form);
+        ChatGptTokenClient.TokenResponse token = result.token();
         if (token == null) {
-            store.dropCredentials(creds.sessionId());
-            store.setFlag(creds.sessionId(), Flag.SESSION_EXPIRED);
-            throw expired();
+            if (result.transientFailure()) {
+                throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "CHATGPT_UNAVAILABLE", UNAVAILABLE_MESSAGE);
+            }
+            if ("invalid_client".equals(result.error())) {
+                return endSession(creds, Flag.REGISTRATION_INVALID, registrationInvalid());
+            }
+            return endSession(creds, Flag.SESSION_EXPIRED, expired());
         }
         SessionCredentials renewed = new SessionCredentials(creds.sessionId(), creds.clientId(),
             new Secret(token.accessToken()),
             token.refreshToken() != null ? new Secret(token.refreshToken()) : creds.refreshToken(),
-            creds.idToken(), clock.instant().plusSeconds(token.expiresInSeconds()), creds.grantedScopes());
+            token.idToken() != null ? new Secret(token.idToken()) : creds.idToken(),
+            clock.instant().plusSeconds(token.expiresInSeconds()),
+            token.scope() == null ? creds.grantedScopes() : scopes(token.scope()));
         store.putCredentials(renewed);
         return renewed;
+    }
+
+    private SessionCredentials endSession(SessionCredentials creds, Flag flag, ApiException failure) {
+        store.dropCredentials(creds.sessionId());
+        store.setFlag(creds.sessionId(), flag);
+        throw failure;
+    }
+
+    private static Set<String> scopes(String scope) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String s : scope.trim().split("\\s+")) {
+            if (!s.isEmpty()) {
+                out.add(s);
+            }
+        }
+        return out;
+    }
+
+    /** Drops the session's credentials and flags it expired (a 401 or an auth code of a Responses call). */
+    public void sessionRejected(UUID sessionId) {
+        synchronized (lockFor(sessionId)) {
+            store.dropCredentials(sessionId);
+            store.setFlag(sessionId, Flag.SESSION_EXPIRED);
+        }
+    }
+
+    private static final String UNAVAILABLE_MESSAGE = "ChatGPT is temporarily unavailable — try again in a few minutes";
+
+    private static ApiException registrationInvalid() {
+        return new ApiException(HttpStatus.UNAUTHORIZED, "CHATGPT_REGISTRATION_INVALID",
+            "ChatGPT registration is no longer valid — use Reset ChatGPT connection, then reconnect");
     }
 
     private static ApiException expired() {

@@ -140,14 +140,14 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(purposes.filter((p) => p === 'SCENARIO_CRITIC')).toHaveLength(0);
   });
 
-  test('FR-14 a rate-limited normalisation fails the run with the plan-limit message and writes no events', async ({ page }) => {
+  test('FR-14 a rate-limited normalisation fails the run with the usage-limit message and writes no events', async ({ page }) => {
     test.setTimeout(90_000);
     const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'rate-limited' } });
     expect(mode.status()).toBe(204);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'FAILED', 40_000);
     expect(run.failure.code).toBe('CHATGPT_RATE_LIMITED');
-    expect(run.failure.message).toBe('ChatGPT plan limit reached — try again later');
+    expect(run.failure.message).toBe('ChatGPT usage limit reached — try again later');
     expect(run.stageIndex).toBe(5);
     expect(run.counts.uniqueEvents).toBe(0);
     const res = await page.request.get(`/api/runs/${id}/events`);

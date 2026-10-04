@@ -41,7 +41,8 @@ public class ScenarioCritic {
 
     public CriticReport critique(UUID runId, UUID sessionId, EvidencePack pack, int attempt,
                                  ScenarioAttemptReason reason, StructuredScenario cleaned) {
-        Map<String, Object> body = ScenarioCriticPrompt.body(responses.model(), pack, cleaned, attempt, reason);
+        Map<String, Object> body = responses.prepare(sessionId,
+            ScenarioCriticPrompt.body(responses.model(), pack, cleaned, attempt, reason));
         for (int i = 0; i < 2; i++) {
             CriticParser.ParseResult parsed = CriticParser.parse(send(runId, sessionId, attempt, body));
             if (parsed.critique().isPresent()) {

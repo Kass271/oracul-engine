@@ -18,7 +18,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.TestPropertySource;
 
 /** Rows 1-6 of research-pipeline.md "Slice 05_search-sources" integration tests (search plan, query expansion). */
-// @trace FR-12
+// @trace FR-12, FR-38, FR-39, FR-44
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=6",
@@ -112,7 +112,10 @@ class ResearchPlanIT extends AbstractRunIT {
         assertThat(req.headers().get("authorization")).startsWith("Bearer at-STUBSECRET-");
         assertThat(req.headers().get("content-type")).startsWith("application/json");
         Map<String, Object> body = json(req.body());
-        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store");
+        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store", "stream");
+        // @trace FR-38
+        assertThat(body.get("stream")).isEqualTo(true);
+        assertThat(req.headers().get("accept")).isEqualTo("text/event-stream");
         assertThat(body.get("model")).isEqualTo("stub-model");
         assertThat(body.get("store")).isEqualTo(false);
         assertThat(req.body()).doesNotContain("\"tools\"").doesNotContain("tool_choice").doesNotContain("web_search");
@@ -215,7 +218,8 @@ class ResearchPlanIT extends AbstractRunIT {
             assertThat(queries.get(i).get("intentId")).isEqualTo(t.getIntentId());
             assertThat(queries.get(i).get("text")).as("query " + t.getId()).isEqualTo(t.getText());
         }
-        assertThat(gdelt.requests).as("GDELT still queried for every template query").hasSize(20);
+        assertThat(gdelt.requests).as("GDELT still queried for every template query (4 OR groups of 5)").hasSize(4);
+        assertThat(gdelt.requests.stream().mapToInt(r -> r.elements().size()).sum()).isEqualTo(20);
         assertThat(responses.requests).as("no retry").hasSize(1);
     }
 
@@ -264,39 +268,46 @@ class ResearchPlanIT extends AbstractRunIT {
         assertThat(queryTexts(plan, "I03")).containsExactly("I03 surplus 1", "I03 surplus 2", "I03 surplus 3");
     }
 
-    // #5
-    @ParameterizedTest(name = "HTTP {0} once, then success")
-    @ValueSource(ints = {401, 403})
-    void rejectedTokenIsRefreshedOnceAndTheCallRetried(int status) throws Exception {
-        responses.responder = new Function<>() {
-            int calls;
-
-            @Override
-            public synchronized StubResponses.Reply apply(StubResponses.Request req) {
-                if (calls++ == 0) return StubResponses.status(status, "{\"error\":\"expired\"}");
-                return responses.defaultResponder().apply(req);
-            }
-        };
+    // #5 (FR-39 row 1): 401 never refreshes and never retries; the run fails at RESEARCH_STRATEGY
+    @Test
+    void a401OnTheExpansionEndsTheSessionWithoutRefreshOrRetry() throws Exception {
+        responses.responder = req -> StubResponses.status(401, "{\"error\":\"expired\"}");
         String sid = connectedSid();
         int refreshesBefore = stub.grant("refresh_token").size();
         String id = (String) startOk(sid, A).get("id");
-        assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
-        assertThat(plan(researchBody(sid, id)).get("expansionMode")).isEqualTo("MODEL");
-        assertThat(responses.requests).hasSize(2);
-        assertThat(stub.grant("refresh_token")).as("exactly one refresh").hasSize(refreshesBefore + 1);
-        assertThat(responses.requests.get(1).headers().get("authorization"))
-            .as("retry uses the refreshed token").isNotEqualTo(responses.requests.get(0).headers().get("authorization"));
+        Map<String, Object> run = awaitDone(sid, id);
+        assertThat(run.get("status")).isEqualTo("FAILED");
+        assertThat(run.get("failure")).isEqualTo(json(
+            "{\"code\":\"CHATGPT_SESSION_EXPIRED\",\"message\":\"ChatGPT session expired — please reconnect\"}"));
+        assertThat(run.get("stage")).isEqualTo("RESEARCH_STRATEGY");
+        assertThat(responses.requests).as("no retry").hasSize(1);
+        assertThat(stub.grant("refresh_token")).as("no refresh").hasSize(refreshesBefore);
+        assertThat(gdelt.requests).isEmpty();
+    }
+
+    // #5 (FR-39 row 6): a 403 without a code is an unexpected error; query expansion falls back to the templates
+    @Test
+    void a403WithoutCodeFallsBackToTemplatesWithoutRefreshOrRetry() throws Exception {
+        responses.responder = req -> StubResponses.status(403, "{\"error\":\"expired\"}");
+        String sid = connectedSid();
+        int refreshesBefore = stub.grant("refresh_token").size();
+        String id = (String) startOk(sid, A).get("id");
+        Map<String, Object> run = awaitDone(sid, id);
+        assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
+        assertThat(plan(researchBody(sid, id)).get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
+        assertThat(responses.requests).as("one attempt, no retry").hasSize(1);
+        assertThat(stub.grant("refresh_token")).as("no refresh").hasSize(refreshesBefore);
+        assertThat(gdelt.requests).as("GDELT is still queried").hasSize(4);
     }
 
     // #6
-    @ParameterizedTest(name = "HTTP {0} always and refresh refused")
-    @ValueSource(ints = {401, 403})
-    void unrecoverableSessionFailsTheRunBeforeAnySearch(int status) throws Exception {
+    @Test
+    void unrecoverableSessionFailsTheRunBeforeAnySearch() throws Exception {
         String sid = connectedSid();
         stub.responder = req -> "refresh_token".equals(req.form().get("grant_type"))
             ? com.oracul.app.chatgpt.StubOpenAi.status(400, "{\"error\":\"invalid_grant\"}")
             : stub.ok(3600, com.oracul.app.chatgpt.StubOpenAi.ALL_SCOPES, true);
-        responses.responder = req -> StubResponses.status(status, "{\"error\":\"expired\"}");
+        responses.responder = req -> StubResponses.status(401, "{\"error\":\"expired\"}");
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("FAILED");
@@ -307,6 +318,7 @@ class ResearchPlanIT extends AbstractRunIT {
         assertThat(run.get("completedAt")).isNotNull();
         assertThat(absent(researchBody(sid, id), "searchPlan")).as("search_plan stays null").isTrue();
         assertThat(gdelt.requests).as("no GDELT request").isEmpty();
+        assertThat(stub.grant("refresh_token")).as("no refresh after a 401").isEmpty();
         var conn = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/auth/chatgpt/connection")
             .cookie(new jakarta.servlet.http.Cookie("ORACUL_SID", sid))).andReturn().getResponse().getContentAsString();
         assertThat(json(conn).get("state")).isEqualTo("SESSION_EXPIRED");

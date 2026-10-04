@@ -33,3 +33,9 @@ errors-and-recovery, models-and-inference, token-reference, preview-limitations.
 |---|---|---|
 | 1 | Approve the phase-02 scope (FR-35..FR-43, NFR-8, NFR-9), or tell me what to change? | Approve scope |
 | 2 | Pre-approve the plan if it follows the required order (sign-in slice first → real check by the user → remaining slices, about 2–3 slices)? | Pre-approve (Recommended) |
+
+## Round 3 — 2026-10-04 (after real check 1)
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Real check 1 showed real GDELT answering 429 "Please limit requests to one every 5 seconds" (and an 18 s answer), so every real run fails with NEWS_UNAVAILABLE. Add FR-44 "Real news search within GDELT's limits" (≤4 merged OR-group requests, one at a time ≥5 s apart, 30 s timeout, one retry after 429, partial results kept, inside the run budget), built in slice 02? | Add FR-44 to slice 02 (Rec.) |

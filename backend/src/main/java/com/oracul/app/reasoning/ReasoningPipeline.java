@@ -97,7 +97,7 @@ public class ReasoningPipeline {
         try {
             return execute(runId, sessionId);
         } catch (ChatGptCallException e) {
-            runs.markFailed(runId, e.code(), e.getMessage(), now());
+            runs.markFailed(runId, e.code(), e.getMessage(), e.providerCode(), now());
             return Result.STOPPED;
         } catch (CallAbandonedException | Stop e) {
             runs.failTimedOut(runId, now());
@@ -278,7 +278,7 @@ public class ReasoningPipeline {
 
     private Called call(UUID runId, UUID sessionId, EvidencePack pack, GenerationRequest req,
                         ScenarioGenerationPrompt.Alternative alt) {
-        var body = ScenarioGenerationPrompt.body(responses.model(), pack, req, alt);
+        var body = responses.prepare(sessionId, ScenarioGenerationPrompt.body(responses.model(), pack, req, alt));
         Long[] callId = new Long[1];
         Runnable beforeSend = () -> {
             if (!guard.check(runId)) {

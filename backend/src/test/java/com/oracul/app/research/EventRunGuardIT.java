@@ -15,7 +15,7 @@ import org.springframework.test.context.TestPropertySource;
  * Rows 31-34 of research-pipeline.md "Slice 06_events" (NFR-2, FR-32): the run guard stops stage 5 when the run is no
  * longer RUNNING or past its deadline. One batch per source and concurrency 1 make "no further request" observable.
  */
-// @trace FR-14, FR-15
+// @trace FR-14, FR-15, FR-39
 @TestPropertySource(properties = {
     "oracul.events.normalization-batch-size=1",
     "oracul.events.normalization-concurrency=1",
@@ -132,7 +132,7 @@ class EventRunGuardIT extends AbstractEventIT {
         assertThat(requests(NORMALIZATION)).as("the retry after the 5 s retry delay is not sent past the 4 s deadline").hasSize(1);
         assertTimeoutFailure(r.run());
         assertThat(r.run().get("failure")).isNotEqualTo(json(
-            "{\"code\":\"CHATGPT_UNAVAILABLE\",\"message\":\"ChatGPT is unavailable right now — try again later\"}"));
+            "{\"code\":\"CHATGPT_UNAVAILABLE\",\"message\":\"ChatGPT is temporarily unavailable — try again in a few minutes\"}"));
         assertThat(eventRows(r.id())).isEqualTo(0);
         assertNothingWritten(r.sid(), r.id());
     }

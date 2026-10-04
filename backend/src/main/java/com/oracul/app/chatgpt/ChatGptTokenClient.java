@@ -41,7 +41,10 @@ class ChatGptTokenClient {
     }
 
     /** Outcome of a token request: a response, or a failure that may be an invalid_grant. */
-    record Result(TokenResponse token, boolean invalidGrant) {
+    record Result(TokenResponse token, boolean invalidGrant, String error, boolean transientFailure) {
+        Result(TokenResponse token, boolean invalidGrant) {
+            this(token, invalidGrant, null, false);
+        }
     }
 
     /** Returns the parsed token response, or null on any failure (already logged without secrets). */
@@ -80,7 +83,7 @@ class ChatGptTokenClient {
     }
 
     Result exchange(Map<String, String> form) {
-        Result failed = new Result(null, false);
+        Result failed = new Result(null, false, null, true);
         try {
             String body = encodeForm(form);
             HttpRequest request = HttpRequest.newBuilder(URI.create(props.tokenUrl()))
@@ -93,7 +96,9 @@ class ChatGptTokenClient {
             if (response.statusCode() / 100 != 2) {
                 log.warn("chatgpt token request failed: status={}", response.statusCode());
                 int status = response.statusCode();
-                return new Result(null, status >= 400 && status < 500 && isInvalidGrant(response.body()));
+                boolean client = status >= 400 && status < 500;
+                return new Result(null, client && isInvalidGrant(response.body()),
+                    client ? errorCode(response.body()) : null, !client);
             }
             TokenResponse parsed = parse(response.body());
             if (parsed == null) {
@@ -108,6 +113,22 @@ class ChatGptTokenClient {
             log.warn("chatgpt token request failed: {}", e.getClass().getSimpleName());
             return failed;
         }
+    }
+
+    /** The {@code error} string, or {@code error.code}, of a JSON error body; null when there is none. */
+    private String errorCode(String body) {
+        try {
+            if (json.readValue(body, Object.class) instanceof Map<?, ?> m) {
+                Object err = m.get("error");
+                if (err instanceof Map<?, ?> em) {
+                    err = em.get("code");
+                }
+                return err instanceof String s ? s : null;
+            }
+        } catch (Exception e) {
+            // not JSON: no code
+        }
+        return null;
     }
 
     private boolean isInvalidGrant(String body) {

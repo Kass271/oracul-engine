@@ -73,7 +73,7 @@ public class StoryWriter {
         try {
             execute(runId, sessionId);
         } catch (ChatGptCallException e) {
-            runs.markFailed(runId, e.code(), e.getMessage(), now());
+            runs.markFailed(runId, e.code(), e.getMessage(), e.providerCode(), now());
         } catch (CallAbandonedException | Stop e) {
             runs.failTimedOut(runId, now());
         }
@@ -122,7 +122,7 @@ public class StoryWriter {
 
     private Called call(UUID runId, UUID sessionId, EvidencePack pack, StructuredScenario scenario,
                         ScenarioWindow window, StoryRequest req) {
-        var body = StoryWritingPrompt.body(responses.model(), pack, scenario, req);
+        var body = responses.prepare(sessionId, StoryWritingPrompt.body(responses.model(), pack, scenario, req));
         Long[] callId = new Long[1];
         Runnable beforeSend = () -> {
             if (!guard.check(runId)) {

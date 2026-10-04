@@ -153,22 +153,26 @@ public abstract class AbstractEventIT extends AbstractRunIT {
      * deliberately old ones of the slice-05 fixture.
      */
     protected String f240(StubGdelt.Request req) {
-        int r = req.number();
-        int n = r <= 6 ? 14 : 13;
+        // news-search.md: per OR element the block that the old request r (= global element index) produced
         String base = gdelt.baseUrl() + "/articles/";
         Instant day = testNow.minus(1, ChronoUnit.DAYS);
         List<String> out = new ArrayList<>();
-        for (int a = 1; a <= n; a++) {
-            String url = base + "r" + r + "-a" + a;
-            String title = "Article r" + r + "-a" + a;
-            String language = "English";
-            Instant seen = day;
-            if (a == 1) url = base + "shared?utm_source=q" + r + "#top";
-            if (a == 2 && r <= 5) title = "  ";
-            if (a == 2 && r >= 6 && r <= 10) language = "French";
-            if (a == 2 && r >= 11 && r <= 15) seen = testNow.minus(200, ChronoUnit.DAYS);
-            if (a == 2 && r >= 16) url = base + "r" + r + "-a3#dup";
-            out.add(StubGdelt.article(url, title, "reuters.com", language, StubGdelt.seendate(seen)));
+        for (int e = 0; e < req.elements().size(); e++) {
+            int r = req.firstElement() + e;
+            String element = req.elements().get(e);
+            int n = r <= 6 ? 14 : 13;
+            for (int a = 1; a <= n; a++) {
+                String url = base + "r" + r + "-a" + a;
+                String title = element + " Article r" + r + "-a" + a;
+                String language = "English";
+                Instant seen = day;
+                if (a == 1) url = base + "shared?utm_source=q" + r + "#top";
+                if (a == 2 && r <= 5) title = "  ";
+                if (a == 2 && r >= 6 && r <= 10) language = "French";
+                if (a == 2 && r >= 11 && r <= 15) seen = testNow.minus(200, ChronoUnit.DAYS);
+                if (a == 2 && r >= 16) url = base + "r" + r + "-a3#dup";
+                out.add(StubGdelt.article(url, title, "reuters.com", language, StubGdelt.seendate(seen)));
+            }
         }
         return StubGdelt.articles(out);
     }

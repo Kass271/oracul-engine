@@ -11,12 +11,24 @@ public interface NewsProvider {
     record Article(String url, String title, String domain, String language, String seendate) {
     }
 
-    record Result(SearchQueryStatus status, List<Article> articles) {
+    /** {@code rateLimited}: the provider answered 429 (the one case that is retried). */
+    record Result(SearchQueryStatus status, List<Article> articles, boolean rateLimited) {
+        public Result(SearchQueryStatus status, List<Article> articles) {
+            this(status, articles, false);
+        }
+
         public static Result failed() {
             return new Result(SearchQueryStatus.FAILED, List.of());
         }
+
+        public static Result limited() {
+            return new Result(SearchQueryStatus.FAILED, List.of(), true);
+        }
     }
 
-    /** Never throws for provider problems: they are reported as FAILED. */
-    Result search(String queryText, HorizonCode horizon);
+    /**
+     * One request: {@code query} is the complete GDELT query string (language filter included). The whole answer must
+     * arrive within {@code timeout}. Never throws for provider problems: they are reported as FAILED.
+     */
+    Result search(String query, int maxRecords, HorizonCode horizon, java.time.Duration timeout);
 }

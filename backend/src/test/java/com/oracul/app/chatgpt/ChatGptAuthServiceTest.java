@@ -15,7 +15,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-// @trace FR-35, FR-36, FR-37
+// @trace FR-35, FR-36, FR-37, FR-40
 class ChatGptAuthServiceTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
@@ -96,15 +96,6 @@ class ChatGptAuthServiceTest {
     }
 
     @Test
-    void refreshAfterRejectionWithoutCredentialsIsSessionExpired() {
-        assertThatThrownBy(() -> service(store, "http://f").refreshAfterRejection(UUID.randomUUID()))
-            .isInstanceOfSatisfying(ApiException.class, e -> {
-                assertThat(e.code()).isEqualTo("CHATGPT_SESSION_EXPIRED");
-                assertThat(e.status().value()).isEqualTo(401);
-            });
-    }
-
-    @Test
     void requireUsableCredentialsPerFlagAndWhenNotConnected() {
         ChatGptAuthService svc = service(store, "http://f");
         UUID sid = UUID.randomUUID();
@@ -116,5 +107,14 @@ class ChatGptAuthServiceTest {
         store.setFlag(sid, Flag.SESSION_EXPIRED);
         assertThatThrownBy(() -> svc.requireUsableCredentials(sid))
             .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("CHATGPT_SESSION_EXPIRED"));
+        // FR-40: flag REGISTRATION_INVALID -> 401 CHATGPT_REGISTRATION_INVALID
+        store.setFlag(sid, Flag.REGISTRATION_INVALID);
+        assertThatThrownBy(() -> svc.requireUsableCredentials(sid))
+            .isInstanceOfSatisfying(ApiException.class, e -> {
+                assertThat(e.code()).isEqualTo("CHATGPT_REGISTRATION_INVALID");
+                assertThat(e.status().value()).isEqualTo(401);
+                assertThat(e.getMessage()).isEqualTo(
+                    "ChatGPT registration is no longer valid — use Reset ChatGPT connection, then reconnect");
+            });
     }
 }

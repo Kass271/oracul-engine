@@ -11,9 +11,16 @@ public final class RunFailures {
     public static String message(RunFailureCode code) {
         return switch (code) {
             case NEWS_UNAVAILABLE -> "ORACUL could not reach its news sources — try again later";
-            case CHATGPT_RATE_LIMITED -> "ChatGPT plan limit reached — try again later";
-            case CHATGPT_UNAVAILABLE -> "ChatGPT is unavailable right now — try again later";
+            case CHATGPT_RATE_LIMITED -> "ChatGPT usage limit reached — try again later";
+            case CHATGPT_UNAVAILABLE -> "ChatGPT is temporarily unavailable — try again in a few minutes";
             case CHATGPT_SESSION_EXPIRED -> "ChatGPT session expired — please reconnect";
+            case CHATGPT_PLAN_NOT_ELIGIBLE ->
+                "Your ChatGPT plan is not eligible for ORACUL — a personal Plus or Pro plan is needed";
+            case CHATGPT_REGISTRATION_INVALID ->
+                "ChatGPT registration is no longer valid — use Reset ChatGPT connection, then reconnect";
+            case CHATGPT_INCOMPLETE -> "ChatGPT did not finish the answer — please try again";
+            case CHATGPT_REQUEST_REJECTED -> "ChatGPT rejected ORACUL's request — please report this";
+            case CHATGPT_NO_MODEL -> "ChatGPT offers no model for this account — check your plan, then try again";
             case RUN_TIMEOUT -> "Generation took too long — try again";
             case INVALID_SCENARIO -> "ORACUL could not construct a valid scenario";
             case SCENARIO_REJECTED -> "ORACUL could not construct a scenario supported by current evidence";
@@ -24,6 +31,10 @@ public final class RunFailures {
                 throw new IllegalArgumentException("INSUFFICIENT_EVIDENCE message depends on the realism");
             default -> "Something went wrong — try again";
         };
+    }
+
+    public static String unexpected(String providerCode) {
+        return "ChatGPT returned an unexpected error (" + providerCode + ") — please try again";
     }
 
     public static String insufficientEvidence(int realism) {

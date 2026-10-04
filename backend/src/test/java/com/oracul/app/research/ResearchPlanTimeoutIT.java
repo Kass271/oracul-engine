@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** Row 3 of the FR-12 integration table, timeout variant: the call outlives oracul.openai.timeout. */
-// @trace FR-12
+// @trace FR-12, FR-44
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=7",
@@ -28,7 +28,7 @@ class ResearchPlanTimeoutIT extends AbstractRunIT {
         Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
         assertThat(plan.get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
         assertThat((java.util.List<?>) plan.get("queries")).hasSize(20);
-        assertThat(gdelt.requests).hasSize(20);
+        assertThat(gdelt.requests).as("20 template queries as 4 OR groups").hasSize(4);
         assertThat(responses.requests).as("no retry").hasSize(1);
     }
 }

@@ -910,7 +910,7 @@ components:
           type: integer
           format: int32
           minimum: 0
-          description: Search queries executed against the news provider
+          description: Planned search queries covered by the news search (OK + EMPTY + FAILED); since phase 02 they are sent in at most 4 grouped GDELT requests
         articlesRetrieved:
           type: integer
           format: int32
@@ -1135,6 +1135,11 @@ components:
 
     SearchQueryStatus:
       type: string
+      description: |
+        Per planned query (phase-02 news-search.md FR-44): queries are sent to GDELT in at most 4 OR-group requests.
+        FAILED = its group request failed (also after the one 429 retry) or was not sent within the search budget;
+        OK = at least one article of the group answer was attributed to this query; EMPTY = the group answered but
+        no article was attributed to it (or the query text was empty after cleaning). PENDING until SEARCHING ends.
       enum: [PENDING, OK, EMPTY, FAILED]
 
     SearchQuery:

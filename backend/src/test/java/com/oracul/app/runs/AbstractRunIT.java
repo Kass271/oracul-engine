@@ -79,7 +79,11 @@ public abstract class AbstractRunIT {
     /** Isolation: no in-flight run of this test may reach the shared stub after the next test resets it. */
     @org.junit.jupiter.api.AfterEach
     void awaitNoActiveRuns() throws Exception {
-        if (!awaitRunsAfterEach()) return;
+        if (!awaitRunsAfterEach()) {
+            // a deliberately pinned run must not outlive its test: terminal state makes the run guard stop its work
+            jdbc.update("update generation_run set status = 'FAILED' where status in ('QUEUED','RUNNING')");
+            return;
+        }
         long end = System.currentTimeMillis() + 5_000;
         while (true) {
             java.util.List<String> active = jdbc.queryForList(

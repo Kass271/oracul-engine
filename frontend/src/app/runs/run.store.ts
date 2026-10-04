@@ -14,7 +14,8 @@ export const POLL_INTERVAL_MS = 1000;
 export const MAX_POLL_FAILURES = 10;
 
 const GENERIC_ERROR = 'Something went wrong — try again';
-const CONNECTION_CODES = ['CHATGPT_NOT_CONNECTED', 'CHATGPT_SESSION_EXPIRED', 'CHATGPT_PLAN_NOT_ELIGIBLE'];
+const CONNECTION_CODES = ['CHATGPT_NOT_CONNECTED', 'CHATGPT_SESSION_EXPIRED', 'CHATGPT_PLAN_NOT_ELIGIBLE', 'CHATGPT_REGISTRATION_INVALID'];
+const FAILED_RELOAD_CODES = ['CHATGPT_SESSION_EXPIRED', 'CHATGPT_REGISTRATION_INVALID'];
 
 @Injectable({ providedIn: 'root' })
 export class RunStore {
@@ -150,7 +151,7 @@ export class RunStore {
         }
         if (
           run.status === 'FAILED' &&
-          run.failure?.code === 'CHATGPT_SESSION_EXPIRED' &&
+          FAILED_RELOAD_CODES.includes(run.failure?.code ?? '') &&
           this.expiredLoadedFor !== run.id
         ) {
           this.expiredLoadedFor = run.id;

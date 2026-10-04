@@ -103,9 +103,9 @@ test.describe('FR-12 Search plan and query generation', () => {
   });
 });
 
-// @trace FR-13
+// @trace FR-13, FR-44
 test.describe('FR-13 Current-news search and source retrieval', () => {
-  test('the acceptance run searches 20 queries and keeps 81 sources', async ({ page }) => {
+  test('the acceptance run searches 20 queries as 4 OR-group requests and keeps 81 sources', async ({ page }) => {
     test.setTimeout(90_000);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
@@ -125,7 +125,8 @@ test.describe('FR-13 Current-news search and source retrieval', () => {
       expect(s.retrievedAt).toBeTruthy();
     }
     expect(new Set(items.map((s: any) => s.url)).size).toBe(81);
-    expect(await recorded(page, 'gdelt')).toHaveLength(20);
+    // @trace FR-44  20 planned queries go out as 4 OR-group requests
+    expect(await recorded(page, 'gdelt')).toHaveLength(4);
   });
 
   test('news provider down: the run fails with NEWS_UNAVAILABLE and no later ChatGPT call', async ({ page }) => {
@@ -149,5 +150,73 @@ test.describe('FR-13 Current-news search and source retrieval', () => {
     const res = await page.request.get('/api/runs/00000000-0000-0000-0000-000000000000/sources');
     expect(res.status()).toBe(404);
     expect(await res.json()).toEqual({ code: 'RUN_NOT_FOUND', message: 'Future not found' });
+  });
+});
+
+// @trace FR-44
+test.describe('FR-44 Real news search within GDELT limits', () => {
+  async function newsMode(page: Page, mode: string): Promise<void> {
+    const r = await page.request.post(`${STUB}/__control/news`, { data: { mode } });
+    expect(r.ok(), `news mode ${mode}`).toBeTruthy();
+  }
+
+  test('FR-44 the acceptance run sends 4 spaced OR-group requests and keeps the counts 20 / 100 / 81', async ({ page }) => {
+    test.setTimeout(90_000);
+    const id = await startAcceptanceRun(page);
+    const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
+    expect(run.counts.searches).toBe(20);
+    expect(run.counts.articlesRetrieved).toBe(100);
+    expect(run.counts.articlesConsidered).toBe(81);
+
+    const requests = await recorded(page, 'gdelt');
+    expect(requests).toHaveLength(4);
+    for (const r of requests) {
+      expect(r.query).toMatch(/^\(.+( OR .+)+\) sourcelang:english$/);
+      expect(r.params.maxrecords).toBe('125');
+      expect(r.params.mode).toBe('ArtList');
+      expect(r.params.format).toBe('json');
+      expect(r.params.sort).toBe('HybridRel');
+    }
+    // the E2E stack spaces request starts by 0.5 s (a little slack for clock jitter between the two ends)
+    for (let k = 1; k < requests.length; k++) {
+      expect(requests[k].at - requests[k - 1].at).toBeGreaterThanOrEqual(450);
+    }
+    const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
+    expect(plan.queries).toHaveLength(20);
+    for (const q of plan.queries) expect(q.status).toBe('OK');
+  });
+
+  test('FR-44 a 429 is retried once after the rate-limit wait and the run completes', async ({ page }) => {
+    test.setTimeout(90_000);
+    await newsMode(page, 'rate-limited-once');
+    const id = await startAcceptanceRun(page);
+    await awaitStatus(page, id, 'COMPLETED', 60_000);
+    const requests = await recorded(page, 'gdelt');
+    expect(requests).toHaveLength(5);
+    expect(requests[1].query).toBe(requests[0].query);
+    expect(requests[1].at - requests[0].at).toBeGreaterThanOrEqual(450);
+  });
+
+  test('FR-44 groups that fail do not stop the run: the queries of groups 1-2 are FAILED, the others OK', async ({ page }) => {
+    test.setTimeout(90_000);
+    await newsMode(page, 'partial');
+    const id = await startAcceptanceRun(page);
+    const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
+    expect(run.counts.searches).toBe(20);
+    const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
+    plan.queries.forEach((q: any, i: number) => expect(q.status, q.id).toBe(i < 10 ? 'FAILED' : 'OK'));
+    expect(await recorded(page, 'gdelt')).toHaveLength(4);
+  });
+
+  test('FR-44 every group rate-limited twice ends the run with NEWS_UNAVAILABLE after 8 requests', async ({ page }) => {
+    test.setTimeout(90_000);
+    await newsMode(page, 'rate-limited');
+    const id = await startAcceptanceRun(page);
+    const run = await awaitStatus(page, id, 'FAILED', 60_000);
+    expect(run.failure.code).toBe('NEWS_UNAVAILABLE');
+    expect(run.failure.message).toBe('ORACUL could not reach its news sources — try again later');
+    expect(run.stageIndex).toBe(3);
+    expect(await recorded(page, 'gdelt')).toHaveLength(8);
+    await expect(page.getByTestId('failure-message')).toHaveText('ORACUL could not reach its news sources — try again later');
   });
 });

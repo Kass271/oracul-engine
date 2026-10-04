@@ -23,8 +23,14 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 /** In-process stand-in for GDELT DOC 2.0 plus the article pages it points to (NFR-7). One instance per JVM. */
 public final class StubGdelt {
 
-    /** A GDELT request: arrival number (1-based), raw query string, decoded parameters. */
-    public record Request(int number, String rawQuery, Map<String, String> params) {}
+    /**
+     * A GDELT request: arrival number (1-based), raw query string, decoded parameters, the OR elements of the decoded
+     * {@code query} (unquoted, in order; the " sourcelang:english" suffix and the outer parentheses removed),
+     * the 1-based global index of its first element (= number of elements of all earlier requests + 1) and the
+     * arrival time (System.nanoTime).
+     */
+    public record Request(int number, String rawQuery, Map<String, String> params, List<String> elements, int firstElement,
+                          long arrivedNanos) {}
 
     /** status 0 = drop the connection without answering. */
     public record Reply(int status, String contentType, String body, long delayMs) {}
@@ -37,6 +43,7 @@ public final class StubGdelt {
 
     private final HttpServer server;
     private final AtomicInteger counter = new AtomicInteger();
+    private final AtomicInteger elementCounter = new AtomicInteger();
     public final List<Request> requests = new CopyOnWriteArrayList<>();
     public final Map<String, Page> pages = new ConcurrentHashMap<>();
     public final Map<String, String> sites = new ConcurrentHashMap<>();
@@ -65,6 +72,9 @@ public final class StubGdelt {
 
     public static void registerAll(DynamicPropertyRegistry r) {
         r.add("oracul.news.gdelt.base-url", INSTANCE::baseUrl);
+        // spec news-search.md: no 5 s waits in ITs
+        r.add("oracul.news.request-spacing", () -> "PT0S");
+        r.add("oracul.news.rate-limit-wait", () -> "PT0S");
     }
 
     public void reset() {
@@ -72,6 +82,7 @@ public final class StubGdelt {
         pages.clear();
         sites.clear();
         counter.set(0);
+        elementCounter.set(0);
         responder = defaultResponder();
     }
 
@@ -136,7 +147,9 @@ public final class StubGdelt {
             params.put(URLDecoder.decode(i < 0 ? pair : pair.substring(0, i), StandardCharsets.UTF_8),
                 i < 0 ? "" : URLDecoder.decode(pair.substring(i + 1), StandardCharsets.UTF_8));
         }
-        Request req = new Request(counter.incrementAndGet(), raw, params);
+        List<String> elements = elementsOf(params.get("query"));
+        int first = elementCounter.getAndAdd(elements.size()) + 1;
+        Request req = new Request(counter.incrementAndGet(), raw, params, elements, first, System.nanoTime());
         requests.add(req);
         Reply reply;
         try {
@@ -154,6 +167,21 @@ public final class StubGdelt {
             return;
         }
         send(ex, reply.status(), reply.contentType(), reply.body().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** OR elements of a decoded query "(<e1> OR <e2>) sourcelang:english" / "<e1> sourcelang:english", unquoted. */
+    static List<String> elementsOf(String query) {
+        if (query == null) return List.of();
+        String q = query.trim();
+        if (q.endsWith(" sourcelang:english")) q = q.substring(0, q.length() - " sourcelang:english".length()).trim();
+        if (q.startsWith("(") && q.endsWith(")")) q = q.substring(1, q.length() - 1);
+        List<String> out = new java.util.ArrayList<>();
+        for (String part : q.split(" OR ")) {
+            String p = part.trim();
+            if (p.length() >= 2 && p.startsWith("\"") && p.endsWith("\"")) p = p.substring(1, p.length() - 1);
+            if (!p.isEmpty()) out.add(p);
+        }
+        return out;
     }
 
     private void handleArticle(HttpExchange ex) throws IOException {

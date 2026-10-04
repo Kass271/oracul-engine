@@ -4,10 +4,14 @@ import { createServer } from 'node:http';
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 4010);
-const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error'];
+const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error', 'refresh_invalid_client', 'refresh_unavailable'];
+const REFRESH_FAILURE_MODES = ['refresh_error', 'refresh_invalid_client', 'refresh_unavailable'];
+const NEWS_MODES = ['ok', 'down', 'rate-limited-once', 'rate-limited', 'partial'];
+const MODELS_MODES = ['ok', 'no-preferred', 'empty', 'unauthorized', 'unavailable'];
+const RESPONSES_MODES = ['ok', 'incomplete', 'failed', 'no-completed', 'not-eligible', 'usage-limit', 'unavailable', 'unavailable-twice', 'route-not-supported', 'unsupported-capability', 'invalid-user', 'unknown-code'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', events: 'ok', scenario: 'ok', scenarioCalls: 0, alternativeCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [] } };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', newsCalls: 0, models: 'ok', responsesMode: 'ok', responsesModeCalls: 0, events: 'ok', scenario: 'ok', scenarioCalls: 0, alternativeCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, requests: { responses: [], gdelt: [], models: [] } };
 
 function reset() {
   state.mode = 'ok';
@@ -15,6 +19,10 @@ function reset() {
   state.codes.clear();
   state.issued.length = 0;
   state.news = 'ok';
+  state.newsCalls = 0;
+  state.models = 'ok';
+  state.responsesMode = 'ok';
+  state.responsesModeCalls = 0;
   state.events = 'ok';
   state.scenario = 'ok';
   state.scenarioCalls = 0;
@@ -25,6 +33,7 @@ function reset() {
   state.storyCalls = 0;
   state.requests.responses.length = 0;
   state.requests.gdelt.length = 0;
+  state.requests.models.length = 0;
 }
 
 const json = (res, status, body) => {
@@ -51,6 +60,30 @@ const dataBlock = (text, name) => {
   const end = text.indexOf('<<<END_ORACUL_UNTRUSTED_DATA>>>', start);
   return end < 0 ? '' : text.slice(start + open.length, end);
 };
+const openaiError = (res, status, code, param) =>
+  json(res, status, { error: { code, message: 'stub', ...(param ? { param } : {}) } });
+
+// Server-Sent Events answer of a Responses call (chatgpt-inference.md "SSE wire format").
+function sse(res, id, text, mode) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+  const event = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+  event('response.created', { response: { id, status: 'in_progress' } });
+  if (mode === 'failed') {
+    event('response.failed', { response: { id, status: 'failed', error: { message: 'stub' } } });
+    return res.end();
+  }
+  const third = Math.ceil(text.length / 3);
+  const parts = mode === 'incomplete' || mode === 'no-completed' ? [text.slice(0, 1)] : [text.slice(0, third), text.slice(third, 2 * third), text.slice(2 * third)];
+  for (const delta of parts) event('response.output_text.delta', { delta });
+  if (mode === 'incomplete') {
+    event('response.incomplete', { response: { id, status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } });
+  } else if (mode !== 'no-completed') {
+    event('response.completed', {
+      response: { id, status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] },
+    });
+  }
+  res.end();
+}
 const STORY_MODES = ['ok', 'bad-date-once', 'bad-date', 'invalid-once', 'invalid', 'rate-limited'];
 
 // ST-DEFAULT(d) (future-result.md): BODY(3) = 3 paragraphs of 60 words, dateline is a placeholder the backend replaces.
@@ -137,7 +170,7 @@ function idToken(aud, nonce) {
 }
 const s256 = (v) => createHash('sha256').update(v).digest('base64url');
 
-function tokens(aud, nonce) {
+function tokens(aud, nonce, signIn = false) {
   const n = ++state.counter;
   const scope = state.mode === 'not_eligible' ? SCOPES.replace('chatgpt.tokens.use.direct', '').replace(/\s+/g, ' ').trim() : SCOPES;
   const body = {
@@ -145,7 +178,7 @@ function tokens(aud, nonce) {
     refresh_token: `rt-STUBSECRET-${n}`,
     id_token: idToken(aud ?? 'oaiapp_stub_client', nonce),
     token_type: 'Bearer',
-    expires_in: 3600,
+    expires_in: signIn && REFRESH_FAILURE_MODES.includes(state.mode) ? 60 : 3600,
     scope,
   };
   state.issued.push(body.access_token, body.refresh_token, body.id_token);
@@ -178,8 +211,32 @@ export const routes = {
     } catch {
       return json(res, 400, { error: 'invalid_json' });
     }
-    if (!['ok', 'down'].includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    if (!NEWS_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
     state.news = mode;
+    state.newsCalls = 0;
+    empty(res, 204);
+  },
+  'POST /__control/models': async (req, res, url, body) => {
+    let mode;
+    try {
+      mode = JSON.parse(body || '{}').mode;
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!MODELS_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    state.models = mode;
+    empty(res, 204);
+  },
+  'POST /__control/responses': async (req, res, url, body) => {
+    let mode;
+    try {
+      mode = JSON.parse(body || '{}').mode;
+    } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!RESPONSES_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
+    state.responsesMode = mode;
+    state.responsesModeCalls = 0;
     empty(res, 204);
   },
   'POST /__control/events': async (req, res, url, body) => {
@@ -232,6 +289,19 @@ export const routes = {
     json(res, 200, { requests: [...state.requests[kind]] });
   },
 
+  // GET /v1/models: the account's model catalogue (FR-38).
+  'GET /v1/models': async (req, res) => {
+    const bearer = /^Bearer at-STUBSECRET-/.test(req.headers.authorization ?? '');
+    state.requests.models.push({ bearer });
+    if (state.models === 'unavailable') return openaiError(res, 503, 'subscription_sharing_usage_unavailable');
+    if (state.models === 'unauthorized' || !bearer) return openaiError(res, 401, 'invalid_token');
+    if (state.models === 'empty') return json(res, 200, { models: [] });
+    if (state.models === 'no-preferred') {
+      return json(res, 200, { models: [{ slug: 'stub-hidden', display_name: 'Stub hidden', visibility: 'hide' }, { slug: 'stub-listed', display_name: 'Stub listed', visibility: 'list' }] });
+    }
+    json(res, 200, { models: [{ slug: 'gpt-5', display_name: 'GPT-5', visibility: 'list' }, { slug: 'gpt-5-mini', display_name: 'GPT-5 mini', visibility: 'list' }] });
+  },
+
   // OpenAI Responses API stub: routed by the "ORACUL REQUEST <PURPOSE>" marker in the prompt.
   'POST /v1/responses': async (req, res, url, body) => {
     let parsed;
@@ -241,6 +311,19 @@ export const routes = {
       return json(res, 400, { error: 'invalid_json' });
     }
     state.requests.responses.push(parsed);
+    if (parsed.stream !== true || parsed.store !== false) {
+      return json(res, 400, { error: { code: 'invalid_request_error', message: 'stream must be true and store must be false' } });
+    }
+    const mode = state.responsesMode;
+    const call = ++state.responsesModeCalls;
+    const hasTextFormat = !!parsed.text?.format;
+    if (mode === 'not-eligible') return openaiError(res, 403, 'subscription_sharing_user_not_eligible');
+    if (mode === 'usage-limit') return openaiError(res, 429, 'subscription_sharing_usage_limit_exceeded');
+    if (mode === 'unavailable' || (mode === 'unavailable-twice' && call <= 2)) return openaiError(res, 503, 'subscription_sharing_usage_unavailable');
+    if (mode === 'route-not-supported') return openaiError(res, 400, 'subscription_sharing_route_not_supported');
+    if (mode === 'invalid-user') return openaiError(res, 401, 'subscription_sharing_invalid_user');
+    if (mode === 'unknown-code') return openaiError(res, 400, 'weird_new_code');
+    if (mode === 'unsupported-capability' && hasTextFormat) return openaiError(res, 400, 'subscription_sharing_unsupported_capability', 'text.format');
     const responseId = `resp_${state.requests.responses.length}`; // taken synchronously: stays unique under concurrent requests
     const text = (parsed.input ?? [])
       .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
@@ -319,31 +402,41 @@ export const routes = {
     } else {
       return json(res, 400, { error: 'unsupported_purpose', purpose: purpose ?? null });
     }
-    json(res, 200, {
-      id: responseId,
-      status: 'completed',
-      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: output }] }],
-    });
+    sse(res, responseId, output, mode);
   },
 
-  // GDELT DOC 2.0 artlist stub: 5 articles per query, the first is shared by all queries (dedup).
+  // GDELT DOC 2.0 artlist stub: the decoded query is an OR group "(<e1> OR <e2> ...) sourcelang:english" (or one element);
+  // every element is answered with the 5 articles of the old per-query stub, the first is shared by all (dedup).
   'GET /api/v2/doc/doc': async (req, res, url) => {
     const query = url.searchParams.get('query') ?? '';
-    state.requests.gdelt.push({ query, params: Object.fromEntries(url.searchParams) });
-    if (state.news === 'down') return json(res, 503, { error: 'unavailable' });
+    const at = Date.now();
+    state.requests.gdelt.push({ query, params: Object.fromEntries(url.searchParams), at });
     const n = state.requests.gdelt.length;
-    const key = sha1(query).slice(0, 8);
+    const call = ++state.newsCalls;
+    const limited = () => {
+      res.writeHead(429, { 'content-type': 'text/plain' });
+      res.end('Please limit requests to one every 5 seconds');
+    };
+    if (state.news === 'down') return json(res, 503, { error: 'unavailable' });
+    if (state.news === 'rate-limited' || (state.news === 'rate-limited-once' && call === 1)) return limited();
+    if (state.news === 'partial' && call <= 2) return json(res, 503, { error: 'unavailable' });
+    let group = query.replace(/ sourcelang:english$/, '').trim();
+    if (group.startsWith('(') && group.endsWith(')')) group = group.slice(1, -1);
+    const elements = group.split(' OR ').map((e) => e.trim().replace(/^"(.*)"$/, '$1'));
     const base = 'http://stub:4010/articles';
-    const articles = [`${base}/shared?utm_source=${n}`, ...[2, 3, 4, 5].map((a) => `${base}/${key}-${a}`)].map((u, i) => ({
-      url: u,
-      url_mobile: '',
-      title: i === 0 ? 'Shared stub article' : `Stub article ${key}-${i + 1}`,
-      seendate: seendate(),
-      socialimage: '',
-      domain: 'reuters.com',
-      language: 'English',
-      sourcecountry: 'United States',
-    }));
+    const articles = elements.flatMap((element) => {
+      const key = sha1(element).slice(0, 8);
+      return [`${base}/shared?utm_source=${n}`, ...[2, 3, 4, 5].map((a) => `${base}/${key}-${a}`)].map((u, i) => ({
+        url: u,
+        url_mobile: '',
+        title: i === 0 ? 'Shared stub article' : `${element} stub article ${key}-${i + 1}`,
+        seendate: seendate(),
+        socialimage: '',
+        domain: 'reuters.com',
+        language: 'English',
+        sourcecountry: 'United States',
+      }));
+    });
     json(res, 200, { articles });
   },
   'GET /articles/*': async (req, res, url) => {
@@ -399,10 +492,12 @@ export const routes = {
       const verifier = form.get('code_verifier');
       if (!entry || !verifier || s256(verifier) !== entry.challenge) return json(res, 400, { error: 'invalid_grant' });
       if (state.mode === 'token_error') return json(res, 500, { error: 'server_error' });
-      return json(res, 200, tokens(form.get('client_id') ?? entry.clientId, entry.nonce));
+      return json(res, 200, tokens(form.get('client_id') ?? entry.clientId, entry.nonce, true));
     }
     if (grant === 'refresh_token') {
       if (state.mode === 'refresh_error') return json(res, 400, { error: 'invalid_grant' });
+      if (state.mode === 'refresh_invalid_client') return json(res, 401, { error: 'invalid_client' });
+      if (state.mode === 'refresh_unavailable') return json(res, 503, { error: 'temporarily_unavailable' });
       if (state.mode === 'token_error') return json(res, 500, { error: 'server_error' });
       return json(res, 200, tokens(form.get('client_id') ?? undefined, undefined));
     }

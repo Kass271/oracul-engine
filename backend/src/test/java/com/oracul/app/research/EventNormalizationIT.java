@@ -18,7 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
 /** Rows 1-5, 18-20 of research-pipeline.md "Slice 06_events" integration tests: event normalisation (stage CONNECTING_SIGNALS). */
-// @trace FR-14
+// @trace FR-14, FR-38, FR-39
 class EventNormalizationIT extends AbstractEventIT {
 
     private static final String TASK_LINE =
@@ -94,7 +94,10 @@ class EventNormalizationIT extends AbstractEventIT {
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
         StubResponses.Request req = requests(NORMALIZATION).get(0);
         Map<String, Object> body = JsonPath.read(req.body(), "$");
-        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store");
+        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store", "stream");
+        // @trace FR-38
+        assertThat(body.get("stream")).isEqualTo(true);
+        assertThat(req.headers().get("accept")).isEqualTo("text/event-stream");
         assertThat(body.get("store")).isEqualTo(false);
         assertThat(body.get("model")).isEqualTo("stub-model");
         assertThat(req.body()).doesNotContain("\"tools\"").doesNotContain("tool_choice").doesNotContain("web_search");
@@ -184,9 +187,34 @@ class EventNormalizationIT extends AbstractEventIT {
         return Stream.of(
             Arguments.of("not json", StubResponses.completed("not json"), "answer does not match the schema"),
             Arguments.of("events is a string", StubResponses.completed("{\"events\":\"x\"}"), "answer does not match the schema"),
-            Arguments.of("S001 twice", StubResponses.completed(dup), "source id S001 appears more than once"),
-            Arguments.of("status incomplete", new StubResponses.Reply(200,
-                "{\"id\":\"resp_1\",\"status\":\"incomplete\",\"output\":[]}", 0), "answer does not match the schema"));
+            Arguments.of("S001 twice", StubResponses.completed(dup), "source id S001 appears more than once"));
+    }
+
+    // FR-38 / FR-39 row 7: a 200 answer with status incomplete is no content problem any more: no correction retry,
+    // no deterministic grouping, the run fails after exactly one request
+    @ParameterizedTest(name = "incomplete answer: {0}")
+    @MethodSource("incompleteAnswers")
+    void anIncompleteAnswerFailsTheRunAfterOneRequest(String name, StubResponses.Reply incomplete) throws Exception {
+        gdeltArticles(v4());
+        scriptReplies(NORMALIZATION, incomplete, incomplete);
+        Ran r = run(A);
+        Map<String, Object> run = r.run();
+        assertThat(run.get("status")).as(name + " run: " + run).isEqualTo("FAILED");
+        assertThat(run.get("failure")).isEqualTo(json(
+            "{\"code\":\"CHATGPT_INCOMPLETE\",\"message\":\"ChatGPT did not finish the answer — please try again\"}"));
+        assertThat(run.get("stage")).isEqualTo("CONNECTING_SIGNALS");
+        assertThat(requests(NORMALIZATION)).as("no correction retry").hasSize(1);
+        assertThat(requests(CLASSIFICATION)).isEmpty();
+        assertThat(eventRows(r.id())).isEqualTo(0);
+        assertThat(counts(run).get("uniqueEvents")).isEqualTo(0);
+    }
+
+    static Stream<Arguments> incompleteAnswers() {
+        return Stream.of(
+            Arguments.of("200 JSON status incomplete", new StubResponses.Reply(200,
+                "{\"id\":\"resp_1\",\"status\":\"incomplete\",\"output\":[]}", 0)),
+            Arguments.of("SSE response.incomplete", StubResponses.sse(StubResponses.createdEvent(),
+                StubResponses.deltaEvent("{\"events\":"), StubResponses.incompleteEvent())));
     }
 
     // #5

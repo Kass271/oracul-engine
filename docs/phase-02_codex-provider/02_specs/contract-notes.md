@@ -4,7 +4,8 @@ Decisions behind the phase-02 changes to `api/openapi.yaml` (version 0.4.0 → 0
 (`docs/phase-01_mvp/02_specs/contract-notes.md`) stay in force: ApiError `{code, message}` for every 4xx/5xx, tags =
 capabilities, UUID ids, ISO-8601 UTC, no schema named `Error`. Capability specs of this phase:
 `chatgpt-connection.md` (FR-35, FR-36, FR-37, FR-41; NFR-9), `chatgpt-inference.md` (FR-38, FR-39, FR-40),
-`run-modes.md` (FR-42, FR-43; NFR-8).
+`run-modes.md` (FR-42, FR-43; NFR-8), `news-search.md` (FR-44, added by the approved scope change for slice
+02_plan-usage-calls).
 
 Sources: developers.openai.com/siwc/token-sharing-open-source/ sign-in, profiles-and-sessions, errors-and-recovery,
 models-and-inference, token-reference, preview-limitations, and https://auth.openai.com/.well-known/openid-configuration
@@ -96,6 +97,20 @@ Run failures (not HTTP errors) are listed in `chatgpt-inference.md` FR-39 and in
 16. **Reset scope.** Reset is installation-wide (one registration row): it clears every session's tokens and is refused
     while any run of any session is active.
 17. **NFR-8 evidence** files are written by the orchestrator from the user's report; they are not test artefacts.
+18. **Model resolution is remembered per session** in `HttpResponsesClient` (one active run per session), so stage
+    code and prompt builders keep their signatures; the slug is still stored on the run (`generation_run.model`).
+19. **Query expansion never retries** (phase-01 rule kept): its template fallback is the recovery. It fails the run
+    only for CHATGPT_SESSION_EXPIRED, CHATGPT_REGISTRATION_INVALID and CHATGPT_PLAN_NOT_ELIGIBLE.
+20. **GDELT OR-groups (FR-44).** Queries are merged into at most 4 requests `(<e1> OR <e2> …) sourcelang:english`,
+    multi-word queries as quoted phrases (GDELT's documented OR syntax allows keywords or phrases and no nesting, so
+    an AND of words cannot sit inside an OR). This narrows multi-word queries to exact phrases; it could not be
+    tried live (every analyst call on 2026-10-04 was answered 429), so NFR-8 check 2 is the proof. GDELT does not say
+    which OR element matched, so per-query attribution is derived from the article title (news-search.md step 7).
+21. **NEWS_UNAVAILABLE (FR-44)** = every GDELT request failed or could not be sent. A request answered with zero
+    articles counts as "news source reached"; an all-empty search continues as in phase-01 (FR-31).
+22. **Search time budget** `oracul.news.search-budget` PT75S inside the 180 s run deadline; spacing, 429 wait,
+    timeout and budget are configurable (`ORACUL_NEWS_*`), the E2E stack shortens spacing and 429 wait to 0.5 s.
+    No contract change: `counts.searches` keeps counting planned queries; `SearchQueryStatus` gains a description.
 
 ## Factory note (no factory change made)
 `factory-engine/bin/stack.mjs` runs plain `docker compose up/down` in the app folder. After FR-42 that starts the
@@ -119,6 +134,7 @@ This is reported to the orchestrator; it is not patched here.
 | `oracul.openai.responses-base-url` | `https://api.openai.com/v1` (`/responses`, `/models`) | FR-38, FR-39 |
 | `oracul.openai.model` | `gpt-5` (preferred) | FR-38 |
 | `oracul.openai.stream-timeout` | `PT120S` | FR-38 |
+| `oracul.news.gdelt.base-url` | `https://api.gdeltproject.org` (spacing / timeout / 429 wait / budget see news-search.md) | FR-44 |
 
 ## Database
 Flyway `V9__run_model_and_provider_code.sql`: `ALTER TABLE generation_run ADD COLUMN model VARCHAR(128) NULL, ADD

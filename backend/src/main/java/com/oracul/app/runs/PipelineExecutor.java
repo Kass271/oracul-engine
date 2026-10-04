@@ -1,6 +1,9 @@
 package com.oracul.app.runs;
 
 import com.oracul.app.api.model.RunStage;
+import com.oracul.app.chatgpt.CallAbandonedException;
+import com.oracul.app.chatgpt.ChatGptCallException;
+import com.oracul.app.chatgpt.HttpResponsesClient;
 import com.oracul.app.reasoning.ReasoningPipeline;
 import com.oracul.app.research.ResearchProfileFactory;
 import com.oracul.app.result.StoryWriter;
@@ -32,12 +35,15 @@ public class PipelineExecutor {
     private final ResearchPipeline research;
     private final ReasoningPipeline reasoning;
     private final StoryWriter story;
+    private final HttpResponsesClient responses;
+    private final RunGuard guard;
     private final Clock clock;
     private final Duration stageDelay;
     private final ThreadPoolExecutor pool;
 
     PipelineExecutor(GenerationRunRepository runs, ResearchProfileFactory profiles, ResearchPipeline research,
-                     ReasoningPipeline reasoning, StoryWriter story, Clock clock,
+                     ReasoningPipeline reasoning, StoryWriter story, HttpResponsesClient responses, RunGuard guard,
+                     Clock clock,
                      @Value("${oracul.run.placeholder-stage-delay:PT1S}") Duration stageDelay,
                      @Value("${oracul.run.executor-threads:4}") int threads) {
         this.runs = runs;
@@ -45,6 +51,8 @@ public class PipelineExecutor {
         this.research = research;
         this.reasoning = reasoning;
         this.story = story;
+        this.responses = responses;
+        this.guard = guard;
         this.clock = clock;
         this.stageDelay = stageDelay;
         AtomicInteger n = new AtomicInteger();
@@ -67,6 +75,9 @@ public class PipelineExecutor {
             boolean started = alternative ? runs.startRunningAlternative(runId, now()) : runs.startRunning(runId, now());
             if (!started) {
                 runs.failTimedOut(runId, now());
+                return;
+            }
+            if (!resolveModel(runId, sessionId)) {
                 return;
             }
             var run = runs.find(runId, sessionId).orElseThrow();
@@ -107,6 +118,28 @@ public class PipelineExecutor {
             } catch (RuntimeException inner) {
                 log.error("Could not mark run {} failed", runId, inner);
             }
+        }
+    }
+
+    /** FR-38: reads the account's model once, before the first ChatGPT call; false when the run was ended. */
+    private boolean resolveModel(UUID runId, UUID sessionId) {
+        try {
+            String slug = responses.resolveModel(sessionId, () -> {
+                if (!guard.check(runId)) {
+                    throw new CallAbandonedException();
+                }
+            });
+            if (!runs.storeModel(runId, slug, now())) {
+                runs.failTimedOut(runId, now());
+                return false;
+            }
+            return true;
+        } catch (ChatGptCallException e) {
+            runs.markFailed(runId, e.code(), e.getMessage(), e.providerCode(), now());
+            return false;
+        } catch (CallAbandonedException e) {
+            runs.failTimedOut(runId, now());
+            return false;
         }
     }
 

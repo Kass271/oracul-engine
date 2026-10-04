@@ -24,12 +24,13 @@ public class GenerationRunRepository {
                       RunStage stage, ScenarioConfiguration configuration, ResearchProfile researchProfile,
                       ResearchCounts counts, String failureCode, String failureMessage, Integer suggestedRealism,
                       String headline, OffsetDateTime createdAt, OffsetDateTime updatedAt,
-                      OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId, boolean hasOpenCriticIssues) {
+                      OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId, boolean hasOpenCriticIssues,
+                      String model, String failureProviderCode) {
     }
 
     private static final String COLUMNS = "id, generation_id, session_id, kind, parent_run_id, status, stage, "
         + "configuration, research_profile, counts, failure_code, failure_message, suggested_realism, headline, "
-        + "created_at, updated_at, completed_at, search_plan, evidence_pack_id";
+        + "created_at, updated_at, completed_at, search_plan, evidence_pack_id, model, failure_provider_code";
 
     private final JdbcTemplate jdbc;
     private final JsonMapper json;
@@ -162,6 +163,19 @@ public class GenerationRunRepository {
             code, message, now, now, id);
     }
 
+    /** Failure with the sanitized provider code (rows 5/6 of FR-39). */
+    public void markFailed(UUID id, String code, String message, String providerCode, OffsetDateTime now) {
+        jdbc.update("update generation_run set status = 'FAILED', failure_code = ?, failure_message = ?, "
+            + "failure_provider_code = ?, updated_at = ?, completed_at = ? where id = ? and status in ('QUEUED','RUNNING')",
+            code, message, providerCode, now, now, id);
+    }
+
+    /** Stores the model slug resolved for the run while the run is still active. */
+    public boolean storeModel(UUID id, String model, OffsetDateTime now) {
+        return jdbc.update("update generation_run set model = ?, updated_at = ? where id = ? "
+            + "and status in ('QUEUED','RUNNING')", model, now, id) == 1;
+    }
+
     /** The newest COMPLETED runs with a headline of the session, newest first (ties by id desc). */
     public List<Row> findRecentCompleted(UUID sessionId, int limit) {
         return jdbc.query("select " + COLUMNS + " from generation_run where session_id = ? and status = 'COMPLETED' "
@@ -192,7 +206,8 @@ public class GenerationRunRepository {
             utc(rs.getObject("updated_at", OffsetDateTime.class)),
             utc(rs.getObject("completed_at", OffsetDateTime.class)),
             rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
-            rs.getObject("evidence_pack_id", UUID.class), openCritic);
+            rs.getObject("evidence_pack_id", UUID.class), openCritic,
+            rs.getString("model"), rs.getString("failure_provider_code"));
     }
 
     public Optional<Row> find(UUID id, UUID sessionId) {
@@ -214,7 +229,8 @@ public class GenerationRunRepository {
                 utc(rs.getObject("updated_at", OffsetDateTime.class)),
                 utc(rs.getObject("completed_at", OffsetDateTime.class)),
                 rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
-                rs.getObject("evidence_pack_id", UUID.class), rs.getBoolean("open_critic")),
+                rs.getObject("evidence_pack_id", UUID.class), rs.getBoolean("open_critic"),
+                rs.getString("model"), rs.getString("failure_provider_code")),
             id, sessionId);
         return rows.stream().findFirst();
     }

@@ -18,7 +18,7 @@ public record ChatGptProperties(
     @DefaultValue("ORACUL") String agentNameHint,
     @DefaultValue("chatgpt.tokens.use.direct") String requiredScope,
     @DefaultValue("PT10M") Duration pendingTtl,
-    @DefaultValue("PT60S") Duration refreshSkew,
+    @DefaultValue("PT5M") Duration refreshSkew,
     @DefaultValue("PT10S") Duration httpTimeout,
     @DefaultValue("https://auth.openai.com") String issuer,
     @DefaultValue("https://auth.openai.com/.well-known/jwks.json") String jwksUrl,

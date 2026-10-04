@@ -19,7 +19,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.TestPropertySource;
 
 /** scenario-reasoning.md "Slice 10_critic" integration tests #1-#14: the SCENARIO_CRITIC stage, its regeneration and open issues. */
-// @trace FR-22
+// @trace FR-22, FR-38, FR-39
 class CriticIT extends AbstractStoryIT {
 
     private static final String CRITIC = "SCENARIO_CRITIC";
@@ -109,7 +109,10 @@ class CriticIT extends AbstractStoryIT {
         assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, GEN, CRITIC, STORY);
         StubResponses.Request req = kreq(1);
         Map<String, Object> body = JsonPath.read(req.body(), "$");
-        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store");
+        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store", "stream");
+        // @trace FR-38
+        assertThat(body.get("stream")).isEqualTo(true);
+        assertThat(req.headers().get("accept")).isEqualTo("text/event-stream");
         assertThat(body.get("store")).isEqualTo(false);
         assertNoToolKeys(req);
         assertThat(instructionsOf(req)).isEqualTo(CriticFixtures.INSTRUCTIONS);
@@ -324,14 +327,14 @@ class CriticIT extends AbstractStoryIT {
             case "429" -> {
                 always(CRITIC, StubResponses.status(429, PROVIDER_BODY));
                 code = "CHATGPT_RATE_LIMITED";
-                message = "ChatGPT plan limit reached — try again later";
+                message = "ChatGPT usage limit reached — try again later";
                 expectedRequests = 1;
             }
             case "500" -> {
                 always(CRITIC, StubResponses.status(500, PROVIDER_BODY));
                 code = "CHATGPT_UNAVAILABLE";
-                message = "ChatGPT is unavailable right now — try again later";
-                expectedRequests = 2;
+                message = "ChatGPT is temporarily unavailable — try again in a few minutes";
+                expectedRequests = 3;
             }
             default -> {
                 stub.responder = req -> "refresh_token".equals(req.form().get("grant_type"))
@@ -348,6 +351,7 @@ class CriticIT extends AbstractStoryIT {
         assertThat(requests(CRITIC)).hasSize(expectedRequests);
         if ("500".equals(kind)) {
             assertThat(kreq(2).body()).isEqualTo(kreq(1).body());
+            assertThat(kreq(3).body()).isEqualTo(kreq(1).body());
             assertThat(criticRows(r.id())).hasSize(1);
         }
         assertThat(requests(STORY)).isEmpty();
@@ -367,7 +371,7 @@ class CriticIT extends AbstractStoryIT {
     void aRateLimitOnTheSecondCriticCallFailsTheRunInStageConstructingScenario() throws Exception {
         scriptCritic(cr("CR-ICS"), reply(StubResponses.status(429, PROVIDER_BODY)));
         Ran r = runV4(A);
-        assertFailed(r.run(), "CHATGPT_RATE_LIMITED", "ChatGPT plan limit reached — try again later", "CONSTRUCTING_SCENARIO", 9);
+        assertFailed(r.run(), "CHATGPT_RATE_LIMITED", "ChatGPT usage limit reached — try again later", "CONSTRUCTING_SCENARIO", 9);
         assertThat(structured(r).get("criticReports")).isEqualTo(jsonOf("[{\"verdict\":\"FAIL\",\"issues\":[" + ICS_ISSUE + "],\"attempt\":1}]"));
         assertThat(requests(GEN)).hasSize(2);
         assertThat(requests(STORY)).isEmpty();

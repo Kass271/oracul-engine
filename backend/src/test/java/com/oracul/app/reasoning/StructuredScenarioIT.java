@@ -13,7 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.node.ArrayNode;
 
 /** Rows #5-#7, #13, #16, #17 of scenario-reasoning.md "Slice 08_validated-scenario": structured output and getStructuredScenario. */
-// @trace FR-20
+// @trace FR-20, FR-38
 class StructuredScenarioIT extends AbstractReasoningIT {
 
     // #5
@@ -77,7 +77,7 @@ class StructuredScenarioIT extends AbstractReasoningIT {
 
     // #7
     @ParameterizedTest(name = "invalid twice: {0}")
-    @ValueSource(strings = {"one-candidate", "empty-text", "incomplete", "unknown-key"})
+    @ValueSource(strings = {"one-candidate", "empty-text", "unknown-key"})
     void anInvalidSecondAnswerFailsTheRunWithInvalidScenario(String kind) throws Exception {
         Answer bad = switch (kind) {
             case "one-candidate" -> computed(input -> {
@@ -86,7 +86,6 @@ class StructuredScenarioIT extends AbstractReasoningIT {
                 return MAPPER.writeValueAsString(n);
             });
             case "empty-text" -> text("");
-            case "incomplete" -> reply(new StubResponses.Reply(200, "{\"id\":\"resp_1\",\"status\":\"incomplete\",\"output\":[]}", 0));
             default -> computed(input -> {
                 var n = ReasoningHarness.tree(ScenarioFixtures.scV4(StubResponses.futureDate(input)));
                 n.set("tools", MAPPER.createArrayNode());
@@ -105,6 +104,23 @@ class StructuredScenarioIT extends AbstractReasoningIT {
         assertThat(counts(r.run()).get("sourcesUsed")).isEqualTo(0);
         int status = startRun(r.sid(), B).andReturn().getResponse().getStatus();
         assertThat(status).as("slot released").isEqualTo(202);
+    }
+
+    // FR-38 / FR-39 row 7: a 200 answer with status incomplete (or an incomplete stream) is no invalid answer any more:
+    // CHATGPT_INCOMPLETE after exactly one request, no correction retry
+    @ParameterizedTest(name = "incomplete: {0}")
+    @ValueSource(strings = {"json", "sse"})
+    void anIncompleteAnswerFailsTheRunAfterOneRequest(String kind) throws Exception {
+        StubResponses.Reply incomplete = "json".equals(kind)
+            ? new StubResponses.Reply(200, "{\"id\":\"resp_1\",\"status\":\"incomplete\",\"output\":[]}", 0)
+            : StubResponses.sse(StubResponses.createdEvent(), StubResponses.deltaEvent("{\"candidate"), StubResponses.incompleteEvent());
+        scriptScenario(reply(incomplete), reply(incomplete));
+        Ran r = runV4(A);
+        assertFailed(r.run(), "CHATGPT_INCOMPLETE", "ChatGPT did not finish the answer — please try again", "EXPLORING_FUTURES", 7);
+        assertThat(requests(GEN)).as("no correction retry").hasSize(1);
+        assertScenarioNotReady(getStructured(r.sid(), r.id()));
+        assertThat(finalAttempt(r.id())).isNull();
+        assertThat(counts(r.run()).get("sourcesUsed")).isEqualTo(0);
     }
 
     // #13

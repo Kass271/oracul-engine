@@ -107,8 +107,8 @@ public class ResearchPipeline {
         try {
             SearchPlan template = planner.plan(profile, cfg, queryBudget);
             plan = expander.expand(sessionId, profile, cfg, template);
-        } catch (ApiException e) {
-            runs.markFailed(runId, "CHATGPT_SESSION_EXPIRED", SESSION_EXPIRED_MESSAGE, now());
+        } catch (ChatGptCallException e) {
+            runs.markFailed(runId, e.code(), e.getMessage(), e.providerCode(), now());
             return false;
         }
         runs.storeSearchPlan(runId, plan, now());
@@ -119,7 +119,11 @@ public class ResearchPipeline {
         if (started < 0) {
             return false;
         }
-        SourceRetrieval.SearchOutcome outcome = retrieval.search(plan, cfg.getHorizon());
+        SourceRetrieval.SearchOutcome outcome = retrieval.search(plan, cfg.getHorizon(), () -> guard.check(runId));
+        if (!guard.check(runId)) {
+            abandon(runId);
+            return false;
+        }
         ResearchCounts counts = new ResearchCounts(outcome.searches(), outcome.articlesRetrieved(), 0, 0, 0, 0, 0);
         if (outcome.allFailed()) {
             tx.executeWithoutResult(s -> {
@@ -166,7 +170,7 @@ public class ResearchPipeline {
                 normalized = normalizer.normalize(sessionId, runId, list);
                 classifier.classify(sessionId, runId, profile.getTopics(), normalized, list);
             } catch (ChatGptCallException e) {
-                runs.markFailed(runId, e.code(), e.getMessage(), now());
+                runs.markFailed(runId, e.code(), e.getMessage(), e.providerCode(), now());
                 return false;
             } catch (CallAbandonedException e) {
                 abandon(runId);

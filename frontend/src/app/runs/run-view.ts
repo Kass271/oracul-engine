@@ -24,6 +24,8 @@ import { RunStore } from './run.store';
       @if (run.status === 'FAILED') {
         <app-run-failure
           [message]="run.failure?.message ?? 'Something went wrong — try again'"
+          [code]="run.failure?.code ?? null"
+          [providerCode]="run.failure?.providerCode ?? null"
           [configuration]="run.configuration"
         />
       } @else if (run.status === 'INSUFFICIENT_EVIDENCE') {

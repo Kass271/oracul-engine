@@ -65,7 +65,7 @@ class RunFailureHygieneIT extends AbstractDeadlineIT {
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitRun(sid, id, 30_000, m -> "FAILED".equals(m.get("status")));
         assertThat(run.get("failure")).isEqualTo(json(
-            "{\"code\":\"CHATGPT_RATE_LIMITED\",\"message\":\"ChatGPT plan limit reached — try again later\"}"));
+            "{\"code\":\"CHATGPT_RATE_LIMITED\",\"message\":\"ChatGPT usage limit reached — try again later\"}"));
         assertThat(requests(STORY)).hasSize(1);
         String raw = getRun(sid, id).andReturn().getResponse().getContentAsString();
         assertThat(raw).doesNotContain("rate_limited").doesNotContain("429").doesNotContain("PROVIDER-SECRET");

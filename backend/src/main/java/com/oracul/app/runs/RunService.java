@@ -142,7 +142,9 @@ public class RunService {
         run.setCounts(r.counts());
         run.setEvidencePackId(r.evidencePackId());
         if (r.failureCode() != null) {
-            run.setFailure(new RunFailure(RunFailureCode.fromValue(r.failureCode()), r.failureMessage()));
+            RunFailure failure = new RunFailure(RunFailureCode.fromValue(r.failureCode()), r.failureMessage());
+            failure.setProviderCode(r.failureProviderCode());
+            run.setFailure(failure);
         }
         run.setSuggestedRealism(r.suggestedRealism());
         run.setHeadline(r.headline());

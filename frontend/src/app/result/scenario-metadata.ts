@@ -24,6 +24,9 @@ import type { ScenarioMetadata } from '../api/models/scenario-metadata';
             >Optimism {{ metadata().configuration.optimism }}/10</mat-chip
           >
           <mat-chip data-testid="meta-horizon">Horizon {{ metadata().horizonLabel }}</mat-chip>
+          @if (metadata().model; as model) {
+            <mat-chip data-testid="meta-model">Model {{ model }}</mat-chip>
+          }
         </mat-chip-set>
         @if (metadata().wildcards.length > 0) {
           <mat-chip-set aria-label="Wildcards" data-testid="meta-wildcards">

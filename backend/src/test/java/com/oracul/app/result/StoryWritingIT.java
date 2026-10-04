@@ -14,7 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** future-result.md "Slice 09_future-story" ITs #1, #2, #4-#10, #15: the STORY_WRITING stage. */
-// @trace FR-23
+// @trace FR-23, FR-38, FR-39
 class StoryWritingIT extends AbstractStoryIT {
 
     private static final String STORY_INVALID = "ORACUL could not construct a valid scenario";
@@ -30,7 +30,10 @@ class StoryWritingIT extends AbstractStoryIT {
         assertThat(requests(STORY)).hasSize(1);
         StubResponses.Request req = sreq(1);
         Map<String, Object> body = JsonPath.read(req.body(), "$");
-        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store");
+        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store", "stream");
+        // @trace FR-38
+        assertThat(body.get("stream")).isEqualTo(true);
+        assertThat(req.headers().get("accept")).isEqualTo("text/event-stream");
         assertThat(body.get("store")).isEqualTo(false);
         assertThat(instructionsOf(req)).isEqualTo(StoryFixtures.INSTRUCTIONS);
         assertThat(instructionsOf(req)).startsWith("You are the scenario reasoning component of ORACUL.\nYou are NOT a researcher.");
@@ -173,14 +176,14 @@ class StoryWritingIT extends AbstractStoryIT {
             case "429" -> {
                 always(STORY, StubResponses.status(429, PROVIDER_BODY));
                 code = "CHATGPT_RATE_LIMITED";
-                message = "ChatGPT plan limit reached — try again later";
+                message = "ChatGPT usage limit reached — try again later";
                 expectedRequests = 1;
             }
             case "500" -> {
                 always(STORY, StubResponses.status(500, PROVIDER_BODY));
                 code = "CHATGPT_UNAVAILABLE";
-                message = "ChatGPT is unavailable right now — try again later";
-                expectedRequests = 2;
+                message = "ChatGPT is temporarily unavailable — try again in a few minutes";
+                expectedRequests = 3;
             }
             default -> {
                 stub.responder = req -> "refresh_token".equals(req.form().get("grant_type"))
@@ -197,6 +200,7 @@ class StoryWritingIT extends AbstractStoryIT {
         assertThat(requests(STORY)).hasSize(expectedRequests);
         if ("500".equals(kind)) {
             assertThat(sreq(2).body()).isEqualTo(sreq(1).body());
+            assertThat(sreq(3).body()).isEqualTo(sreq(1).body());
             assertThat(storyModelCalls(r.id())).hasSize(1);
         }
         assertThat(storyRows(r.id())).isZero();

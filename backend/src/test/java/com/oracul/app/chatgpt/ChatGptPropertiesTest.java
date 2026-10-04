@@ -28,4 +28,24 @@ class ChatGptPropertiesTest {
         assertThat(ChatGptTestProps.of("http://x", "http://x", "http://x").scopeList())
             .containsExactly("openid", "chatgpt.tokens.use.direct");
     }
+
+    // @trace FR-38
+    @org.junit.jupiter.api.Test
+    void theRefreshSkewDefaultIsFiveMinutes() {
+        var binder = new org.springframework.boot.context.properties.bind.Binder(
+            new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(
+                java.util.Map.of("oracul.chatgpt.resource", "https://api.openai.com/v1"))); // one value forces binding
+        ChatGptProperties defaults = binder.bind("oracul.chatgpt", ChatGptProperties.class).get();
+        assertThat(defaults.refreshSkew()).isEqualTo(java.time.Duration.ofMinutes(5));
+    }
+
+    // @trace FR-38
+    @org.junit.jupiter.api.Test
+    void anExplicitRefreshSkewIsBoundAsGiven() {
+        var binder = new org.springframework.boot.context.properties.bind.Binder(
+            new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(
+                java.util.Map.of("oracul.chatgpt.refresh-skew", "PT90S")));
+        assertThat(binder.bind("oracul.chatgpt", ChatGptProperties.class).get().refreshSkew())
+            .isEqualTo(java.time.Duration.ofSeconds(90));
+    }
 }

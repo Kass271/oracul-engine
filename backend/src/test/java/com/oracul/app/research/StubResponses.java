@@ -35,8 +35,18 @@ public final class StubResponses {
         }
     }
 
-    /** status 0 = drop the connection without answering. */
-    public record Reply(int status, String body, long delayMs) {}
+    /**
+     * status 0 = drop the connection without answering. contentType null = application/json. chunks != null: the
+     * body is sent as these raw pieces (flushed one by one, chunkGapMs apart) instead of {@code body}.
+     */
+    public record Reply(int status, String body, long delayMs, String contentType, List<String> chunks, long chunkGapMs) {
+        public Reply(int status, String body, long delayMs) {
+            this(status, body, delayMs, null, null, 0);
+        }
+    }
+
+    /** Recorded GET /v1/models request: lower-cased header names; arrival time is System.nanoTime. */
+    public record ModelsRequest(Map<String, String> headers, long arrivedNanos) {}
 
     /** Arrival and completion time (System.nanoTime) of one request; completedNanos is 0 until it was answered. */
     public static final class Exchange {
@@ -62,6 +72,14 @@ public final class StubResponses {
     public final List<Exchange> exchanges = new CopyOnWriteArrayList<>();
     public volatile Function<Request, Reply> responder = defaultResponder();
 
+    /** Default model catalogue answer of GET /v1/models. */
+    public static final String DEFAULT_CATALOGUE =
+        "{\"models\":[{\"slug\":\"stub-model\",\"display_name\":\"Stub model\",\"visibility\":\"list\"}]}";
+
+    /** GET /v1/models requests (never part of {@link #requests} / {@link #exchanges} / the in-flight counters). */
+    public final List<ModelsRequest> modelRequests = new CopyOnWriteArrayList<>();
+    public volatile Function<ModelsRequest, Reply> modelsResponder = defaultModelsResponder();
+
     // concurrency bookkeeping (research-pipeline.md "Backend test stubs"): in flight = arrived and not yet answered
     private final Map<String, AtomicInteger> inFlight = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> maxInFlight = new ConcurrentHashMap<>();
@@ -84,6 +102,7 @@ public final class StubResponses {
             return t;
         }));
         server.createContext("/v1/responses", this::handle);
+        server.createContext("/v1/models", this::handleModels);
         server.start();
     }
 
@@ -112,6 +131,87 @@ public final class StubResponses {
         maxInFlight.clear();
         inFlight.forEach((purpose, now) -> maxInFlight.put(purpose, new AtomicInteger(now.get())));
         responder = defaultResponder();
+        modelRequests.clear();
+        modelsResponder = defaultModelsResponder();
+    }
+
+    public static Function<ModelsRequest, Reply> defaultModelsResponder() {
+        return req -> new Reply(200, DEFAULT_CATALOGUE, 0);
+    }
+
+    /** Catalogue answer {"models":[...]} from (slug, visibility) pairs; a null slug is written as JSON null. */
+    public static Reply catalogue(String[]... slugAndVisibility) {
+        StringBuilder sb = new StringBuilder("{\"models\":[");
+        for (int i = 0; i < slugAndVisibility.length; i++) {
+            if (i > 0) sb.append(',');
+            String slug = slugAndVisibility[i][0];
+            sb.append("{\"slug\":").append(slug == null ? "null" : jsonString(slug)).append(",\"display_name\":\"n\"")
+                .append(",\"visibility\":").append(jsonString(slugAndVisibility[i][1])).append('}');
+        }
+        return new Reply(200, sb.append("]}").toString(), 0);
+    }
+
+    /** SSE answer: status 200, text/event-stream, one "event: <type>" + "data: <json>" block per data JSON. */
+    public static Reply sse(String... dataJson) {
+        StringBuilder sb = new StringBuilder();
+        for (String d : dataJson) {
+            String type = JsonPath.read(d, "$.type");
+            sb.append("event: ").append(type).append("\ndata: ").append(d).append("\n\n");
+        }
+        return new Reply(200, sb.toString(), 0, "text/event-stream", null, 0);
+    }
+
+    /** SSE answer sent as the given raw pieces, flushed one by one with a gap between them. */
+    public static Reply sseChunks(long gapMs, String... rawChunks) {
+        return new Reply(200, "", 0, "text/event-stream", List.of(rawChunks), gapMs);
+    }
+
+    /** {"error":{"code":"<code>","message":"stub"}} with the given status. */
+    public static Reply error(int status, String code) {
+        return new Reply(status, "{\"error\":{\"code\":" + jsonString(code) + ",\"message\":\"stub\"}}", 0);
+    }
+
+    public static String createdEvent() {
+        return "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\"}}";
+    }
+
+    public static String deltaEvent(String delta) {
+        return "{\"type\":\"response.output_text.delta\",\"delta\":" + jsonString(delta) + "}";
+    }
+
+    /** response.completed carrying the full text in one output message item. */
+    public static String completedEvent(String outputText) {
+        return "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":"
+            + "[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":"
+            + jsonString(outputText) + "}]}]}}";
+    }
+
+    /** response.completed with an empty output (the text then comes from the deltas). */
+    public static String completedEmptyEvent() {
+        return "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}";
+    }
+
+    public static String incompleteEvent() {
+        return "{\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"status\":\"incomplete\","
+            + "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}";
+    }
+
+    /** response.failed; a null code writes an error object without code. */
+    public static String failedEvent(String code) {
+        return "{\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"status\":\"failed\",\"error\":{"
+            + (code == null ? "" : "\"code\":" + jsonString(code) + ",") + "\"message\":\"stub\"}}}";
+    }
+
+    public static String errorEvent(String code) {
+        return "{\"type\":\"error\",\"code\":" + jsonString(code) + ",\"message\":\"stub\"}";
+    }
+
+    /** A complete, ordinary streamed answer: created, the text in three deltas, completed with the full text. */
+    public static Reply streamed(String outputText) {
+        int a = outputText.length() / 3;
+        int b = 2 * outputText.length() / 3;
+        return sse(createdEvent(), deltaEvent(outputText.substring(0, a)), deltaEvent(outputText.substring(a, b)),
+            deltaEvent(outputText.substring(b)), completedEvent(outputText));
     }
 
     /** Highest number of requests of the purpose that were being answered at the same time since the last reset. */
@@ -333,7 +433,7 @@ public final class StubResponses {
     }
 
     public static Reply delayed(Reply r, long ms) {
-        return new Reply(r.status(), r.body(), ms);
+        return new Reply(r.status(), r.body(), ms, r.contentType(), r.chunks(), r.chunkGapMs());
     }
 
     public Function<Request, Reply> defaultResponder() {
@@ -406,15 +506,54 @@ public final class StubResponses {
             ex.close(); // status 0 = drop the connection without answering
             return;
         }
-        byte[] out = reply.body().getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().add("Content-Type", "application/json");
+        send(ex, reply);
+    }
+
+    private static void send(HttpExchange ex, Reply reply) {
+        ex.getResponseHeaders().add("Content-Type", reply.contentType() == null ? "application/json" : reply.contentType());
         try {
+            if (reply.chunks() != null) {
+                ex.sendResponseHeaders(reply.status(), 0);
+                for (String chunk : reply.chunks()) {
+                    ex.getResponseBody().write(chunk.getBytes(StandardCharsets.UTF_8));
+                    ex.getResponseBody().flush();
+                    if (reply.chunkGapMs() > 0) Thread.sleep(reply.chunkGapMs());
+                }
+                return;
+            }
+            byte[] out = reply.body().getBytes(StandardCharsets.UTF_8);
             ex.sendResponseHeaders(reply.status(), out.length == 0 ? -1 : out.length);
             if (out.length > 0) ex.getResponseBody().write(out);
         } catch (IOException ignored) {
             // client already timed out
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
         } finally {
             ex.close();
         }
+    }
+
+    private void handleModels(HttpExchange ex) throws IOException {
+        ex.getRequestBody().readAllBytes();
+        Map<String, String> headers = new LinkedHashMap<>();
+        ex.getRequestHeaders().forEach((k, v) -> headers.put(k.toLowerCase(), String.join(",", v)));
+        ModelsRequest req = new ModelsRequest(headers, System.nanoTime());
+        modelRequests.add(req);
+        Reply reply;
+        try {
+            reply = modelsResponder.apply(req);
+        } catch (RuntimeException e) {
+            reply = status(500, "{}");
+        }
+        try {
+            if (reply.delayMs() > 0) Thread.sleep(reply.delayMs());
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+        if (reply.status() == 0) {
+            ex.close();
+            return;
+        }
+        send(ex, reply);
     }
 }

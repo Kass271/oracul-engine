@@ -14,7 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** Rows #1-#4 and #15 of scenario-reasoning.md "Slice 08_validated-scenario": the SCENARIO_GENERATION request and its failures. */
-// @trace FR-19
+// @trace FR-19, FR-38, FR-39
 class ScenarioGenerationIT extends AbstractReasoningIT {
 
     private static final String SETTINGS_HEAD =
@@ -31,7 +31,10 @@ class ScenarioGenerationIT extends AbstractReasoningIT {
         assertThat(gen).hasSize(1);
         StubResponses.Request req = gen.get(0);
         Map<String, Object> body = JsonPath.read(req.body(), "$");
-        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store");
+        assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store", "stream");
+        // @trace FR-38
+        assertThat(body.get("stream")).isEqualTo(true);
+        assertThat(req.headers().get("accept")).isEqualTo("text/event-stream");
         assertThat(body.get("model")).isEqualTo("stub-model");
         assertThat(body.get("store")).isEqualTo(false);
         for (StubResponses.Request any : responses.requests) assertNoToolKeys(any);
@@ -113,14 +116,14 @@ class ScenarioGenerationIT extends AbstractReasoningIT {
             case "429" -> {
                 always(GEN, StubResponses.status(429, PROVIDER_BODY));
                 code = "CHATGPT_RATE_LIMITED";
-                message = "ChatGPT plan limit reached — try again later";
+                message = "ChatGPT usage limit reached — try again later";
                 expectedRequests = 1;
             }
             case "500" -> {
                 always(GEN, StubResponses.status(500, PROVIDER_BODY));
                 code = "CHATGPT_UNAVAILABLE";
-                message = "ChatGPT is unavailable right now — try again later";
-                expectedRequests = 2;
+                message = "ChatGPT is temporarily unavailable — try again in a few minutes";
+                expectedRequests = 3;
             }
             default -> {
                 stub.responder = req -> "refresh_token".equals(req.form().get("grant_type"))

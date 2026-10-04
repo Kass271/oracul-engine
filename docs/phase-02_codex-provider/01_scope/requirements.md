@@ -105,6 +105,17 @@ tests) stay in force.
   - Given the Troubleshooting section, when I look for invalid_authorize_request, plan not eligible, usage limit, ports 4200/8080 in use, Docker disk full, and resetting the registration or database, then each has a cause and a fix
   - Given the README's commands, when I run them as written on a fresh clone, then they work without editing any file, env var, database row or API key
 
+### FR-44 — Real news search within GDELT's limits
+- UI: no
+- Corrects: FR-13 (search transport against the real GDELT DOC API)
+- Description: The current-news search works against the real GDELT DOC 2.0 API, which allows one request every 5 seconds and often answers slowly, so a real run reaches the scenario stages instead of failing with NEWS_UNAVAILABLE. Verified 2026-10-04 with a real call: HTTP 429 "Please limit requests to one every 5 seconds", a successful answer took 18 s.
+- Acceptance:
+  - Given a run's search plan, when the search stage runs, then the planned queries are merged into at most 4 GDELT requests (OR-groups) and the plan's per-query attribution of sources is kept
+  - Given several GDELT requests, when they are sent, then they go out one at a time with at least 5 seconds between the starts of two requests, and each waits up to 30 seconds for an answer
+  - Given GDELT answers 429, when the request is handled, then ORACUL waits 5 seconds and retries that request once
+  - Given some GDELT requests fail and others return sources, when the stage ends, then the run continues with the sources it got; only when no request returns any source does the run fail with "ORACUL could not reach its news sources — try again later"
+  - Given the whole search, when it runs, then it finishes within the run's time budget so the later stages still have time to complete
+
 ## Non-functional
 
 ### NFR-8 — Real-service check gates GREEN

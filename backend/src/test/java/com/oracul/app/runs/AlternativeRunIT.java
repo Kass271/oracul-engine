@@ -308,7 +308,7 @@ class AlternativeRunIT extends AbstractStoryIT {
         Map<String, Object> before = row(p.id());
         always(GEN, StubResponses.status(429, PROVIDER_BODY));
         Ran a = altRun(p);
-        assertFailed(a.run(), "CHATGPT_RATE_LIMITED", "ChatGPT plan limit reached — try again later", "EXPLORING_FUTURES", 7);
+        assertFailed(a.run(), "CHATGPT_RATE_LIMITED", "ChatGPT usage limit reached — try again later", "EXPLORING_FUTURES", 7);
         assertThat(row(p.id())).isEqualTo(before);
     }
 

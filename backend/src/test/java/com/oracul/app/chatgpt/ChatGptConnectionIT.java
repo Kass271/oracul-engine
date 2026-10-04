@@ -209,7 +209,7 @@ class ChatGptConnectionIT extends AbstractChatGptIT {
         assertThat(stub.grant("refresh_token")).isEmpty();
     }
 
-    // @trace FR-8
+    // @trace FR-8, FR-38
     @Test
     void tokenInsideRefreshSkewIsRefreshedAndStaysConnected() throws Exception {
         stub.responder = r -> stub.ok(30, StubOpenAi.ALL_SCOPES, true);
@@ -219,18 +219,26 @@ class ChatGptConnectionIT extends AbstractChatGptIT {
         callbackLocation("code=c&state=" + enc(s.state()) + "&client_id=oaiapp_stub_r");
         String firstRefreshToken = stub.issued.stream().filter(v -> v.startsWith("rt-")).findFirst().orElseThrow();
         assertUsable(startRun(sid));
+        // the run task resolves the model right after the 202 (phase-02 FR-38), which may refresh once more: only the
+        // first refresh is certain here, and every refresh uses the refresh token the previous answer returned
         var refreshes = stub.grant("refresh_token");
-        assertThat(refreshes).hasSize(1);
+        assertThat(refreshes).isNotEmpty();
         assertThat(refreshes.get(0).form().get("refresh_token")).isEqualTo(firstRefreshToken);
         assertThat(refreshes.get(0).form().get("client_id")).isEqualTo("oaiapp_stub_r");
+        assertThat(refreshes.get(0).form().get("resource")).isEqualTo("https://api.openai.com/v1");
+        assertThat(refreshes.get(0).form().keySet()).containsExactlyInAnyOrder("grant_type", "refresh_token", "client_id", "resource");
         assertThat(refreshes.get(0).contentType()).startsWith("application/x-www-form-urlencoded");
         assertThat(stateOf(sid)).isEqualTo("CONNECTED");
 
         // rotation: the next refresh uses the refresh token returned by the previous one
-        String rotated = stub.issued.stream().filter(v -> v.startsWith("rt-")).reduce((x, y) -> y).orElseThrow();
-        assertThat(rotated).isNotEqualTo(firstRefreshToken);
         assertUsable(startRun(sid));
-        assertThat(stub.grant("refresh_token").get(1).form().get("refresh_token")).isEqualTo(rotated);
+        var all = stub.grant("refresh_token");
+        var heldTokens = stub.issued.stream().filter(v -> v.startsWith("rt-")).toList();
+        assertThat(all).hasSizeGreaterThanOrEqualTo(1);
+        for (int i = 0; i < all.size(); i++) {
+            assertThat(all.get(i).form().get("refresh_token")).as("refresh " + i + " uses the token of the previous answer")
+                .isEqualTo(heldTokens.get(i));
+        }
     }
 
     // @trace FR-8

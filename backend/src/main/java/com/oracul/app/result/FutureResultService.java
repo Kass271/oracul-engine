@@ -86,8 +86,10 @@ public class FutureResultService {
         }
         List<SearchIntent> intents = run.searchPlan() == null ? new ArrayList<>()
             : new ArrayList<>(run.searchPlan().getIntents());
+        var metadata = ScenarioMetadataMapper.map(run.configuration(), run.counts());
+        metadata.setModel(run.model());
         return new FutureResult(run.id(), run.generationId(), new ArrayList<>(LABELS), story,
-            ScenarioMetadataMapper.map(run.configuration(), run.counts()),
+            metadata,
             new ArrayList<>(scenario.getCausalChain()), sources, new ResearchExplanation(intents, run.counts()),
             openIssues);
     }

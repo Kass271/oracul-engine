@@ -3,7 +3,7 @@ import { evidence } from './evidence';
 
 const STUB = 'http://localhost:4010';
 const TIMEOUT_RUN_ID = '11111111-1111-1111-1111-111111111111';
-const RATE_LIMIT_MESSAGE = 'ChatGPT plan limit reached — try again later';
+const RATE_LIMIT_MESSAGE = 'ChatGPT usage limit reached — try again later';
 
 // acceptance configuration A (as filled through the panel by configureAcceptance)
 const A = {
@@ -82,7 +82,7 @@ function runId(page: Page): string {
   return page.url().split('/').pop()!;
 }
 
-// @trace FR-32
+// @trace FR-32, FR-39
 test.describe('FR-32 Run failure handling', () => {
   test('FR-32 a ChatGPT 429 ends the run with the friendly message, the panel stays usable and Try again re-submits', async ({ page }) => {
     test.setTimeout(240_000);
@@ -95,6 +95,12 @@ test.describe('FR-32 Run failure handling', () => {
 
     await expect(page.getByTestId('failure-view')).toBeVisible({ timeout: 90_000 });
     await expect(page.getByTestId('failure-message')).toHaveText(RATE_LIMIT_MESSAGE);
+    // @trace FR-39  the 429 also offers the ChatGPT usage settings
+    const usage = page.getByTestId('failure-usage-link');
+    await expect(usage).toHaveText('Open ChatGPT Settings → Usage');
+    await expect(usage).toHaveAttribute('href', 'https://chatgpt.com/#settings/Usage');
+    await expect(usage).toHaveAttribute('target', '_blank');
+    await expect(usage).toHaveAttribute('rel', 'noopener noreferrer');
     await expect(page.getByTestId('progress-view')).toHaveCount(0);
     await expect(page.getByTestId('result-view')).toHaveCount(0);
     const inner = await page.getByTestId('failure-view').innerText();

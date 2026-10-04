@@ -2,17 +2,14 @@ package com.oracul.app.research;
 
 import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.SearchQueryStatus;
+import com.oracul.app.common.RawHttpGet;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,24 +22,16 @@ public class GdeltNewsProvider implements NewsProvider {
 
     private static final Logger log = LoggerFactory.getLogger(GdeltNewsProvider.class);
 
-    private final HttpClient http;
     private final JsonMapper json = JsonMapper.builder()
         .enable(tools.jackson.core.json.JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS).build();
     private final String baseUrl;
-    private final int maxRecords;
-    private final Duration timeout;
 
-    GdeltNewsProvider(@Value("${oracul.news.gdelt.base-url:https://api.gdeltproject.org}") String baseUrl,
-                      @Value("${oracul.news.max-records-per-query:25}") int maxRecords,
-                      @Value("${oracul.news.query-timeout:PT10S}") Duration timeout) {
+    GdeltNewsProvider(@Value("${oracul.news.gdelt.base-url:https://api.gdeltproject.org}") String baseUrl) {
         String base = baseUrl;
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
         this.baseUrl = base;
-        this.maxRecords = maxRecords;
-        this.timeout = timeout;
-        this.http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(timeout).followRedirects(HttpClient.Redirect.NORMAL).build();
     }
 
     /** GDELT timespan parameter of a horizon. */
@@ -64,29 +53,26 @@ public class GdeltNewsProvider implements NewsProvider {
     }
 
     @Override
-    public Result search(String queryText, HorizonCode horizon) {
-        CompletableFuture<HttpResponse<String>> future = null;
+    public Result search(String query, int maxRecords, HorizonCode horizon, Duration timeout) {
         try {
-            String url = baseUrl + "/api/v2/doc/doc?query=" + encode(queryText + " sourcelang:english")
+            if (timeout.isZero() || timeout.isNegative()) {
+                return Result.failed();
+            }
+            String url = baseUrl + "/api/v2/doc/doc?query=" + encode(query)
                 + "&mode=ArtList&format=json&maxrecords=" + maxRecords + "&sort=HybridRel&timespan="
                 + timespan(horizon);
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(timeout)
-                .header("Accept", "application/json").GET().build();
-            future = http.sendAsync(request, HttpResponse.BodyHandlers.ofString());
-            HttpResponse<String> response = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (response.statusCode() / 100 != 2) {
-                log.warn("news query failed: status={}", response.statusCode());
+            RawHttpGet.Response response = RawHttpGet.get(URI.create(url), Map.of("Accept", "application/json"), timeout);
+            if (response.status() == 429) {
+                log.warn("news request failed: status=429");
+                return Result.limited();
+            }
+            if (response.status() / 100 != 2) {
+                log.warn("news request failed: status={}", response.status());
                 return Result.failed();
             }
             return parse(response.body());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return Result.failed();
         } catch (Exception e) {
-            if (future != null) {
-                future.cancel(true);
-            }
-            log.warn("news query failed: {}", e.getClass().getSimpleName());
+            log.warn("news request failed: {}", e.getClass().getSimpleName());
             return Result.failed();
         }
     }
