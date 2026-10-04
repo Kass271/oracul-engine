@@ -53,7 +53,7 @@ openApiGenerate {
             "useSpringBoot4" to "true",
             "useJakartaEe" to "true",
             "useTags" to "true",
-            "skipDefaultInterface" to "true",
+            "skipDefaultInterface" to "false",
             "openApiNullable" to "false",
             "documentationProvider" to "none",
             "annotationLibrary" to "none",
