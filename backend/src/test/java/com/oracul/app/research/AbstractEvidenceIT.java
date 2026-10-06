@@ -30,14 +30,14 @@ public abstract class AbstractEvidenceIT extends AbstractEventIT {
         "Health regulators approved a new pandemic vaccine. Reports differ on the number of doses approved.";
     public static final String EV2_SUMMARY = "Dock workers strike over humanoid robots.";
 
-    /** Fresh GDELT stub (first request returns V4), scripted N-V4 and the given classification answers (default C-V4). */
+    /** Fresh news stub (first /rss/search request returns V4), scripted N-V4 and the given classification answers (default C-V4). */
     protected Ran runV4(String body) throws Exception {
         return runV4(body, N_V4, C_V4);
     }
 
     protected Ran runV4(String body, String normalization, String... classificationAnswers) throws Exception {
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, normalization);
         script(CLASSIFICATION, classificationAnswers);
         return run(body);

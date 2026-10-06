@@ -21,13 +21,11 @@ import org.springframework.test.context.TestPropertySource;
 /**
  * phase-02 news-search.md FR-48 steps 3, 4 and 8: what a Google News RSS item becomes — title cleaning, attribution on the
  * cleaned title, pubDate and link classes, the article fetch that resolves a Google link (or does not), publisher and
- * publisherUrl, source type and quality from the publisher host. One group holds every element (max-requests = 1).
+ * publisherUrl, source type and quality from the publisher host. The search stage always sends min(4, n) group requests,
+ * so a plan whose elements must share a group is padded with filler queries (4 x k queries: group 1 = the k real ones).
  */
 // @trace FR-48
 @TestPropertySource(properties = {
-    "oracul.news.request-spacing=PT0S",
-    "oracul.news.rate-limit-wait=PT0S",
-    "oracul.news.max-requests=1",
     "oracul.news.google.timeout=PT1S",
 })
 class GoogleNewsSourceIT extends AbstractNewsSearchIT {
@@ -35,19 +33,37 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     private static final String REUTERS = "https://www.reuters.com";
 
     private String base() {
-        return gdelt.baseUrl();
+        return news.baseUrl();
     }
 
     private static String recent() {
-        return StubGdelt.pubDate(Instant.now().minus(1, ChronoUnit.DAYS));
+        return StubNews.pubDate(Instant.now().minus(1, ChronoUnit.DAYS));
     }
 
-    /** Search + readSources over a feed of the given items for the plan; the stub never falls back to GDELT here. */
+    /**
+     * A plan whose first {@code real.size()} queries share group 1: one real element needs no padding, k >= 2 elements are
+     * followed by 3k filler queries (4 groups of k elements; the fillers match no title).
+     */
+    private static com.oracul.app.api.model.SearchPlan sharedGroupPlan(List<String> real) {
+        List<String> texts = new ArrayList<>(real);
+        if (real.size() > 1) {
+            for (int i = 0; i < 3 * real.size(); i++) texts.add("filler" + i + " zzz");
+        }
+        return planOf(texts);
+    }
+
+    /** The feed is answered to the request of group 1 (the one holding the first element); every other group gets an empty feed. */
+    private static java.util.function.Function<StubNews.Request, StubNews.Reply> groupOneAnswers(String firstElement, StubNews.Reply answer) {
+        return req -> req.elements().contains(firstElement) ? answer : StubNews.rss();
+    }
+
+    /** Search + readSources over a feed of the given items for the plan; one Google request per group, no other request. */
     private List<Source> sources(SearchPlanHolder plan, String... items) throws Exception {
-        gdelt.rssResponder = req -> StubGdelt.rss(items);
+        String first = plan.plan().getQueries().get(0).getText();
+        news.responder = groupOneAnswers(first, StubNews.rss(items));
         var outcome = search(plan.plan());
-        assertThat(gdelt.rssRequests).hasSize(1);
-        assertThat(gdelt.requests).as("an answered group is not sent to GDELT").isEmpty();
+        assertThat(news.requests).hasSize(Math.min(4, plan.plan().getQueries().size()));
+        assertThat(news.paths).as("only Google News and article requests").allSatisfy(p -> assertThat(p).doesNotStartWith("/api/v2/doc"));
         List<Source> out = new ArrayList<>();
         for (var st : retrieval.readSources(outcome, plan.horizon())) out.add(st.source());
         return out;
@@ -60,7 +76,7 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     }
 
     private List<Source> oneItem(String link, String title, String pubDate, String source, String sourceUrl) throws Exception {
-        return sources(one(), StubGdelt.rssItem(title, link, pubDate, source, sourceUrl));
+        return sources(one(), StubNews.rssItem(title, link, pubDate, source, sourceUrl));
     }
 
     // ---- title cleaning ------------------------------------------------------------------------------------------
@@ -87,11 +103,11 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     @Test
     void attributionUsesTheCleanedTitle() throws Exception {
         // uncleaned, the title contains the phrase of element 1 ("reuters wire") and would be attributed there
-        var plan = new SearchPlanHolder(planOf(List.of("reuters wire", "solar eclipse")), HorizonCode._1Y);
-        gdelt.rssResponder = req -> StubGdelt.rss(StubGdelt.rssItem("Solar eclipse draws crowds - Reuters wire",
-            base() + "/articles/clean", recent(), "Reuters wire", REUTERS));
+        var plan = new SearchPlanHolder(sharedGroupPlan(List.of("reuters wire", "solar eclipse")), HorizonCode._1Y);
+        news.responder = groupOneAnswers("reuters wire", StubNews.rss(StubNews.rssItem("Solar eclipse draws crowds - Reuters wire",
+            base() + "/articles/clean", recent(), "Reuters wire", REUTERS)));
         var outcome = search(plan.plan());
-        assertThat(gdelt.rssRequests).hasSize(1);
+        assertThat(news.requests).as("4 groups of 2").hasSize(4);
         List<SearchQuery> q = outcome.plan().getQueries();
         assertThat(q.get(0).getStatus()).isEqualTo(SearchQueryStatus.EMPTY);
         assertThat(q.get(1).getStatus()).as("cleaned title 'Solar eclipse draws crowds' matches element 2").isEqualTo(SearchQueryStatus.OK);
@@ -100,17 +116,17 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     }
 
     @Test
-    void entriesOfAnAnsweredGroupAreAttributedLikeGdeltEntries() throws Exception {
+    void entriesOfAnAnsweredGroupAreAttributedByPhraseThenOverlapThenFirstElement() throws Exception {
         List<String> elements = List.of("solar eclipse", "wind farm", "mars rover", "fusion plant");
         List<String> titles = List.of("Solar eclipse draws crowds", "Wind farm approved", "Rover on Mars wakes", "Unrelated headline",
             "Fusion plant opens", "Wind farm and fusion plant", "The solar eclipse", "Nothing to see");
         String[] items = new String[titles.size()];
         for (int i = 0; i < titles.size(); i++) {
-            items[i] = StubGdelt.rssItem(titles.get(i) + " - Reuters", base() + "/articles/e" + i, recent(), "Reuters", REUTERS);
+            items[i] = StubNews.rssItem(titles.get(i) + " - Reuters", base() + "/articles/e" + i, recent(), "Reuters", REUTERS);
         }
-        gdelt.rssResponder = req -> StubGdelt.rss(items);
-        var outcome = search(planOf(elements));
-        int[] expected = {0, 1, 2, 0, 3, 1, 0, 0}; // phrase / overlap / first element (same classes as the GDELT test)
+        news.responder = groupOneAnswers("solar eclipse", StubNews.rss(items));
+        var outcome = search(sharedGroupPlan(elements));
+        int[] expected = {0, 1, 2, 0, 3, 1, 0, 0}; // phrase / overlap / first element
         int[] counts = new int[elements.size()];
         for (int e : expected) counts[e]++;
         for (int i = 0; i < elements.size(); i++) {
@@ -126,7 +142,7 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     @Test
     void anRfc1123PubDateIsThePublishedAt() throws Exception {
         Instant t = Instant.now().minus(30, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
-        List<Source> s = oneItem(base() + "/articles/pub", "Dated story", StubGdelt.pubDate(t), "Reuters", REUTERS);
+        List<Source> s = oneItem(base() + "/articles/pub", "Dated story", StubNews.pubDate(t), "Reuters", REUTERS);
         assertThat(s).hasSize(1);
         assertThat(s.get(0).getPublishedAt().toInstant()).isEqualTo(t);
     }
@@ -146,24 +162,24 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     @Test
     void anItemOlderThanTheHorizonDaysIsDropped() throws Exception {
         Instant old = Instant.now().minus(200, ChronoUnit.DAYS);
-        assertThat(oneItem(base() + "/articles/old", "Old story", StubGdelt.pubDate(old), "Reuters", REUTERS))
+        assertThat(oneItem(base() + "/articles/old", "Old story", StubNews.pubDate(old), "Reuters", REUTERS))
             .as("200 days old at horizon 1y (90 days)").isEmpty();
-        gdelt.reset();
-        assertThat(oneItem(base() + "/articles/fresh", "Fresh story", StubGdelt.pubDate(Instant.now().minus(80, ChronoUnit.DAYS)), "Reuters", REUTERS))
+        news.reset();
+        assertThat(oneItem(base() + "/articles/fresh", "Fresh story", StubNews.pubDate(Instant.now().minus(80, ChronoUnit.DAYS)), "Reuters", REUTERS))
             .as("80 days old is inside the 90 days").hasSize(1);
     }
 
     @Test
     void theAgeFilterOfShortHorizonsFollowsTheirDays() throws Exception {
         var plan = new SearchPlanHolder(planOf(List.of("solar flare")), HorizonCode._1W);
-        assertThat(sources(plan, StubGdelt.rssItem("Eight days", base() + "/articles/d8", StubGdelt.pubDate(Instant.now().minus(8, ChronoUnit.DAYS)),
+        assertThat(sources(plan, StubNews.rssItem("Eight days", base() + "/articles/d8", StubNews.pubDate(Instant.now().minus(8, ChronoUnit.DAYS)),
             "Reuters", REUTERS))).as("8 days old at horizon 1w (7 days)").isEmpty();
-        gdelt.reset();
-        assertThat(sources(plan, StubGdelt.rssItem("Five days", base() + "/articles/d5", StubGdelt.pubDate(Instant.now().minus(5, ChronoUnit.DAYS)),
+        news.reset();
+        assertThat(sources(plan, StubNews.rssItem("Five days", base() + "/articles/d5", StubNews.pubDate(Instant.now().minus(5, ChronoUnit.DAYS)),
             "Reuters", REUTERS))).hasSize(1);
-        gdelt.reset();
+        news.reset();
         var month = new SearchPlanHolder(planOf(List.of("solar flare")), HorizonCode._1M);
-        assertThat(sources(month, StubGdelt.rssItem("Ten days", base() + "/articles/d10", StubGdelt.pubDate(Instant.now().minus(10, ChronoUnit.DAYS)),
+        assertThat(sources(month, StubNews.rssItem("Ten days", base() + "/articles/d10", StubNews.pubDate(Instant.now().minus(10, ChronoUnit.DAYS)),
             "Reuters", REUTERS))).as("10 days old at horizon 1m (14 days)").hasSize(1);
     }
 
@@ -184,7 +200,7 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     @ParameterizedTest(name = "{0}: kept={2}")
     @MethodSource("links")
     void onlyAbsoluteHttpAndHttpsLinksBecomeSources(String name, String link, boolean kept) throws Exception {
-        String url = link == null ? null : link.replace("{port}", String.valueOf(gdelt.port()));
+        String url = link == null ? null : link.replace("{port}", String.valueOf(news.port()));
         List<Source> s = oneItem(url, "Story " + name, recent(), "Reuters", REUTERS);
         assertThat(s).as(name).hasSize(kept ? 1 : 0);
     }
@@ -227,7 +243,7 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
 
     @Test
     void aRedirectToAnHtmlPageResolvesTheLink() throws Exception {
-        gdelt.site("resolved-1", "Resolved Site");
+        news.site("resolved-1", "Resolved Site");
         List<Source> s = oneItem(base() + "/rss/articles/resolved-1", "Resolved story - Reuters", recent(), "Reuters", REUTERS);
         assertThat(s).hasSize(1);
         Source src = s.get(0);
@@ -239,7 +255,7 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
         assertThat(src.getSourceType()).isEqualTo(SourceType.NEWS);
         assertThat(src.getSourceQuality()).isEqualTo(0.85);
         assertThat(src.getTitle()).isEqualTo("Resolved story");
-        assertThat(gdelt.articleRequests).contains("resolved-1");
+        assertThat(news.articleRequests).contains("resolved-1");
     }
 
     @Test
@@ -266,7 +282,7 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     @ParameterizedTest(name = "{0}: the Google link is kept, metadataFetched false")
     @MethodSource("unresolved")
     void aFetchThatDoesNotEndInAnHtmlPageKeepsTheGoogleLink(String name, String path) throws Exception {
-        gdelt.pages.put("gone-404", new StubGdelt.Page(404, "text/html", "<html>gone</html>"));
+        news.pages.put("gone-404", new StubNews.Page(404, "text/html", "<html>gone</html>"));
         String link = base() + path;
         List<Source> s = oneItem(link, "Unresolved story - Reuters", recent(), "Reuters", REUTERS);
         assertThat(s).as(name).hasSize(1);
@@ -281,8 +297,8 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     @Test
     void aResolvedUrlThatAnEarlierSourceAlreadyHasIsNotUsedTwice() throws Exception {
         List<Source> s = sources(one(),
-            StubGdelt.rssItem("First story - Reuters", base() + "/rss/articles/same", recent(), "Reuters", REUTERS),
-            StubGdelt.rssItem("Second story - Reuters", base() + "/rss/articles/same?second=1", recent(), "Reuters", REUTERS));
+            StubNews.rssItem("First story - Reuters", base() + "/rss/articles/same", recent(), "Reuters", REUTERS),
+            StubNews.rssItem("Second story - Reuters", base() + "/rss/articles/same?second=1", recent(), "Reuters", REUTERS));
         assertThat(s).hasSize(2);
         assertThat(s.get(0).getId()).isEqualTo("S001");
         assertThat(s.get(0).getUrl()).hasToString(base() + "/articles/same");
@@ -295,11 +311,11 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
     }
 
     @Test
-    void googleSourcesCarryTopicAndQueryIdsLikeGdeltSources() throws Exception {
-        var plan = new SearchPlanHolder(planOf(List.of("alpha one", "beta two")), HorizonCode._1Y);
+    void googleSourcesCarryTopicAndQueryIds() throws Exception {
+        var plan = new SearchPlanHolder(sharedGroupPlan(List.of("alpha one", "beta two")), HorizonCode._1Y);
         List<Source> s = sources(plan,
-            StubGdelt.rssItem("Beta two arrives - Reuters", base() + "/articles/q-b", recent(), "Reuters", REUTERS),
-            StubGdelt.rssItem("Alpha one arrives - Reuters", base() + "/articles/q-a", recent(), "Reuters", REUTERS));
+            StubNews.rssItem("Beta two arrives - Reuters", base() + "/articles/q-b", recent(), "Reuters", REUTERS),
+            StubNews.rssItem("Alpha one arrives - Reuters", base() + "/articles/q-a", recent(), "Reuters", REUTERS));
         assertThat(s).extracting(Source::getId).containsExactly("S001", "S002");
         assertThat(s.get(0).getQueryIds()).as("response order within the group").isEqualTo(List.of("Q02"));
         assertThat(s.get(1).getQueryIds()).isEqualTo(List.of("Q01"));

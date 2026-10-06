@@ -146,7 +146,7 @@ class ModelResolutionIT extends AbstractPlanUsageIT {
 
     @Test
     void aRunWithoutSourcesStillStoresItsResolvedModel() throws Exception {
-        Ran r = run(A); // default GDELT {}: the run completes after the query expansion
+        Ran r = run(A); // default empty news feed: the run completes after the query expansion
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("select model from generation_run where id = cast(? as uuid)", String.class, r.id()))
             .isEqualTo(P);

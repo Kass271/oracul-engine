@@ -7,7 +7,6 @@ test.describe.configure({ mode: 'serial' });
 test.beforeEach(async ({ request }) => {
   const r = await request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  await request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
   const events = await request.post(`${STUB}/__control/events`, { data: { mode: 'ok' } });
   expect(events.status()).toBe(204);
 });

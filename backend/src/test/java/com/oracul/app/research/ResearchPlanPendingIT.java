@@ -39,7 +39,7 @@ class ResearchPlanPendingIT extends AbstractRunIT {
             assertThat(q.get("articlesReturned")).isEqualTo(0);
         }
         assertThat(json(getSources(sid, id))).isEqualTo(json("{\"items\":[]}"));
-        assertThat(gdelt.requests).as("searching has not started").isEmpty();
+        assertThat(news.requests).as("searching has not started").isEmpty();
         assertThat(research.get("counts")).isEqualTo(json(ZERO_COUNTS));
     }
 }

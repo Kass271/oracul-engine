@@ -21,8 +21,8 @@ class AlternativeRunStagesIT extends AbstractStoryIT {
 
     @Test
     void anAlternativeRunShowsOnlyTheStages7To10() throws Exception {
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
         String sid0 = connectedSid();

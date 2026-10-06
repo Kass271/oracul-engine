@@ -18,7 +18,6 @@ const B = {
 
 async function resetStub(page: Page): Promise<void> {
   expect((await page.request.post(`${STUB}/__control/reset`)).status()).toBe(204);
-  await page.request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
   expect((await page.request.post(`${STUB}/__control/events`, { data: { mode: 'ok' } })).status()).toBe(204);
   expect((await page.request.post(`${STUB}/__control/scenario`, { data: { mode: 'ok' } })).status()).toBe(204);
   expect((await page.request.post(`${STUB}/__control/story`, { data: { mode: 'ok' } })).status()).toBe(204);

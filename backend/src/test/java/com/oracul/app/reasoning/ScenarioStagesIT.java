@@ -15,8 +15,8 @@ class ScenarioStagesIT extends AbstractReasoningIT {
 
     @Test
     void theRunPassesExploringChallengingAndConstructingInOrder() throws Exception {
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
         String sid = connectedSid();

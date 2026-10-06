@@ -32,7 +32,7 @@ class ResearchPlanTimeoutIT extends AbstractRunIT {
         Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
         assertThat(plan.get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
         assertThat((java.util.List<?>) plan.get("queries")).hasSize(20);
-        assertThat(gdelt.requests).as("20 template queries as 4 OR groups").hasSize(4);
+        assertThat(news.requests).as("20 template queries as 4 OR groups").hasSize(4);
         assertThat(responses.requests.stream().filter(r -> "QUERY_EXPANSION".equals(StubResponses.purpose(r))).count())
             .as("no retry").isEqualTo(1);
     }

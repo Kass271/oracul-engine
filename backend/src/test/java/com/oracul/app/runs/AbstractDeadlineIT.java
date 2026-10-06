@@ -82,8 +82,8 @@ public abstract class AbstractDeadlineIT extends AbstractStoryIT {
 
     protected void freshStubs() {
         responses.reset(); // arrival counters and recorded requests of earlier runs must not satisfy awaitArrived
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
     }

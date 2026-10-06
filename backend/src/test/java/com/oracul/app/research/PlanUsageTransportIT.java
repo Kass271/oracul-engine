@@ -184,7 +184,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @ParameterizedTest(name = "incomplete: {0}")
     @MethodSource("incompleteStreams")
     void aStreamWithoutCompletedFailsTheStageWithoutPartialText(String name, StubResponses.Reply reply) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(CLASSIFICATION, C_V4);
         always(NORMALIZATION, reply);
         Ran r = run(A);
@@ -199,7 +199,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @Test
     void aTruncatedStreamNeverUsesItsPartialDeltasAsTheAnswer() throws Exception {
         // the deltas alone would be a valid answer: without response.completed they must not be used
-        gdeltArticles(v4());
+        newsArticles(v4());
         always(NORMALIZATION, req -> StubResponses.sse(StubResponses.createdEvent(),
             StubResponses.deltaEvent(StubResponses.defaultNormalization(req.inputText()))));
         Ran r = run(A);
@@ -246,7 +246,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @Test
     void theFallbackRepeatsTheRejectedCallExactlyOnceAndLaterCallsStartWithoutTextFormat() throws Exception {
         rejectTextFormat("text.format");
-        gdeltArticles(v4());
+        newsArticles(v4());
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         List<StubResponses.Request> all = responses.requests;
@@ -277,7 +277,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @Test
     void aFencedFallbackAnswerParsesLikeBareJson() throws Exception {
         for (String fence : List.of("```json\n", "```\n")) {
-            gdelt.reset();
+            news.reset();
             responses.reset();
             rejectTextFormat(null);
             Function<StubResponses.Request, StubResponses.Reply> inner = responses.responder;
@@ -287,7 +287,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
                 String text = JsonPath.read(reply.body(), "$.output[0].content[0].text");
                 return StubResponses.completed(fence + text + "\n```");
             };
-            gdeltArticles(v4());
+            newsArticles(v4());
             Ran r = run(A);
             assertThat(r.run().get("status")).as(fence + " run: " + r.run()).isEqualTo("COMPLETED");
             @SuppressWarnings("unchecked")
@@ -301,7 +301,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @Test
     void aBodyWithoutTextFormatIsNeverFallenBackAndAFailingFallbackIsARequestRejection() throws Exception {
         // every call is rejected, with or without text: the repeat is rejected too -> row 5
-        gdeltArticles(v4());
+        newsArticles(v4());
         always(NORMALIZATION, StubResponses.error(400, "subscription_sharing_unsupported_capability"));
         script(CLASSIFICATION, C_V4);
         Ran r = run(A);
@@ -313,7 +313,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
 
     @Test
     void aRejectionNamingAnotherParameterIsNoFallback() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         always(NORMALIZATION, new StubResponses.Reply(400,
             "{\"error\":{\"code\":\"subscription_sharing_unsupported_capability\",\"message\":\"stub\",\"param\":\"tools\"}}", 0));
         script(CLASSIFICATION, C_V4);
@@ -326,7 +326,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @Test
     void anAbsentParamStillTriggersTheFallback() throws Exception {
         rejectTextFormat(null);
-        gdeltArticles(v4());
+        newsArticles(v4());
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         assertThat(responses.requests.stream().filter(PlanUsageTransportIT::hasTextFormat)).hasSize(1);
@@ -335,7 +335,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @Test
     void aParamStartingWithTextTriggersTheFallback() throws Exception {
         rejectTextFormat("text");
-        gdeltArticles(v4());
+        newsArticles(v4());
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         assertThat(responses.requests.stream().filter(PlanUsageTransportIT::hasTextFormat)).hasSize(1);
@@ -348,7 +348,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
         Function<StubResponses.Request, StubResponses.Reply> inner = responses.responder;
         responses.responder = req -> GEN.equals(StubResponses.purpose(req)) && !hasTextFormat(req)
             ? StubResponses.completed("this is not json") : inner.apply(req);
-        gdeltArticles(v4());
+        newsArticles(v4());
         Ran r = run(A);
         assertFailure(r.run(), "INVALID_SCENARIO", INVALID, null);
         assertThat(requests(GEN).stream().filter(q -> !hasTextFormat(q)).count()).as("initial + one correction").isEqualTo(2);

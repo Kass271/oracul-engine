@@ -19,7 +19,8 @@ class FutureResultIT extends AbstractStoryIT {
         assertStoryCompleted(r.run());
         String d = dayAfter(cutoffDate(r));
         Map<String, Object> res = result(r);
-        assertThat(res.keySet()).containsExactlyInAnyOrder("runId", "generationId", "labels", "story", "metadata", "causalChain",
+        assertThat(res.keySet())
+            .containsExactlyInAnyOrder("runId", "generationId", "labels", "story", "metadata", "causalChain",
             "sources", "research", "openCriticIssues");
         assertThat(res.get("runId")).isEqualTo(r.id());
         assertThat(res.get("generationId")).isEqualTo(r.run().get("generationId"));
@@ -75,7 +76,7 @@ class FutureResultIT extends AbstractStoryIT {
     // @trace FR-47
     @Test
     void aRunWithAnEmptyPackHasASpeculativeResultWithoutSources() throws Exception {
-        Ran r = run(A); // default GDELT {}: COMPLETED with headline and story
+        Ran r = run(A); // default empty news feed: COMPLETED with headline and story
         assertStoryCompleted(r.run());
         assertThat(requests(STORY)).hasSize(1);
         assertThat(storyRows(r.id())).isEqualTo(1);

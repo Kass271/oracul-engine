@@ -32,7 +32,7 @@ class EventNormalizerRulesIT extends AbstractEventIT {
     }
 
     private Ran runScripted(String... normalizationAnswers) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(NORMALIZATION, normalizationAnswers);
         return run(A);
     }
@@ -136,7 +136,7 @@ class EventNormalizerRulesIT extends AbstractEventIT {
 
     @Test
     void dateFallsBackToTheEarliestSourceDateAndKeepsAValidModelDate() throws Exception {
-        gdeltArticles(List.of(
+        newsArticles(List.of(
             new Art("who-vaccine", "who.int", "WHO approves new pandemic vaccine", 1),
             new Art("reuters-vaccine", "reuters.com", "Regulators approve pandemic vaccine", 4),
             new Art("local-vaccine", "example-news.com", "Pandemic vaccine gets approval", 2)));
@@ -166,7 +166,7 @@ class EventNormalizerRulesIT extends AbstractEventIT {
     // fallback grouping
     @Test
     void fallbackJoinsTitlesWithJaccardAtLeastPointSixTransitivelyAndOnlyThen() throws Exception {
-        gdeltArticles(withTitles(v4(), "a b c d e", "a b c d f", "a b c f g", "x y z"));
+        newsArticles(withTitles(v4(), "a b c d e", "a b c d f", "a b c f g", "x y z"));
         scriptReplies(NORMALIZATION, StubResponses.completed("not json"), StubResponses.completed("not json"));
         Ran r = run(A);
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
@@ -180,7 +180,7 @@ class EventNormalizerRulesIT extends AbstractEventIT {
 
     @Test
     void fallbackKeepsTitlesBelowTheThresholdApart() throws Exception {
-        gdeltArticles(withTitles(v4(), "a b c d e", "a b c f g", "p q r", "x y z"));
+        newsArticles(withTitles(v4(), "a b c d e", "a b c f g", "p q r", "x y z"));
         scriptReplies(NORMALIZATION, StubResponses.completed("not json"), StubResponses.completed("not json"));
         Ran r = run(A);
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
@@ -190,7 +190,7 @@ class EventNormalizerRulesIT extends AbstractEventIT {
 
     @Test
     void aValidAnswerGroupingEverythingNeedsNoRetry() throws Exception {
-        gdeltArticles(withTitles(v4(), "Pandemic vaccine approved by regulators", "Regulators approved pandemic vaccine",
+        newsArticles(withTitles(v4(), "Pandemic vaccine approved by regulators", "Regulators approved pandemic vaccine",
             "Dock workers strike over humanoid robots", "Fusion plant opens in France"));
         script(NORMALIZATION, answer(ok("[\"S001\",\"S002\",\"S003\",\"S004\"]")));
         Ran r = run(A);

@@ -1,0 +1,151 @@
+{
+  "slice": "01_gdelt-removal",
+  "round": 7,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/runs/EvidenceNoteMixin.java",
+      "line": 9,
+      "fr": "FR-49",
+      "problem": "The takeover fixed only the two cases E2E happened to compare exactly (EvidenceNote.wildcardsWithoutSources, ResearchCounts.sourcesKept/sourcesWithContent). The cause is broader: the contract 0.7.0 regeneration added more optional properties, and the app writes them as [] or null, which breaks the contract. Live check against the running E2E backend (run be496400…, created by this slice's code): GET /api/runs/{id}/research → searchPlan has \"pipelines\": [] (contract: minItems 1; \"Older runs - … no `pipelines`\"; the stored search_plan JSONB also holds \"pipelines\": []); GET /api/runs/{id}/result → \"wildcardGroups\": [] (contract: \"Present iff the run … has wildcard pipelines\"); GET /api/runs/{id}/sources → every item has \"publisherHost\": null and \"contentStatus\": null (neither is nullable; contentStatus is an enum, \"Absent for runs created before phase 03\"; publisherHost is \"absent while url is still the Google News link\"). These are the same defect as round 3 in another place. They also hit every phase-01/02 run already in the DB, because reading the stored JSON fills the generated defaults. A client (or the later FR-60 UI) that checks `searchPlan.pipelines` or `wildcardGroups` for presence would treat every old run as a wildcard run.",
+      "fix": "Use the existing mixin pattern for the whole set of new optional properties: SearchPlan.pipelines and FutureResult.wildcardGroups @JsonInclude(NON_EMPTY); Source.publisherHost / contentStatus NON_NULL (and excerpts / pipelineIds NON_EMPTY until the slices that always send them); EvidencePack.wildcardSections NON_EMPTY until FR-57; WildcardPipeline.candidatesConsidered NON_NULL / sourceIds NON_EMPTY. Walk the regenerated models for all 0.7.0 additions (`git diff 54285ba f84b367 -- api/openapi.yaml`) so no optional field of the new contract stays on the wire as null or [].",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/AbstractRunIT.java",
+      "line": 113,
+      "fr": "FR-49",
+      "problem": "The backend suite hides exactly the class of defect behind round 3 and R1. AbstractRunIT.legacy() removes sourcesKept / sourcesWithContent / wildcardsWithoutSources when they are null or [] before 12 ITs compare exactly (StartRunIT, GetRunIT, GetRunTerminalIT, RunResearchIT, ResearchPlanPendingIT, SourceRetrievalIT, FutureResultIT, SpeculativeScenarioIT, InsufficientEvidenceIT, EvidenceNoteNoThresholdIT, AbstractEventIT). EvidencePackIT:185 and FutureResultIT:22 also drop wildcardSections / wildcardGroups from their key-set checks. Every one of these passes with or without the new mixins. ResearchCountsMixin has no test at any level, because no E2E spec compares counts exactly. The Javadoc of legacy() is also stale: it still says the app writes unset optional fields as null or an empty list.",
+      "fix": "Remove legacy() (or make it assert instead of strip) and compare the bodies exactly again, so a null or [] on the wire fails the test. Add one exhaustive wire-format test for the optional phase-03 fields that asserts each field is absent from the JSON when unset: counts.sourcesKept, counts.sourcesWithContent, evidenceNote.wildcardsWithoutSources (INSUFFICIENT_EVIDENCE and NO_EVIDENCE), searchPlan.pipelines, result.wildcardGroups, evidencePack.wildcardSections, source.publisherHost, source.contentStatus, source.excerpts, source.pipelineIds. Use doesNotContainKey for each field on the raw JSON maps of /runs/{id}, /research, /sources, /evidence-pack and /result. Drop the key filters in EvidencePackIT:185 and FutureResultIT:22.",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/StubNews.java",
+      "line": 95,
+      "fr": "FR-49",
+      "problem": "registerBaseUrls still sets the former provider's base-url key. It builds the name from pieces (\"gd\" + \"elt\") so the FR-49 scan cannot see it. Production code no longer reads the key, so the line is dead and its comment (\"as long as production code still reads it\") is stale. It quietly works around the scan whose job is to show the name is gone from backend/src/test. RemovedNewsPropertiesIT is the one legitimate place for the assembled key.",
+      "fix": "Delete the line and the stale part of the Javadoc. The junit-platform timeout and the scan of backend/src/main already guard against a call to the real internet.",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/runs/EvidenceNoteMixin.java",
+      "line": 12,
+      "fr": "FR-49",
+      "problem": "The contract says wildcardsWithoutSources is \"Present iff at least one and kind is not NO_EVIDENCE\". The mixin enforces only the non-empty half. Nothing sets the list in this slice, so nothing is visible now, but the FR-59 slice must not rely on the mixin for the NO_EVIDENCE rule.",
+      "fix": "Leave as is for slice 01. In FR-59, never set the list on a NO_EVIDENCE note (EvidenceNotes.of) and test that case.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/result/FutureResultMixin.java",
+      "line": 10,
+      "fr": "FR-49",
+      "problem": "The round-5 mixins cover every 0.7.0 optional field that slice 01 can put on the wire. The nested 0.7.0 types still have no mixin: PackWildcardSection.level, PackSourceItem.publishedAt / snippet, ResultWildcardGroup.level and ResultGroupSource.publishedAt (all @Nullable in the generated models). No code builds these types yet, so nothing is visible now. Once FR-57 / FR-60 fill wildcardSections / wildcardGroups, a GENERAL pipeline (no level) or a source without a date would be written as \"level\": null / \"publishedAt\": null.",
+      "fix": "Leave as is for slice 01. In the FR-57 and FR-60 slices, add NON_NULL mixins for these types, the same way WildcardPipelineMixin does, and extend OptionalWireFieldsAbsentIT to a run that has wildcard pipelines.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SourceRetrievalUnitTest.java",
+      "line": 129,
+      "fr": "FR-13",
+      "problem": "aSourceWhoseFetchBreaksIsDroppedAndTheOthersAreNumberedWithoutGaps writes a spec deviation into the test as if it were intended. FR-13 errors (phase-01 research-pipeline.md:103, :439-440) say: when the article fetch fails, the source keeps its provider metadata with metadataFetched false, and fetch failures never fail the run. The FR-46 invariant (phase-02 news-search.md:151) says stored rows = k = the candidates that are kept. This test expects the candidate whose fetch throws (b.example.com/boom) to vanish, with 2 stored rows from 3 candidates. It passes only because SourceRetrieval.runBounded swallows the ExecutionException and leaves prepared[i] null (see R7). It also checks the URLs with containsExactlyInAnyOrder, so the arrival-order numbering it names (a -> S001, c -> S002) is not actually tied to the URLs.",
+      "fix": "Do not lock in dropping. Assert the spec: 3 stored sources S001..S003 in arrival order, and the /boom source has the Google link, metadataFetched false, and summary = title. This needs the builder fix in R7. Until then, remove the case rather than asserting the deviation. Use containsExactly on the URLs, in the same order as the ids.",
+      "status": "fixed"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/research/SourceRetrieval.java",
+      "line": 420,
+      "fr": "FR-13",
+      "problem": "If prepare() throws, runBounded leaves that slot null and readSources silently drops the candidate. The spec says it should be kept with metadataFetched false. The real ArticleMetadataFetcher catches everything, but the run guard passed as mayFetch (RunGuard.check, a JDBC query) can throw a DataAccessException. A brief DB error during READING_SOURCES then loses sources without any log line. This is old behaviour, made visible by R6. It does not block slice 01.",
+      "fix": "In prepare() (or the runBounded job), catch RuntimeException and return new Prepared(c, Optional.empty(), null), so a broken fetch or guard check falls back to the provider metadata as FR-13 requires.",
+      "status": "open"
+    },
+    {
+      "id": "R8",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SearchPlannerSkewTest.java",
+      "line": 58,
+      "fr": "FR-12",
+      "problem": "The 'heavy topic is not below any light one' check is a tautology. `lightest` is the minimum over all topics, the heavy topic included, so `own >= lightest` holds for every allocation. The skew property that the Javadoc and the assertion message promise is never checked. The else branch (fewer WILDCARD queries than topics) only counts the topics that got a query. It does not check the spec rule (phase-01 research-pipeline.md:330-332) that the topics with the highest weight (ties -> earlier) get the 1 each, so a planner that gave the single query to a light topic would pass.",
+      "fix": "Take the maximum over the light topics only (exclude the heavy index) and assert own >= that maximum. In the else branch, assert that the heavy topic is among the topics that got a query and that the rest are the earliest light topics (ties -> earlier). This covers the whole 4..100 x shapes range in the same loop.",
+      "status": "fixed"
+    },
+    {
+      "id": "R9",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ArticleMetadataFetcherTest.java",
+      "line": 174,
+      "fr": "FR-13",
+      "problem": "anUnreachableHostGivesNoResult takes 2.0 s (test-results XML), which is the full fetcher timeout. The server is created (and its port bound) but never started before stop(0), so the connection is not refused: it hangs until the timeout. The test therefore checks the timeout path a second time, not the unreachable path its name claims, and adds a 2 s real-time wait to a unit class. Also, every fetcher(...) call builds an HttpClient plus a virtual-thread executor, and the test never shuts down or closes them. Their selector threads remain until GC.",
+      "fix": "Get a refused port by binding a plain ServerSocket on port 0 and closing it before the call (or call server.start() before stop). Assert the call finishes well under the timeout. Call fetcher.shutdown() on every fetcher the test creates (collect them and close them in @AfterEach).",
+      "status": "fixed"
+    },
+    {
+      "id": "R10",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SourceRetrievalUnitTest.java",
+      "line": 115,
+      "fr": "FR-48",
+      "problem": "noRequestStartsWhenTheSearchBudgetEndsWhileTheRunGuardIsBeingAsked uses a fixed Thread.sleep(150) against a real 40 ms budget. It never checks that the guard was actually called; a scheduler delay longer than 40 ms takes the pre-guard budget check and still passes. anInterruptedWaitForTheFetchesIsReportedAndStopsTheFetchesStillRunning checks only the InterruptedException; the 'stops the fetches' half of its name is not asserted. The SourceRetrieval instances' fetchPool is never shut down (cleanUp only shuts down the fetchers).",
+      "fix": "Count the guard calls and assert exactly 1. Let the guard wait on a latch or poll until the budget has passed instead of sleeping a fixed time. In the interrupted case, assert that every started fake fetch has seen its interrupt (for example, a CountDownLatch counted down in the InterruptedException branch). Call retrieval.shutdown() in @AfterEach.",
+      "status": "open"
+    },
+    {
+      "id": "R11",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ArticleMetadataFetcherTest.java",
+      "line": 60,
+      "fr": "FR-13",
+      "problem": "Round 7 fixed the main part of R9: anUnreachableHostGivesNoResult now uses a refused port and runs in 0.001 s. The rest of the R9 fix was not done. fetcher(...) still builds a new ArticleMetadataFetcher (HttpClient plus executor) on every call, and no test calls fetcher.shutdown(). The class creates about 12 of them and never closes them. Also, the unreachable case still does not check that the call returns well under the timeout, so a fallback to the timeout path would go unnoticed.",
+      "fix": "Collect the fetchers that fetcher(...) creates, and call shutdown() on each in @AfterEach. In anUnreachableHostGivesNoResult, assert the elapsed time is far below the 2 s timeout (for example, under 1 s).",
+      "status": "open"
+    },
+    {
+      "id": "R12",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SourceRetrievalUnitTest.java",
+      "line": 51,
+      "fr": "FR-13",
+      "problem": "The /boom test was removed (R6), but FakeFetcher.fetchDetailed still has the branch that throws on a URL containing \"/boom\". No test uses it now, so it is dead test code. It belongs to the test that R7 needs: a fetch that throws keeps its source, with metadataFetched false.",
+      "fix": "When R7 is fixed, use the branch for the spec-conform test: 3 stored sources S001..S003 in arrival order (containsExactly), and the /boom source has metadataFetched false and summary = title. Until then, remove the branch.",
+      "status": "open"
+    }
+  ]
+}

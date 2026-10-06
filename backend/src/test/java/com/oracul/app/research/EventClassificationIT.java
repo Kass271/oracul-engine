@@ -16,7 +16,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class EventClassificationIT extends AbstractEventIT {
 
     private Ran runV4(String... classificationAnswers) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         if (classificationAnswers.length > 0) script(CLASSIFICATION, classificationAnswers);
         else script(CLASSIFICATION, C_V4);

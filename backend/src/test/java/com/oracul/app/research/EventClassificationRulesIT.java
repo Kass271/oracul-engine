@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 class EventClassificationRulesIT extends AbstractEventIT {
 
     private Ran runScripted(String bodyJson, String... classificationAnswers) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, classificationAnswers);
         return run(bodyJson);

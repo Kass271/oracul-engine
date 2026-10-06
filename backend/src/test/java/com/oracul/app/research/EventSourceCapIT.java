@@ -24,7 +24,7 @@ class EventSourceCapIT extends AbstractEventIT {
     // #22
     @Test
     void onlyTheFirst12SourcesInIdOrderAreNormalizedWhenEverythingTies() throws Exception {
-        gdeltF240();
+        newsF240();
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         assertThat(counts(r.run()).get("articlesConsidered")).as("FR-46: at most 30 sources are kept").isEqualTo(30);

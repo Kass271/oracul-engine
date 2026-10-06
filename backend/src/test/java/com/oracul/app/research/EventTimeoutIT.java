@@ -16,7 +16,7 @@ class EventTimeoutIT extends AbstractEventIT {
     @ParameterizedTest(name = "timeout twice on {0}")
     @ValueSource(strings = {NORMALIZATION, CLASSIFICATION})
     void aTimeoutTwiceFailsTheRunWithChatGptUnavailable(String purpose) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         if (!NORMALIZATION.equals(purpose)) script(NORMALIZATION, N_V4);
         if (!CLASSIFICATION.equals(purpose)) script(CLASSIFICATION, C_V4);
         always(purpose, StubResponses.delayed(StubResponses.completed("{}"), 2000));

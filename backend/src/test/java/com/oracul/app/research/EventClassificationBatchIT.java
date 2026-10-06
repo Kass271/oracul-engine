@@ -19,7 +19,7 @@ class EventClassificationBatchIT extends AbstractEventIT {
     void badEventsOfAllBatchesAreRetriedTogetherInIdOrderInBatchesOfTheSameSize() throws Exception {
         List<Art> five = new ArrayList<>();
         for (int i = 1; i <= 5; i++) five.add(new Art("a" + i, "reuters.com", "Distinct headline number" + " " + "x".repeat(i)));
-        gdeltArticles(five);
+        newsArticles(five);
         // answers are keyed by the event ids of the request, not by arrival order (batches run in parallel):
         // an event asked for the first time is answered only when its number is even; asked again, always
         Set<String> asked = ConcurrentHashMap.newKeySet();

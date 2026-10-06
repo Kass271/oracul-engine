@@ -9,7 +9,6 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(async ({ request }) => {
   expect((await request.post(`${STUB}/__control/reset`)).status()).toBe(204);
-  await request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
   await request.post(`${STUB}/__control/rss`, { data: { mode: 'ok' } });
   for (const name of ['events', 'scenario', 'story']) {
     expect((await request.post(`${STUB}/__control/${name}`, { data: { mode: 'ok' } })).status()).toBe(204);
@@ -47,7 +46,7 @@ async function startAcceptanceRun(page: Page): Promise<string> {
   return page.url().split('/').pop()!;
 }
 
-async function recordedCount(page: Page, kind: 'responses' | 'rss' | 'gdelt'): Promise<number> {
+async function recordedCount(page: Page, kind: 'responses' | 'rss' | 'all'): Promise<number> {
   const res = await page.request.get(`${STUB}/__control/requests?kind=${kind}`);
   expect(res.status()).toBe(200);
   const body = await res.json();
@@ -58,7 +57,7 @@ async function traffic(page: Page): Promise<Record<string, number>> {
   return {
     responses: await recordedCount(page, 'responses'),
     rss: await recordedCount(page, 'rss'),
-    gdelt: await recordedCount(page, 'gdelt'),
+    all: await recordedCount(page, 'all'),
   };
 }
 
@@ -97,7 +96,7 @@ test.describe('FR-45 Stop a generation and start a new one', () => {
     expect(run.headline ?? null).toBeNull();
     expect(run.completedAt).toBeTruthy();
 
-    // 3 s later the stub has seen nothing new: no Responses, Google News or GDELT request for the stopped run
+    // 3 s later the stub has seen nothing new: no Responses, Google News or other request for the stopped run
     const before = await traffic(page);
     await page.waitForTimeout(3000);
     expect(await traffic(page)).toEqual(before);

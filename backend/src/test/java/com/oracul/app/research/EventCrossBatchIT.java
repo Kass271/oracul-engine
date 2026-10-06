@@ -27,7 +27,7 @@ class EventCrossBatchIT extends AbstractEventIT {
     }
 
     Ran runThree(String batch1, String batch2) throws Exception {
-        gdeltArticles(v4(3));
+        newsArticles(v4(3));
         scriptBatch(1, batch1);
         scriptBatch(2, batch2);
         return run(A);
@@ -101,7 +101,7 @@ class EventCrossBatchIT extends AbstractEventIT {
     // events of the same batch are never merged
     @Test
     void eventsOfTheSameBatchAreNeverMerged() throws Exception {
-        gdeltArticles(v4(3));
+        newsArticles(v4(3));
         scriptBatch(1, events(ev("[\"S001\"]", "null", "[\"WHO\"]", "WHO approves new pandemic vaccine", "null", 0.8),
             ev("[\"S002\"]", "null", "[\"WHO\"]", "WHO approves new pandemic vaccine", "null", 0.8)));
         scriptBatch(2, events(ev("[\"S003\"]", "null", "[\"Dock workers\"]", "Dock workers strike", "null", 0.8)));
@@ -113,7 +113,7 @@ class EventCrossBatchIT extends AbstractEventIT {
     // each batch is validated on its own: the second batch is retried with its own errors only
     @Test
     void anInvalidBatchIsRetriedAlone() throws Exception {
-        gdeltArticles(v4(3));
+        newsArticles(v4(3));
         scriptBatch(1, events(ev("[\"S001\",\"S002\"]", "null", "[\"WHO\"]", "WHO approves new pandemic vaccine", "null", 0.8)));
         scriptBatch(2, events(ev("[\"S777\"]", "null", "[\"who\"]", "WHO approves pandemic vaccine", "null", 0.8)),
             events(ev("[\"S003\"]", "null", "[\"who\"]", "WHO approves pandemic vaccine", "null", 0.8)));

@@ -19,7 +19,7 @@ class EventBatchingIT extends AbstractEventIT {
     // #8 and #13
     @Test
     void thirtyKeptSourcesAreBatchedAndEveryClassificationIsInRange() throws Exception {
-        gdeltF240();
+        newsF240();
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(30);

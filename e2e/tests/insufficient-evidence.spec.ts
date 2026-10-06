@@ -27,7 +27,6 @@ test.describe.configure({ mode: 'serial' });
 async function resetStub(page: Page): Promise<void> {
   const r = await page.request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  await page.request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
   expect((await page.request.post(`${STUB}/__control/events`, { data: { mode: 'ok' } })).status()).toBe(204);
   expect((await page.request.post(`${STUB}/__control/scenario`, { data: { mode: 'ok' } })).status()).toBe(204);
   expect((await page.request.post(`${STUB}/__control/story`, { data: { mode: 'ok' } })).status()).toBe(204);
@@ -132,7 +131,6 @@ test.describe('FR-47 Always generate, note insufficient evidence at the end', ()
   test('FR-47 no news at all: a speculative future with the NO_EVIDENCE note and no LOWER REALISM', async ({ page }) => {
     test.setTimeout(240_000);
     expect((await page.request.post(`${STUB}/__control/rss`, { data: { mode: 'down' } })).status()).toBe(204);
-    expect((await page.request.post(`${STUB}/__control/news`, { data: { mode: 'down' } })).status()).toBe(204);
     await connect(page);
     await configureA10(page);
     await page.getByTestId('generate-button').click();
@@ -160,9 +158,10 @@ test.describe('FR-47 Always generate, note insufficient evidence at the end', ()
     expect(JSON.stringify(generations[0])).toContain(
       'The Evidence Pack is empty: no current news could be used. Write a fully speculative scenario',
     );
-    // news never reached the run, yet both providers were asked
+    // news never reached the run, yet Google News was asked once per group and nothing else was (no fallback provider)
     expect((await (await page.request.get(`${STUB}/__control/requests?kind=rss`)).json()).requests).toHaveLength(4);
-    expect((await (await page.request.get(`${STUB}/__control/requests?kind=gdelt`)).json()).requests).toHaveLength(4);
+    const all = (await (await page.request.get(`${STUB}/__control/requests?kind=all`)).json()).requests;
+    expect(all.filter((r: { path: string }) => r.path.startsWith('/api/v2/doc'))).toHaveLength(0);
   });
 });
 

@@ -3,7 +3,7 @@ package com.oracul.app.reasoning;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
-import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubNews;
 import com.oracul.app.research.StubResponses;
 import java.util.List;
 import java.util.Map;
@@ -138,7 +138,7 @@ class StructuredScenarioIT extends AbstractReasoningIT {
     // @trace FR-47
     @Test
     void anEmptyPackWritesASpeculativeScenario() throws Exception {
-        Ran r = run(A); // default GDELT {}: no sources, no events, empty pack
+        Ran r = run(A); // default empty news feed: no sources, no events, empty pack
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
         assertThat(requests(GEN)).hasSize(1);
         assertThat(attemptRows(r.id())).isEqualTo(1);
@@ -154,7 +154,7 @@ class StructuredScenarioIT extends AbstractReasoningIT {
     // @trace FR-47
     @Test
     void aRunWithoutNewsStillWritesASpeculativeScenario() throws Exception {
-        gdelt.responder = req -> StubGdelt.status(503);
+        news.responder = req -> StubNews.status(503);
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         assertThat(r.run().get("failure")).isNull();

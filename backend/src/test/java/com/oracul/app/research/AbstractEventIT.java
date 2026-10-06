@@ -97,7 +97,7 @@ public abstract class AbstractEventIT extends AbstractRunIT {
         return "{\"classifications\":[" + String.join(",", entries) + "]}";
     }
 
-    /** One article of a GDELT fixture; the page is http://127.0.0.1:port/articles/name (summary "Summary of name"). */
+    /** One article of a news fixture; the page is http://127.0.0.1:port/articles/name (summary "Summary of name"). */
     public record Art(String name, String domain, String title, Duration age) {
         public Art(String name, String domain, String title) {
             this(name, domain, title, Duration.ofDays(1));
@@ -132,53 +132,54 @@ public abstract class AbstractEventIT extends AbstractRunIT {
 
     /**
      * "Now" of this test, taken once per test instance (JUnit creates one instance per test): every fixture computes its
-     * seendate from this instant, so articles meant to tie on date really tie (research-pipeline.md "Source cap").
+     * pubDate from this instant, so articles meant to tie on date really tie (research-pipeline.md "Source cap").
      */
     protected final Instant testNow = Instant.now().truncatedTo(ChronoUnit.SECONDS);
 
-    /** The first GDELT request returns the articles, every other one {}. */
-    protected void gdeltArticles(List<Art> arts) {
-        List<String> json = new ArrayList<>();
+    /**
+     * The first {@code /rss/search} request answers one item per {@link Art} in list order (title {@code a.title()}, link
+     * {@code <base>/rss/articles/<name>}, {@code pubDate} = testNow - age, {@code <source url="https://<domain>">}), every
+     * later request answers the empty feed. The link resolves (302) to the page {@code <base>/articles/<name>}.
+     */
+    protected void newsArticles(List<Art> arts) {
+        List<String> items = new ArrayList<>();
         for (Art a : arts) {
-            json.add(StubGdelt.article(gdelt.baseUrl() + "/articles/" + a.name(), a.title(), a.domain(), "English",
-                StubGdelt.seendate(testNow.minus(a.age()))));
+            items.add(StubNews.rssItem(a.title(), news.baseUrl() + "/rss/articles/" + a.name(), StubNews.pubDate(testNow.minus(a.age())),
+                a.domain(), "https://" + a.domain()));
         }
-        String body = StubGdelt.articles(json);
-        gdelt.responder = req -> req.number() == 1 ? StubGdelt.json(body) : StubGdelt.json("{}");
+        StubNews.Reply first = StubNews.rss(items.toArray(String[]::new));
+        news.responder = req -> req.number() == 1 ? first : StubNews.rss();
     }
+
+    private static final String F240_PUBLISHER_URL = "https://www.reuters.com";
 
     /**
-     * Fixture F240 of slice 05 (205 distinct sources after filtering). Needs {@code oracul.research.query-budget=18} on
-     * the test class. Every article's seendate is {@code testNow - 1 day} (computed once per test) except the
-     * deliberately old ones of the slice-05 fixture.
+     * Fixture F240 (205 usable candidates after filtering) as Google News items: per OR element (global element index r =
+     * {@code req.firstElement() + e}) the block of items r-a1 ... Every pubDate is {@code testNow - 1 day} except the
+     * deliberately old ones; "unusable link" entries (javascript:void(0)) and blank titles are filtered by the pipeline.
      */
-    protected String f240(StubGdelt.Request req) {
-        // news-search.md: per OR element the block that the old request r (= global element index) produced
-        String base = gdelt.baseUrl() + "/articles/";
-        Instant day = testNow.minus(1, ChronoUnit.DAYS);
-        List<String> out = new ArrayList<>();
+    protected StubNews.Reply f240(StubNews.Request req) {
+        String base = news.baseUrl();
+        List<String> items = new ArrayList<>();
         for (int e = 0; e < req.elements().size(); e++) {
             int r = req.firstElement() + e;
-            String element = req.elements().get(e);
             int n = r <= 6 ? 14 : 13;
             for (int a = 1; a <= n; a++) {
-                String url = base + "r" + r + "-a" + a;
-                String title = element + " Article r" + r + "-a" + a;
-                String language = "English";
-                Instant seen = day;
-                if (a == 1) url = base + "shared?utm_source=q" + r + "#top";
+                String link = a == 1 ? base + "/rss/articles/shared?utm_source=q" + r : base + "/rss/articles/r" + r + "-a" + a;
+                String title = req.elements().get(e) + " Article r" + r + "-a" + a + " - Reuters";
+                String pubDate = StubNews.pubDate(testNow.minus(1, ChronoUnit.DAYS));
                 if (a == 2 && r <= 5) title = "  ";
-                if (a == 2 && r >= 6 && r <= 10) language = "French";
-                if (a == 2 && r >= 11 && r <= 15) seen = testNow.minus(200, ChronoUnit.DAYS);
-                if (a == 2 && r >= 16) url = base + "r" + r + "-a3#dup";
-                out.add(StubGdelt.article(url, title, "reuters.com", language, StubGdelt.seendate(seen)));
+                if (a == 2 && r >= 6 && r <= 10) link = "javascript:void(0)";
+                if (a == 2 && r >= 11 && r <= 15) pubDate = StubNews.pubDate(testNow.minus(200, ChronoUnit.DAYS));
+                if (a == 2 && r >= 16) link = base + "/rss/articles/r" + r + "-a3";
+                items.add(StubNews.rssItem(title, link, pubDate, "Reuters", F240_PUBLISHER_URL));
             }
         }
-        return StubGdelt.articles(out);
+        return StubNews.rss(items.toArray(String[]::new));
     }
 
-    protected void gdeltF240() {
-        gdelt.responder = req -> StubGdelt.json(f240(req));
+    protected void newsF240() {
+        news.responder = this::f240;
     }
 
     /** Events of the F240 default run: EV001...EV{count}, EVn has sourceIds ["S<n>"], every event classified. */

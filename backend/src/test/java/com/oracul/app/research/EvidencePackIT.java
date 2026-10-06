@@ -106,7 +106,7 @@ class EvidencePackIT extends AbstractEvidenceIT {
     @Test
     @SuppressWarnings("unchecked")
     void aRunWithoutSourcesStillHasAnEmptyPack() throws Exception {
-        gdelt.reset();
+        news.reset();
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         Map<String, Object> pack = pack(r);
@@ -127,8 +127,8 @@ class EvidencePackIT extends AbstractEvidenceIT {
     @Test
     void aRunThatFailedBeforeRankingHasNoPack() throws Exception {
         // run-control.md FR-47: news down no longer fails a run; a rate-limited EVENT_NORMALIZATION call does (before RANKING)
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         always(NORMALIZATION, StubResponses.status(429, "{}"));
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("FAILED");
@@ -182,7 +182,8 @@ class EvidencePackIT extends AbstractEvidenceIT {
     @Test
     void theResponseHasNoUnexpectedTopLevelFields() throws Exception {
         Ran r = runV4(A);
-        assertThat(pack(r).keySet()).containsExactlyInAnyOrder("id", "generationId", "cutoff", "configuration", "profile", "core",
+        assertThat(pack(r).keySet())
+            .containsExactlyInAnyOrder("id", "generationId", "cutoff", "configuration", "profile", "core",
             "supporting", "counterSignals", "sources", "promptText");
     }
 }

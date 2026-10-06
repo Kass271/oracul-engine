@@ -26,7 +26,7 @@ import org.springframework.test.context.TestPropertySource;
 class ResearchPlanIT extends AbstractRunIT {
 
     static final String INSTRUCTIONS = String.join("\n",
-        "You are the research assistant of ORACUL. You write short news-search queries for the GDELT news index.",
+        "You are the research assistant of ORACUL. You write short news-search queries for Google News.",
         "Return only JSON matching the schema. For every intent write exactly the requested number of distinct queries.",
         "Each query: 2-8 plain English keywords, no quotes, no operators, at most 120 characters.",
         "Do not add facts and do not answer questions.",
@@ -115,7 +115,7 @@ class ResearchPlanIT extends AbstractRunIT {
                 assertThat(query.get("id")).isEqualTo(String.format("Q%02d", q + 1));
                 assertThat(query.get("intentId")).isEqualTo(intentId);
                 assertThat(query.get("text")).isEqualTo(intentId + " stub query " + k);
-                assertThat(query.get("status")).as("default GDELT stub answers {}").isEqualTo("EMPTY");
+                assertThat(query.get("status")).as("default news stub answers an empty feed").isEqualTo("EMPTY");
                 assertThat(query.get("articlesReturned")).isEqualTo(0);
             }
         }
@@ -232,8 +232,8 @@ class ResearchPlanIT extends AbstractRunIT {
             assertThat(queries.get(i).get("intentId")).isEqualTo(t.getIntentId());
             assertThat(queries.get(i).get("text")).as("query " + t.getId()).isEqualTo(t.getText());
         }
-        assertThat(gdelt.requests).as("GDELT still queried for every template query (4 OR groups of 5)").hasSize(4);
-        assertThat(gdelt.requests.stream().mapToInt(r -> r.elements().size()).sum()).isEqualTo(20);
+        assertThat(news.requests).as("Google News still queried for every template query (4 OR groups of 5)").hasSize(4);
+        assertThat(news.requests.stream().mapToInt(r -> r.elements().size()).sum()).isEqualTo(20);
         assertThat(expansion()).as("no retry").hasSize(1);
     }
 
@@ -296,7 +296,7 @@ class ResearchPlanIT extends AbstractRunIT {
         assertThat(run.get("stage")).isEqualTo("RESEARCH_STRATEGY");
         assertThat(responses.requests).as("no retry").hasSize(1);
         assertThat(stub.grant("refresh_token")).as("no refresh").hasSize(refreshesBefore);
-        assertThat(gdelt.requests).isEmpty();
+        assertThat(news.requests).isEmpty();
     }
 
     // #5 (FR-39 row 6): a 403 without a code is an unexpected error; query expansion falls back to the templates
@@ -311,7 +311,7 @@ class ResearchPlanIT extends AbstractRunIT {
         assertThat(plan(researchBody(sid, id)).get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
         assertThat(expansion()).as("one attempt, no retry").hasSize(1);
         assertThat(stub.grant("refresh_token")).as("no refresh").hasSize(refreshesBefore);
-        assertThat(gdelt.requests).as("GDELT is still queried").hasSize(4);
+        assertThat(news.requests).as("Google News is still queried").hasSize(4);
     }
 
     // #6
@@ -331,7 +331,7 @@ class ResearchPlanIT extends AbstractRunIT {
         assertThat(run.get("stageIndex")).isEqualTo(2);
         assertThat(run.get("completedAt")).isNotNull();
         assertThat(absent(researchBody(sid, id), "searchPlan")).as("search_plan stays null").isTrue();
-        assertThat(gdelt.requests).as("no GDELT request").isEmpty();
+        assertThat(news.requests).as("no news request").isEmpty();
         assertThat(stub.grant("refresh_token")).as("no refresh after a 401").isEmpty();
         var conn = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/auth/chatgpt/connection")
             .cookie(new jakarta.servlet.http.Cookie("ORACUL_SID", sid))).andReturn().getResponse().getContentAsString();

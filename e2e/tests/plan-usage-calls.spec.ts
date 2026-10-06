@@ -16,7 +16,6 @@ test.describe.configure({ mode: 'serial' });
 test.beforeEach(async ({ request }) => {
   const r = await request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  await post(request, '/__control/news', { mode: 'ok' });
   await post(request, '/__control/models', { mode: 'ok' });
   await post(request, '/__control/responses', { mode: 'ok' });
   await post(request, '/__control/mode', { mode: 'ok' });

@@ -130,7 +130,7 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
     @ParameterizedTest(name = "stage call: {0}")
     @MethodSource("rowArgs")
     void everyClassOfAStageCallEndsInItsTableRow(String name, Row row) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(CLASSIFICATION, C_V4);
         always(NORMALIZATION, row.reply());
         String sid = connectedSid();
@@ -186,7 +186,7 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
     @ParameterizedTest(name = "{0} transient failures then success")
     @MethodSource("transientCounts")
     void aTransientFailureThatClearsContinuesTheRun(int failures) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(CLASSIFICATION, C_V4);
         List<StubResponses.Reply> replies = new ArrayList<>();
         for (int i = 0; i < failures; i++) replies.add(StubResponses.error(503, "subscription_sharing_usage_unavailable"));
@@ -217,7 +217,7 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
 
     @Test
     void theRetryIsNotCountedAsASecondModelCallRowButSendsTheIdenticalBody() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(CLASSIFICATION, C_V4);
         scriptReplies(NORMALIZATION, StubResponses.status(500, SECRET_BODY), StubResponses.status(500, SECRET_BODY),
             StubResponses.completed(N_V4));
@@ -263,7 +263,7 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
     @ParameterizedTest(name = "{0}: {1}")
     @MethodSource("channelRows")
     void aFailureInsideTheStreamIsClassifiedLikeAnHttpError(String channel, String providerCode, Row row) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(CLASSIFICATION, C_V4);
         always(NORMALIZATION, viaChannel(channel, providerCode));
         String sid = connectedSid();
@@ -293,7 +293,7 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
         assertFailure(r.run(), code, message, null);
         assertThat(r.run().get("stage")).isEqualTo("RESEARCH_STRATEGY");
         assertThat(responses.requests).as("one attempt").hasSize(1);
-        assertThat(gdelt.requests).isEmpty();
+        assertThat(news.requests).isEmpty();
     }
 
     static Stream<Arguments> expansionFallback() {

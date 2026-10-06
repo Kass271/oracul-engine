@@ -1,39 +1,22 @@
 package com.oracul.app.research;
 
-import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.SearchQueryStatus;
+import java.time.Duration;
 import java.util.List;
 
-/** Current-news search; one implementation (GDELT) in the MVP. */
+/** Current-news search; one implementation (Google News RSS). */
 public interface NewsProvider {
 
     /** Raw provider article. Fields may be null. */
-    record Article(String url, String title, String domain, String language, String seendate,
-                   java.time.Instant publishedAt, String sourceName, String sourceUrl, boolean google) {
-        /** A GDELT article. */
-        public Article(String url, String title, String domain, String language, String seendate) {
-            this(url, title, domain, language, seendate, null, null, null, false);
-        }
+    record Article(String url, String title, java.time.Instant publishedAt, String sourceName, String sourceUrl) {
     }
 
-    /** {@code rateLimited}: the provider answered 429 (the one case that is retried). */
-    record Result(SearchQueryStatus status, List<Article> articles, boolean rateLimited) {
-        public Result(SearchQueryStatus status, List<Article> articles) {
-            this(status, articles, false);
-        }
-
+    record Result(SearchQueryStatus status, List<Article> articles) {
         public static Result failed() {
             return new Result(SearchQueryStatus.FAILED, List.of());
         }
-
-        public static Result limited() {
-            return new Result(SearchQueryStatus.FAILED, List.of(), true);
-        }
     }
 
-    /**
-     * One request: {@code query} is the complete GDELT query string (language filter included). The whole answer must
-     * arrive within {@code timeout}. Never throws for provider problems: they are reported as FAILED.
-     */
-    Result search(String query, int maxRecords, HorizonCode horizon, java.time.Duration timeout);
+    /** One request: {@code q} is the complete query string. Never throws for provider problems: they are reported as FAILED. */
+    Result search(String q, int maxItems, Duration timeout);
 }

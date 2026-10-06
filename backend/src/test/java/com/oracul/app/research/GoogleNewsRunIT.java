@@ -12,11 +12,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * phase-02 news-search.md FR-48 + FR-46 through whole runs: Google News RSS answers every group of fixture F240 (mirror of the
- * GDELT fixture with " - Reuters" title suffixes), the run keeps 30 of the 205 usable candidates, resolves their links through
- * the article fetch and exposes publisherUrl; failing and empty feeds.
+ * phase-02 news-search.md FR-48 + FR-46 through whole runs (phase-03 FR-49: Google is the only provider): Google News RSS
+ * answers every group of fixture F240 (items with " - Reuters" title suffixes), the run keeps 30 of the 205 usable
+ * candidates, resolves their links through the article fetch and exposes publisherUrl; failing and empty feeds.
  */
-// @trace FR-46, FR-48
+// @trace FR-46, FR-48, FR-49
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
@@ -27,32 +27,10 @@ class GoogleNewsRunIT extends AbstractEventIT {
 
     private static final String REUTERS = "https://www.reuters.com";
 
-    /** The RSS mirror of f240: per element (global index r) the block of the GDELT fixture as Google News items. */
-    private StubGdelt.Reply googleF240(StubGdelt.RssRequest req) {
-        String base = gdelt.baseUrl();
-        int first = 1 + gdelt.rssRequests.stream().filter(x -> x.number() < req.number()).mapToInt(x -> x.elements().size()).sum();
-        List<String> items = new ArrayList<>();
-        for (int e = 0; e < req.elements().size(); e++) {
-            int r = first + e;
-            int n = r <= 6 ? 14 : 13;
-            for (int a = 1; a <= n; a++) {
-                String link = a == 1 ? base + "/rss/articles/shared?utm_source=q" + r : base + "/rss/articles/r" + r + "-a" + a;
-                String title = req.elements().get(e) + " Article r" + r + "-a" + a + " - Reuters";
-                String pubDate = StubGdelt.pubDate(testNow.minus(1, ChronoUnit.DAYS));
-                if (a == 2 && r <= 5) title = "  ";
-                if (a == 2 && r >= 6 && r <= 10) link = "javascript:void(0)";
-                if (a == 2 && r >= 11 && r <= 15) pubDate = StubGdelt.pubDate(testNow.minus(200, ChronoUnit.DAYS));
-                if (a == 2 && r >= 16) link = base + "/rss/articles/r" + r + "-a3";
-                items.add(StubGdelt.rssItem(title, link, pubDate, "Reuters", REUTERS));
-            }
-        }
-        return StubGdelt.rss(items.toArray(String[]::new));
-    }
-
     @SuppressWarnings("unchecked")
     @Test
-    void f240ThroughGoogleKeepsThirtyResolvedSourcesWithPublisherUrlAndNeverCallsGdelt() throws Exception {
-        gdelt.rssResponder = this::googleF240;
+    void f240ThroughGoogleKeepsThirtyResolvedSourcesWithPublisherUrl() throws Exception {
+        newsF240();
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
@@ -61,9 +39,9 @@ class GoogleNewsRunIT extends AbstractEventIT {
         assertThat(counts.get("searches")).isEqualTo(18);
         assertThat(counts.get("articlesRetrieved")).as("every item of the answered groups").isEqualTo(240);
         assertThat(counts.get("articlesConsidered")).isEqualTo(30);
-        assertThat(gdelt.rssRequests).as("18 queries go out as 4 OR-group requests (5,5,4,4)").hasSize(4);
-        assertThat(gdelt.rssRequests.stream().map(r -> r.elements().size()).toList()).containsExactly(5, 5, 4, 4);
-        assertThat(gdelt.requests).as("0 GDELT requests while Google answers").isEmpty();
+        assertThat(news.requests).as("18 queries go out as 4 OR-group requests (5,5,4,4)").hasSize(4);
+        assertThat(news.requests.stream().map(r -> r.elements().size()).toList()).containsExactly(5, 5, 4, 4);
+        assertThat(news.paths).as("no request to a former provider path").noneMatch(p -> p.startsWith("/api/v2/doc"));
 
         Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
         List<Map<String, Object>> queries = (List<Map<String, Object>>) plan.get("queries");
@@ -72,7 +50,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
         List<String> topicOfQuery = new ArrayList<>();
         int returned = 0;
         for (Map<String, Object> q : queries) {
-            assertThat(q.get("status")).as("same per-query statuses as the GDELT answer would give").isEqualTo("OK");
+            assertThat(q.get("status")).as("every group was answered").isEqualTo("OK");
             returned += ((Number) q.get("articlesReturned")).intValue();
             topicOfQuery.add(F240Support.topicOf(intents.get((String) q.get("intentId"))));
         }
@@ -82,7 +60,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
         List<Integer> keptIdx = CapOracle.select(usable);
         List<Map<String, Object>> sources = sourceItems(sid, id);
         assertThat(sources).hasSize(30);
-        String base = gdelt.baseUrl();
+        String base = news.baseUrl();
         for (int i = 0; i < sources.size(); i++) {
             Map<String, Object> s = sources.get(i);
             CapOracle.Cand want = usable.get(keptIdx.get(i));
@@ -100,41 +78,50 @@ class GoogleNewsRunIT extends AbstractEventIT {
         }
         Map<String, Object> shared = sources.stream().filter(s -> (base + "/articles/shared").equals(s.get("url"))).findFirst().orElseThrow();
         assertThat((List<?>) shared.get("queryIds")).as("the shared article keeps all 18 queries").hasSize(18);
-        assertThat(gdelt.articleRequests.stream().filter(n -> n.equals("shared")).count()).as("fetched once").isEqualTo(1);
-        assertThat(gdelt.articleRequests).as("only kept candidates are fetched").hasSize(30);
+        assertThat(news.articleRequests.stream().filter(n -> n.equals("shared")).count()).as("fetched once").isEqualTo(1);
+        assertThat(news.articleRequests).as("only kept candidates are fetched").hasSize(30);
         // the same Google link is not kept twice: every url unique
         assertThat(sources.stream().map(s -> s.get("url")).distinct().count()).isEqualTo(30);
     }
 
     @SuppressWarnings("unchecked")
     @Test
-    void oneGoogleGroupFailingSendsOnlyThatGroupToGdelt() throws Exception {
-        gdelt.rssResponder = req -> req.number() == 2 ? StubGdelt.status(503) : googleF240(req);
-        gdelt.responder = req -> StubGdelt.json(f240(req));
+    void oneGoogleGroupFailingFailsOnlyThatGroupAndSendsNothingElse() throws Exception {
+        news.responder = req -> req.number() == 2 ? StubNews.status(503) : f240(req);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
-        assertThat(gdelt.rssRequests).hasSize(4);
-        assertThat(gdelt.requests).as("exactly one GDELT request: group 2").hasSize(1);
-        assertThat(gdelt.requests.get(0).elements()).isEqualTo(gdelt.rssRequests.get(1).elements());
-        assertThat(((Map<String, Object>) run.get("counts")).get("articlesConsidered")).isEqualTo(30);
+        assertThat(news.requests).as("one request per group, no fallback request").hasSize(4);
+        assertThat(news.paths).noneMatch(p -> p.startsWith("/api/v2/doc"));
+        Map<String, Object> counts = (Map<String, Object>) run.get("counts");
+        assertThat(counts.get("searches")).isEqualTo(18);
+        assertThat(counts.get("articlesRetrieved")).as("240 minus the 66 items of the failed group (r6 has 14, r7-r10 have 13)").isEqualTo(174);
+        assertThat(counts.get("articlesConsidered")).isEqualTo(30);
+        List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
+        for (int i = 0; i < queries.size(); i++) {
+            Map<String, Object> q = queries.get(i);
+            boolean inFailedGroup = i >= 5 && i <= 9; // group 2 = Q06..Q10
+            assertThat(q.get("status")).as(q.get("id").toString()).isEqualTo(inFailedGroup ? "FAILED" : "OK");
+            if (inFailedGroup) assertThat(q.get("articlesReturned")).isEqualTo(0);
+        }
         List<Map<String, Object>> sources = sourceItems(sid, id);
         assertThat(sources).hasSize(30);
-        assertThat(sources.stream().anyMatch(s -> s.get("publisherUrl") != null)).as("Google sources have a publisherUrl").isTrue();
-        assertThat(sources.stream().anyMatch(s -> s.get("publisherUrl") == null)).as("GDELT sources have none").isTrue();
+        assertThat(sources).allSatisfy(s -> assertThat(s.get("publisherUrl")).as("every source comes from a Google item").isEqualTo(REUTERS));
+        assertThat(sources.stream().flatMap(s -> ((List<String>) s.get("queryIds")).stream()).filter(q -> List.of("Q06", "Q07", "Q08", "Q09", "Q10").contains(q)))
+            .as("no source belongs to a query of the failed group").isEmpty();
     }
 
     @SuppressWarnings("unchecked")
     @Test
-    void anEmptyFeedEverywhereMakesEmptyQueriesNoGdeltRequestAndASpeculativeRun() throws Exception {
-        gdelt.rssResponder = req -> StubGdelt.rss();
+    void anEmptyFeedEverywhereMakesEmptyQueriesAndASpeculativeRun() throws Exception {
+        news.responder = req -> StubNews.rss();
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
-        assertThat(gdelt.rssRequests).hasSize(4);
-        assertThat(gdelt.requests).isEmpty();
+        assertThat(news.requests).hasSize(4);
+        assertThat(news.paths).noneMatch(p -> p.startsWith("/api/v2/doc"));
         List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
         assertThat(queries).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("EMPTY"));
         assertThat(sourceItems(sid, id)).isEmpty();
@@ -143,11 +130,11 @@ class GoogleNewsRunIT extends AbstractEventIT {
 
     @Test
     void aLinkThatAnswersWithoutARedirectKeepsTheGoogleLinkInTheApi() throws Exception {
-        String link = gdelt.baseUrl() + "/articles/no-redirect";
-        gdelt.rssResponder = req -> req.number() == 1
-            ? StubGdelt.rss(StubGdelt.rssItem(req.elements().get(0) + " story - Reuters", link,
-                StubGdelt.pubDate(Instant.now().minusSeconds(3600)), "Reuters", REUTERS))
-            : StubGdelt.rss();
+        String link = news.baseUrl() + "/articles/no-redirect";
+        news.responder = req -> req.number() == 1
+            ? StubNews.rss(StubNews.rssItem(req.elements().get(0) + " story - Reuters", link,
+                StubNews.pubDate(Instant.now().minusSeconds(3600)), "Reuters", REUTERS))
+            : StubNews.rss();
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
@@ -163,17 +150,19 @@ class GoogleNewsRunIT extends AbstractEventIT {
     }
 
     @Test
-    void googleAndGdeltBothDownFailEveryQueryAndTheRunGoesOn() throws Exception {
-        gdelt.rssResponder = req -> StubGdelt.status(503);
-        gdelt.responder = req -> StubGdelt.status(503);
+    void googleDownFailsEveryQueryWithoutAnyFallbackAndTheRunGoesOn() throws Exception {
+        news.responder = req -> StubNews.status(503);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(run.get("failure")).isNull();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(gdelt.rssRequests).hasSize(4);
-        assertThat(gdelt.requests).hasSize(4);
+        assertThat(news.requests).as("one request per group, 4 groups").hasSize(4);
+        assertThat(news.paths).as("no request to any other route").containsOnly("/rss/search");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> counts = (Map<String, Object>) run.get("counts");
+        assertThat(counts.get("articlesRetrieved")).isEqualTo(0);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
         assertThat(queries).hasSize(18).allSatisfy(q -> {

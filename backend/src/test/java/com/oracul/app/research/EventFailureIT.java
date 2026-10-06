@@ -27,7 +27,7 @@ class EventFailureIT extends AbstractEventIT {
 
     /** V4 sources and the normal answers for every purpose except the failing one. */
     private void prepare(String failing) {
-        gdeltArticles(v4());
+        newsArticles(v4());
         if (!NORMALIZATION.equals(failing)) script(NORMALIZATION, N_V4);
         if (!CLASSIFICATION.equals(failing)) script(CLASSIFICATION, C_V4);
     }
@@ -82,7 +82,7 @@ class EventFailureIT extends AbstractEventIT {
     // #14: 429 on the retry itself
     @Test
     void rateLimitOnTheNormalizationRetryFailsTheRun() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(NORMALIZATION, "not json");
         always(NORMALIZATION, StubResponses.status(429, PROVIDER_BODY));
         Ran r = run(A);
@@ -92,7 +92,7 @@ class EventFailureIT extends AbstractEventIT {
     // #14: 429 on the follow-up classification batch
     @Test
     void rateLimitOnTheClassificationFollowUpFailsTheRunAndWritesNothing() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, classifications(C_EV1));
         always(CLASSIFICATION, StubResponses.status(429, PROVIDER_BODY));
@@ -128,7 +128,7 @@ class EventFailureIT extends AbstractEventIT {
     @ParameterizedTest(name = "HTTP 503 once on {0}, then normal: completed with 2 requests")
     @ValueSource(strings = {NORMALIZATION, CLASSIFICATION})
     void aSingleTransientFailureIsRetriedTransparently(String purpose) throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         String answer = NORMALIZATION.equals(purpose) ? N_V4 : C_V4;
         scriptReplies(purpose, StubResponses.status(503, PROVIDER_BODY), StubResponses.completed(answer));
         if (!NORMALIZATION.equals(purpose)) script(NORMALIZATION, N_V4);
@@ -174,7 +174,7 @@ class EventFailureIT extends AbstractEventIT {
     // FR-38 / FR-39 row 7: a 200 answer with status incomplete fails the run after one request (no content retry)
     @Test
     void anIncompleteClassificationResponseFailsTheRunWithChatGptIncomplete() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         StubResponses.Reply incomplete = new StubResponses.Reply(200, "{\"id\":\"resp_1\",\"status\":\"incomplete\",\"output\":[]}", 0);
         always(CLASSIFICATION, incomplete);
@@ -185,7 +185,7 @@ class EventFailureIT extends AbstractEventIT {
     // #35: a transport failure of one parallel batch stops the stage: batches that have not started never start
     @Test
     void aRateLimitedBatchStopsTheStageBeforeLaterBatchesStart() throws Exception {
-        gdeltF240();
+        newsF240();
         // the 429 is held until all four requests have arrived, so batch 4 has certainly passed its gate
         always(NORMALIZATION, req -> StubResponses.batch(req) == 2
             ? holdUntilFourArrived()

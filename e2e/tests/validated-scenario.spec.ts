@@ -10,7 +10,6 @@ test.describe.configure({ mode: 'serial' });
 async function resetStub(page: Page): Promise<void> {
   const r = await page.request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  await page.request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
   const events = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'ok' } });
   expect(events.status()).toBe(204);
   // the reset must also bring the scenario answers back to normal

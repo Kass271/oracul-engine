@@ -21,7 +21,7 @@ class StreamTimeoutIT extends AbstractPlanUsageIT {
 
     @Test
     void aStreamLongerThanTheStreamTimeoutFailsTheStageEvenIfItWouldComplete() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(CLASSIFICATION, C_V4);
         always(NORMALIZATION, req -> slowCompleteStream(N_V4));
         Ran r = runWithin(A, 20_000);
@@ -32,7 +32,7 @@ class StreamTimeoutIT extends AbstractPlanUsageIT {
 
     @Test
     void aStreamThatFitsIntoTheStreamTimeoutIsAnswered() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         script(CLASSIFICATION, C_V4);
         always(NORMALIZATION, req -> StubResponses.sseChunks(100, "event: response.created\ndata: " + StubResponses.createdEvent() + "\n\n",
             ": keep-alive\n\n", "event: response.completed\ndata: " + StubResponses.completedEvent(N_V4) + "\n\n"));

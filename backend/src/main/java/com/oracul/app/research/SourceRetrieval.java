@@ -12,10 +12,8 @@ import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,11 +32,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/** Stages SEARCHING and READING_SOURCES: run the queries, filter, fetch metadata (FR-13). */
+/** Stages SEARCHING and READING_SOURCES: run the queries, filter, fetch metadata (FR-13, FR-48). */
 @Component
 public class SourceRetrieval {
 
-    private static final DateTimeFormatter SEENDATE = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
     private static final int MAX_SUMMARY = 600;
     private static final Logger log = LoggerFactory.getLogger(SourceRetrieval.class);
 
@@ -69,46 +66,30 @@ public class SourceRetrieval {
     /** FR-46: the most sources a run keeps. */
     public static final int MAX_SOURCES = SourceCap.MAX;
     private static final int GOOGLE_REDIRECTS = 5;
+    private static final int MAX_PER_QUERY = 25;
 
-    private final NewsProvider news;
-    private final GoogleNewsProvider google;
+    private final NewsProvider google;
     private final Duration googleSpacing;
     private final Duration googleTimeout;
     private final ArticleMetadataFetcher fetcher;
     private final SourceQualityTable quality;
     private final Clock clock;
-    private final int maxRequests;
-    private final Duration requestSpacing;
-    private final Duration queryTimeout;
-    private final Duration rateLimitWait;
     private final Duration searchBudget;
-    private final int maxRecordsPerQuery;
     private final int fetchConcurrency;
     private final ExecutorService fetchPool;
 
-    SourceRetrieval(NewsProvider news, GoogleNewsProvider google, ArticleMetadataFetcher fetcher, SourceQualityTable quality, Clock clock,
+    SourceRetrieval(NewsProvider google, ArticleMetadataFetcher fetcher, SourceQualityTable quality, Clock clock,
                     @Value("${oracul.news.google.request-spacing:PT1S}") Duration googleSpacing,
                     @Value("${oracul.news.google.timeout:PT10S}") Duration googleTimeout,
-                    @Value("${oracul.news.max-requests:4}") int maxRequests,
-                    @Value("${oracul.news.request-spacing:PT5S}") Duration requestSpacing,
-                    @Value("${oracul.news.query-timeout:PT30S}") Duration queryTimeout,
-                    @Value("${oracul.news.rate-limit-wait:PT5S}") Duration rateLimitWait,
                     @Value("${oracul.news.search-budget:PT75S}") Duration searchBudget,
-                    @Value("${oracul.news.max-records-per-query:25}") int maxRecordsPerQuery,
                     @Value("${oracul.news.article-fetch-concurrency:8}") int fetchConcurrency) {
-        this.news = news;
         this.google = google;
         this.googleSpacing = googleSpacing;
         this.googleTimeout = googleTimeout;
         this.fetcher = fetcher;
         this.quality = quality;
         this.clock = clock;
-        this.maxRequests = Math.max(1, maxRequests);
-        this.requestSpacing = requestSpacing;
-        this.queryTimeout = queryTimeout;
-        this.rateLimitWait = rateLimitWait;
         this.searchBudget = searchBudget;
-        this.maxRecordsPerQuery = maxRecordsPerQuery;
         this.fetchConcurrency = Math.max(1, fetchConcurrency);
         this.fetchPool = Executors.newVirtualThreadPerTaskExecutor();
     }
@@ -123,7 +104,7 @@ public class SourceRetrieval {
     }
 
     /**
-     * Sends the planned queries as at most max-requests OR-group requests, one at a time and spaced (FR-44).
+     * Sends the planned queries as 4 OR-group requests, one at a time and spaced (FR-48).
      * {@code mayStart} is the run guard: no request starts once it says no.
      */
     public SearchOutcome search(SearchPlan plan, HorizonCode horizon, BooleanSupplier mayStart)
@@ -132,7 +113,7 @@ public class SourceRetrieval {
         String[] elements = new String[queries.size()];
         List<Integer> sendable = new ArrayList<>();
         for (int i = 0; i < queries.size(); i++) {
-            elements[i] = GdeltQueryGroups.element(queries.get(i).getText());
+            elements[i] = GoogleQueryGroups.element(queries.get(i).getText());
             if (elements[i] != null) {
                 sendable.add(i);
             }
@@ -146,25 +127,23 @@ public class SourceRetrieval {
         List<Attributed> ordered = new ArrayList<>();
 
         int from = 0;
-        for (int size : GdeltQueryGroups.groupSizes(sendable.size(), maxRequests)) {
+        for (int size : GoogleQueryGroups.groupSizes(sendable.size(), GoogleQueryGroups.GROUPS)) {
             List<Integer> members = sendable.subList(from, from + size);
             from += size;
             List<String> groupElements = new ArrayList<>();
             members.forEach(i -> groupElements.add(elements[i]));
-            int maxRecords = GdeltQueryGroups.maxRecords(maxRecordsPerQuery, size);
+            int maxRecords = GoogleQueryGroups.maxRecords(MAX_PER_QUERY, size);
             NewsProvider.Result result = scheduler.google(GoogleNewsProvider.q(groupElements, horizon), maxRecords);
             if (result == null) {
-                result = NewsProvider.Result.failed(); // not started: no fallback either
-            } else if (result.status() == SearchQueryStatus.FAILED) {
-                log.warn("news group falling back to GDELT");
-                result = scheduler.request(GdeltQueryGroups.query(groupElements), maxRecords, horizon);
+                result = NewsProvider.Result.failed(); // not started
             }
             if (result.status() == SearchQueryStatus.FAILED) {
+                log.warn("news group failed");
                 members.forEach(i -> status[i] = SearchQueryStatus.FAILED);
                 continue;
             }
             for (NewsProvider.Article a : result.articles()) {
-                int member = GdeltQueryGroups.attribute(groupElements, a.title());
+                int member = GoogleQueryGroups.attribute(groupElements, a.title());
                 int queryIndex = members.get(member);
                 articles.get(queries.get(queryIndex).getId()).add(a);
                 ordered.add(new Attributed(queries.get(queryIndex).getId(), a));
@@ -182,12 +161,10 @@ public class SourceRetrieval {
         return new SearchOutcome(out, articles, ordered);
     }
 
-    /** Serial, spaced GDELT requests inside the search budget, with one retry after a 429. */
+    /** Serial, spaced Google requests inside the search budget (never retried). */
     private final class Scheduler {
         private final long budgetEnd;
         private final BooleanSupplier mayStart;
-        private long lastStart;
-        private boolean started;
         private long lastGoogleStart;
         private boolean googleStarted;
 
@@ -216,46 +193,7 @@ public class SourceRetrieval {
             }
             lastGoogleStart = now;
             googleStarted = true;
-            return SourceRetrieval.this.google.search(q, maxItems, Duration.ofNanos(Math.min(googleTimeout.toNanos(), left)));
-        }
-
-        NewsProvider.Result request(String query, int maxRecords, HorizonCode horizon) throws InterruptedException {
-            NewsProvider.Result result = attempt(query, maxRecords, horizon, System.nanoTime());
-            if (result == null) {
-                return NewsProvider.Result.failed();
-            }
-            if (!result.rateLimited()) {
-                return result;
-            }
-            log.warn("news request rate-limited, retrying once");
-            long earliest = System.nanoTime() + rateLimitWait.toNanos();
-            result = attempt(query, maxRecords, horizon, earliest);
-            return result == null || result.rateLimited() ? NewsProvider.Result.failed() : result;
-        }
-
-        /** Null when the request could not be started (budget or deadline). */
-        private NewsProvider.Result attempt(String query, int maxRecords, HorizonCode horizon, long earliest)
-            throws InterruptedException {
-            long start = Math.max(earliest, started ? lastStart + requestSpacing.toNanos() : earliest);
-            start = Math.max(start, System.nanoTime());
-            if (start >= budgetEnd) {
-                log.warn("news request skipped: search budget exhausted");
-                return null;
-            }
-            sleepUntil(start);
-            if (!mayStart.getAsBoolean()) {
-                return null;
-            }
-            long now = System.nanoTime();
-            long left = budgetEnd - now;
-            if (left <= 0) {
-                log.warn("news request skipped: search budget exhausted");
-                return null;
-            }
-            lastStart = now;
-            started = true;
-            Duration timeout = Duration.ofNanos(Math.min(queryTimeout.toNanos(), left));
-            return news.search(query, maxRecords, horizon, timeout);
+            return google.search(q, maxItems, Duration.ofNanos(Math.min(googleTimeout.toNanos(), left)));
         }
 
         private void sleepUntil(long nanoTime) throws InterruptedException {
@@ -318,7 +256,7 @@ public class SourceRetrieval {
     private List<Candidate> filter(SearchOutcome outcome, HorizonCode horizon) {
         Map<String, SearchIntent> intents = new HashMap<>();
         outcome.plan().getIntents().forEach(in -> intents.put(in.getId(), in));
-        Instant cutoff = clock.instant().minus(GdeltNewsProvider.timespanDays(horizon), ChronoUnit.DAYS);
+        Instant cutoff = clock.instant().minus(GoogleQueryGroups.timespanDays(horizon), ChronoUnit.DAYS);
         Map<String, SearchQuery> byId = new HashMap<>();
         outcome.plan().getQueries().forEach(q -> byId.put(q.getId(), q));
         Map<String, Candidate> byUrl = new LinkedHashMap<>();
@@ -329,10 +267,7 @@ public class SourceRetrieval {
             if (url == null || a.title() == null || a.title().isBlank()) {
                 continue;
             }
-            if (a.language() != null && !a.language().isBlank() && !a.language().trim().equalsIgnoreCase("English")) {
-                continue;
-            }
-            Instant seen = a.google() ? a.publishedAt() : parseSeen(a.seendate());
+            Instant seen = a.publishedAt();
             if (seen != null && seen.isBefore(cutoff)) {
                 continue;
             }
@@ -351,14 +286,10 @@ public class SourceRetrieval {
         return new ArrayList<>(byUrl.values());
     }
 
-    /** Domain whose quality table entry ranks the candidate: GDELT domain, Google publisher host, else the URL host. */
+    /** Domain whose quality table entry ranks the candidate: Google publisher host, else the URL host. */
     private static String qualityDomain(Candidate c, String url) {
-        NewsProvider.Article a = c.article();
-        if (a.google()) {
-            String host = absoluteHost(a.sourceUrl());
-            return host != null ? host : UrlNormalizer.host(url);
-        }
-        return a.domain() != null && !a.domain().isBlank() ? a.domain().trim() : UrlNormalizer.host(url);
+        String host = absoluteHost(c.article().sourceUrl());
+        return host != null ? host : UrlNormalizer.host(url);
     }
 
     /** Host (as written) of an absolute http(s) URL, else null. */
@@ -395,9 +326,6 @@ public class SourceRetrieval {
         if (!mayFetch.getAsBoolean()) {
             return new Prepared(c, Optional.empty(), null);
         }
-        if (!c.article().google()) {
-            return new Prepared(c, fetcher.fetch(c.url()), null);
-        }
         Optional<ArticleMetadataFetcher.Fetched> fetched = fetcher.fetchDetailed(c.url(), GOOGLE_REDIRECTS);
         if (fetched.isPresent() && fetched.get().redirects() >= 1) {
             String finalUrl = UrlNormalizer.normalize(fetched.get().finalUrl());
@@ -414,7 +342,7 @@ public class SourceRetrieval {
         Instant attempt = clock.instant().truncatedTo(ChronoUnit.MICROS);
         String title = collapse(a.title());
         String url = resolvedUrl != null ? resolvedUrl : c.url();
-        Optional<ArticleMetadataFetcher.Metadata> meta = a.google() && resolvedUrl == null ? Optional.empty() : p.meta();
+        Optional<ArticleMetadataFetcher.Metadata> meta = resolvedUrl == null ? Optional.empty() : p.meta();
         String host = UrlNormalizer.host(url);
         String siteName = meta.map(ArticleMetadataFetcher.Metadata::siteName).map(String::trim).orElse("");
         String description = meta.map(ArticleMetadataFetcher.Metadata::description).map(SourceRetrieval::collapse)
@@ -424,24 +352,18 @@ public class SourceRetrieval {
         String publisher;
         String domain;
         String publisherUrl = null;
-        if (a.google()) {
-            String sourceText = a.sourceName() == null ? "" : a.sourceName().trim();
-            String sourceHost = absoluteHost(a.sourceUrl());
-            if (sourceHost != null) {
-                publisherUrl = a.sourceUrl().trim();
-            }
-            domain = sourceHost != null ? sourceHost : host;
-            if (resolvedUrl != null && !siteName.isEmpty()) {
-                publisher = siteName;
-            } else if (!sourceText.isEmpty()) {
-                publisher = sourceText;
-            } else {
-                publisher = sourceHost != null ? sourceHost : host;
-            }
+        String sourceText = a.sourceName() == null ? "" : a.sourceName().trim();
+        String sourceHost = absoluteHost(a.sourceUrl());
+        if (sourceHost != null) {
+            publisherUrl = a.sourceUrl().trim();
+        }
+        domain = sourceHost != null ? sourceHost : host;
+        if (resolvedUrl != null && !siteName.isEmpty()) {
+            publisher = siteName;
+        } else if (!sourceText.isEmpty()) {
+            publisher = sourceText;
         } else {
-            domain = a.domain() != null && !a.domain().isBlank() ? a.domain().trim() : host;
-            publisher = !siteName.isEmpty() ? siteName
-                : a.domain() != null && !a.domain().isBlank() ? a.domain().trim() : host;
+            publisher = sourceHost != null ? sourceHost : host;
         }
         var cls = quality.classify(domain);
 
@@ -462,18 +384,7 @@ public class SourceRetrieval {
         if (publisherUrl != null) {
             s.setPublisherUrl(URI.create(publisherUrl));
         }
-        return new SourceRepository.Stored(s, a.language());
-    }
-
-    private static Instant parseSeen(String seendate) {
-        if (seendate == null || seendate.isBlank()) {
-            return null;
-        }
-        try {
-            return LocalDateTime.parse(seendate.trim(), SEENDATE).toInstant(ZoneOffset.UTC);
-        } catch (Exception e) {
-            return null;
-        }
+        return new SourceRepository.Stored(s, null);
     }
 
     private static String collapse(String s) {

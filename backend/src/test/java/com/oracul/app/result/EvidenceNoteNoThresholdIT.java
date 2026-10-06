@@ -24,7 +24,6 @@ class EvidenceNoteNoThresholdIT extends AbstractStoryIT {
         return A.replace("\"realism\":8", "\"realism\":" + realism);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> note(Map<String, Object> run) {
         assertThat(run.get("evidenceNote")).as("evidenceNote of " + run).isNotNull();
         return (Map<String, Object>) run.get("evidenceNote");
@@ -36,13 +35,13 @@ class EvidenceNoteNoThresholdIT extends AbstractStoryIT {
 
     /** K(0, 3): no CORE item at all, three counter-signal candidates. */
     private Ran runCounterSignalsOnly(String body) throws Exception {
-        gdelt.reset();
+        news.reset();
         List<Art> arts = new ArrayList<>();
         for (int i = 1; i <= 3; i++) {
             arts.add(new Art("z-" + i, "reuters.com", "Z article " + i));
-            gdelt.site("z-" + i, "Publisher " + i);
+            news.site("z-" + i, "Publisher " + i);
         }
-        gdeltArticles(arts);
+        newsArticles(arts);
         always(CLASSIFICATION, req -> {
             List<String> entries = new ArrayList<>();
             for (String id : StubResponses.eventIds(req.inputText())) {
@@ -71,7 +70,7 @@ class EvidenceNoteNoThresholdIT extends AbstractStoryIT {
     @ParameterizedTest(name = "thresholds 0, empty pack, realism {0}")
     @ValueSource(ints = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
     void noEvidenceStillHappensWithThresholdsZero(int realism) throws Exception {
-        gdelt.reset();
+        news.reset();
         Ran r = run(bodyA(realism));
         Map<String, Object> run = r.run();
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");

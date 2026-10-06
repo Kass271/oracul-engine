@@ -21,7 +21,7 @@ class EventSourceOrderIT extends AbstractEventIT {
             new Art("reuters-vaccine", "reuters.com", "Regulators approve pandemic vaccine"),
             new Art("local-vaccine", "example-news.com", "Pandemic vaccine gets approval"),
             new Art("robot-strike", "reuters.com", "Dock workers strike over humanoid robots", Duration.ofHours(2)));
-        gdeltArticles(arts);
+        newsArticles(arts);
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         assertThat(counts(r.run()).get("articlesConsidered")).isEqualTo(4);

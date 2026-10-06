@@ -2,7 +2,7 @@ package com.oracul.app.runs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubNews;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -23,8 +23,8 @@ class RunStartupSweepIT extends AbstractDeadlineIT {
         freshStubs();
         String sy = connectedSid();
         String y = (String) runWith(sy, A).run().get("id");
-        gdelt.reset();
-        gdelt.responder = req -> StubGdelt.status(503);
+        news.reset();
+        news.responder = req -> StubNews.status(503);
         String sz = connectedSid();
         String z = (String) runWith(sz, A).run().get("id");
         freshStubs();
@@ -55,9 +55,9 @@ class RunStartupSweepIT extends AbstractDeadlineIT {
         Setup s = threeSessions();
         assertThat(sweep(STARTUP)).isEqualTo(1);
         responses.release("QUERY_EXPANSION");
-        int gdeltBefore = gdelt.requests.size();
+        int newsBefore = news.requests.size();
         Map<String, Object> before = row(s.x());
-        watchUnchanged(s.x(), before, 2500, () -> assertThat(gdelt.requests).hasSize(gdeltBefore));
+        watchUnchanged(s.x(), before, 2500, () -> assertThat(news.requests).hasSize(newsBefore));
         assertSlotReleased(s.sx());
     }
 

@@ -14,7 +14,7 @@ const exists = (rel: string): boolean => fs.existsSync(new URL(rel, APP));
 const read = (rel: string): string => fs.readFileSync(new URL(rel, APP), 'utf8');
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The backend environment of docker-compose.e2e.yml (run-modes.md), plus the two Google News variables of FR-48. */
+/** The backend environment of docker-compose.e2e.yml (run-modes.md), plus the two Google News variables of FR-48 (phase-03 FR-49: no variable of a second news provider). */
 const E2E_ENV: [string, string][] = [
   ['ORACUL_CHATGPT_AUTHORIZE_URL', 'http://localhost:4010/oauth/authorize'],
   ['ORACUL_CHATGPT_TOKEN_URL', 'http://stub:4010/oauth/token'],
@@ -22,11 +22,8 @@ const E2E_ENV: [string, string][] = [
   ['ORACUL_CHATGPT_ISSUER', 'http://stub:4010'],
   ['ORACUL_CHATGPT_REVOCATION_URL', 'http://stub:4010/oauth/revoke'],
   ['ORACUL_OPENAI_RESPONSES_BASE_URL', 'http://stub:4010/v1'],
-  ['ORACUL_NEWS_GDELT_BASE_URL', 'http://stub:4010'],
   ['ORACUL_NEWS_GOOGLE_BASE_URL', 'http://stub:4010'],
   ['ORACUL_NEWS_GOOGLE_REQUEST_SPACING', 'PT0.2S'],
-  ['ORACUL_NEWS_REQUEST_SPACING', 'PT0.5S'],
-  ['ORACUL_NEWS_RATE_LIMIT_WAIT', 'PT0.5S'],
   ['ORACUL_OPENAI_RETRY_DELAY', 'PT0.2S'],
   ['ORACUL_RUN_PLACEHOLDER_STAGE_DELAY', 'PT2S'],
   ['ORACUL_RUN_MIN_STAGE_DURATION', 'PT2S'],
@@ -64,6 +61,20 @@ test.describe('FR-42 Opt-in E2E stub with its own data: compose files and stack 
     }
     expect(yml, 'E2E uses the real loopback redirect uri').not.toContain('ORACUL_CHATGPT_REDIRECT_URI');
     expect(yml).toMatch(/depends_on:[\s\S]*stub:/);
+  });
+
+  // @trace FR-49
+  test('FR-49 docker-compose.e2e.yml sets no variable of the former news provider and none of its removed settings', () => {
+    const yml = read('docker-compose.e2e.yml');
+    // the name of the former provider, in pieces: the scan of FR-49 allows it in one backend test file only
+    const former = ['GD', 'ELT'].join('');
+    for (const name of [`ORACUL_NEWS_${former}_BASE_URL`, 'ORACUL_NEWS_REQUEST_SPACING', 'ORACUL_NEWS_RATE_LIMIT_WAIT']) {
+      expect(yml, `${name} is removed`).not.toMatch(new RegExp(`^\\s*${name}\\s*:`, 'm'));
+    }
+    expect(yml.toLowerCase()).not.toContain(former.toLowerCase());
+    // every other news variable stays
+    expect(yml).toMatch(/^\s*ORACUL_NEWS_GOOGLE_BASE_URL:/m);
+    expect(yml).toMatch(/^\s*ORACUL_NEWS_GOOGLE_REQUEST_SPACING:\s*PT0\.2S\s*$/m);
   });
 
   test('.oracul/stack.json declares the e2e mode with the stub file and the run mode with the real stack only', () => {

@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.jayway.jsonpath.JsonPath;
 import com.oracul.app.TestcontainersConfiguration;
 import com.oracul.app.chatgpt.StubOpenAi;
-import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubNews;
 import com.oracul.app.research.StubResponses;
 import jakarta.servlet.http.Cookie;
 import java.net.URLDecoder;
@@ -64,7 +64,7 @@ public abstract class AbstractRunIT {
 
     protected final StubOpenAi stub = StubOpenAi.INSTANCE;
     protected final StubResponses responses = StubResponses.INSTANCE;
-    protected final StubGdelt gdelt = StubGdelt.INSTANCE;
+    protected final StubNews news = StubNews.INSTANCE;
 
     @DynamicPropertySource
     static void stubProps(DynamicPropertyRegistry r) {
@@ -90,6 +90,8 @@ public abstract class AbstractRunIT {
                 "select cast(id as varchar) from generation_run where status in ('QUEUED','RUNNING')", String.class);
             if (active.isEmpty()) return;
             if (System.currentTimeMillis() >= end) {
+                // a failed test must not leak its run into the next test: a terminal state makes the run guard stop its work
+                jdbc.update("update generation_run set status = 'FAILED' where status in ('QUEUED','RUNNING')");
                 throw new AssertionError("runs still active 5 s after the test (leak into next test): " + active);
             }
             Thread.sleep(25);

@@ -315,8 +315,8 @@ class CriticIT extends AbstractStoryIT {
     @ParameterizedTest(name = "critic call failure: {0}")
     @ValueSource(strings = {"429", "500", "401"})
     void transportFailuresOfTheCriticFailTheRunInStageChallengingAssumptions(String kind) throws Exception {
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
         String sid = connectedSid();
@@ -403,7 +403,7 @@ class CriticIT extends AbstractStoryIT {
     // @trace FR-47
     @Test
     void anEmptyPackIsCriticisedLikeAnyOtherPack() throws Exception {
-        Ran r = run(A); // default GDELT {}: empty pack, speculative mode
+        Ran r = run(A); // default empty news feed: empty pack, speculative mode
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
         assertThat(requests(GEN)).hasSize(1);
         assertThat(requests(CRITIC)).as("speculative scenario is criticised").hasSize(1);

@@ -27,8 +27,8 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
-/** Rows 8, 11-14 of research-pipeline.md "Slice 05_search-sources" integration tests (GDELT search stage). */
-// @trace FR-13, FR-44, FR-47
+/** Rows 8, 11-14 of research-pipeline.md "Slice 05_search-sources" integration tests (search stage, Google News RSS). */
+// @trace FR-13, FR-44, FR-47, FR-49
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=10",
@@ -52,29 +52,28 @@ class SourceRetrievalIT extends AbstractRunIT {
         return awaitDone(sid, id);
     }
 
-    private static String article(String url, String name) {
-        return StubGdelt.article(url, "Title " + name, "reuters.com", "English",
-            StubGdelt.seendate(Instant.now().minus(1, ChronoUnit.DAYS)));
+    /** One Google News item "Title <name>" whose link resolves (302) to /articles/<name>. */
+    private String item(String name) {
+        return StubNews.rssItem("Title " + name, news.baseUrl() + "/rss/articles/" + name,
+            StubNews.pubDate(Instant.now().minus(1, ChronoUnit.DAYS)), "Reuters", "https://www.reuters.com");
     }
 
     // #8 (FR-44: 20 queries go out as 4 OR-group requests)
     @Test
-    void theQueriesAreSentToGdeltAsFourOrGroupsWithExactlyTheSpecifiedParameters() throws Exception {
+    void theQueriesAreSentToGoogleNewsAsFourOrGroupsWithExactlyTheSpecifiedParameters() throws Exception {
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
-        assertThat(gdelt.requests).hasSize(4);
+        assertThat(news.requests).hasSize(4);
         List<String> planTexts = new ArrayList<>();
         for (Map<String, Object> q : list(plan(researchBody(sid, id)).get("queries"))) planTexts.add((String) q.get("text"));
         List<String> sent = new ArrayList<>();
-        for (StubGdelt.Request r : gdelt.requests) {
-            assertThat(r.params().keySet()).containsExactlyInAnyOrder("query", "mode", "format", "maxrecords", "sort", "timespan");
-            assertThat(r.params().get("mode")).isEqualTo("ArtList");
-            assertThat(r.params().get("format")).isEqualTo("json");
-            assertThat(r.params().get("maxrecords")).as("25 x 5 elements").isEqualTo("125");
-            assertThat(r.params().get("sort")).isEqualTo("HybridRel");
-            assertThat(r.params().get("timespan")).isEqualTo("3months");
-            assertThat(r.params().get("query")).matches("^\\(.+( OR .+)+\\) sourcelang:english$");
+        for (StubNews.Request r : news.requests) {
+            assertThat(r.params().keySet()).containsExactlyInAnyOrder("q", "hl", "gl", "ceid");
+            assertThat(r.params().get("hl")).isEqualTo("en-US");
+            assertThat(r.params().get("gl")).isEqualTo("US");
+            assertThat(r.params().get("ceid")).isEqualTo("US:en");
+            assertThat(r.q()).matches("^\\(.+( OR .+)+\\) when:90d$");
             assertThat(r.rawQuery()).as("parameters are URL-encoded").doesNotContain(" ");
             assertThat(r.elements()).hasSize(5);
             sent.addAll(r.elements());
@@ -82,25 +81,25 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(sent).as("plan order, contiguous groups").containsExactlyElementsOf(planTexts);
     }
 
-    // #8 timespan mapping
-    @ParameterizedTest(name = "horizon {0} -> timespan {1}")
-    @CsvSource({"1d,7d", "1w,7d", "1m,14d", "1y,3months", "5y,3months", "10y,3months", "20y,3months"})
-    void timespanFollowsTheHorizon(String horizon, String timespan) throws Exception {
+    // #8 horizon -> when:<N>d
+    @ParameterizedTest(name = "horizon {0} -> when:{1}d")
+    @CsvSource({"1d,7", "1w,7", "1m,14", "1y,90", "5y,90", "10y,90", "20y,90"})
+    void whenFollowsTheHorizon(String horizon, int days) throws Exception {
         String sid = connectedSid();
         Map<String, Object> run = runToTerminal(sid, withHorizon(B, horizon));
         assertThat(run.get("status")).isEqualTo("COMPLETED");
-        assertThat(gdelt.requests).hasSize(4);
-        assertThat(gdelt.requests).allSatisfy(r -> assertThat(r.params().get("timespan")).isEqualTo(timespan));
+        assertThat(news.requests).hasSize(4);
+        assertThat(news.requests).allSatisfy(r -> assertThat(r.q()).endsWith(" when:" + days + "d"));
     }
 
     // #8 + FR-13 rules: sources keep the topic of their (attributed) query, in group then response order
     @Test
     void sourcesCarryTheTopicOfTheirAttributedQueryInGroupOrder() throws Exception {
-        gdelt.responder = req -> StubGdelt.json(StubGdelt.articles(List.of(article(gdelt.baseUrl() + "/articles/t" + req.number(), "t" + req.number()))));
+        news.responder = req -> StubNews.rss(item("t" + req.number()));
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
-        assertThat(gdelt.requests).hasSize(4);
+        assertThat(news.requests).hasSize(4);
         Map<String, Object> plan = plan(researchBody(sid, id));
         Map<String, Map<String, Object>> intents = new HashMap<>();
         for (Map<String, Object> i : list(plan.get("intents"))) intents.put((String) i.get("id"), i);
@@ -144,8 +143,8 @@ class SourceRetrievalIT extends AbstractRunIT {
     // #11 (FR-44: groups fail, not single queries)
     @Test
     void failedGroupsDoNotStopTheRun() throws Exception {
-        gdelt.responder = req -> req.number() <= 2 ? StubGdelt.status(503)
-            : StubGdelt.json(StubGdelt.articles(List.of(article(gdelt.baseUrl() + "/articles/n" + req.number(), "n" + req.number()))));
+        news.responder = req -> req.number() <= 2 ? StubNews.status(503)
+            : StubNews.rss(item("n" + req.number()));
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
@@ -156,7 +155,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(counts.get("searches")).isEqualTo(20);
         assertThat(counts.get("articlesRetrieved")).isEqualTo(2);
         assertThat(counts.get("articlesConsidered")).isEqualTo(2);
-        assertThat(gdelt.requests).as("a 503 is never retried").hasSize(4);
+        assertThat(news.requests).as("a 503 is never retried").hasSize(4);
         List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
         for (int i = 0; i < 20; i++) {
             String expected = i < 10 ? "FAILED" : i % 5 == 0 ? "OK" : "EMPTY";
@@ -168,19 +167,19 @@ class SourceRetrievalIT extends AbstractRunIT {
 
     static Stream<Arguments> unavailableProviders() {
         return Stream.of(
-            Arguments.of("HTTP 503", (Function<StubGdelt.Request, StubGdelt.Reply>) r -> StubGdelt.status(503)),
-            Arguments.of("connection dropped", (Function<StubGdelt.Request, StubGdelt.Reply>) r -> StubGdelt.drop()),
-            Arguments.of("200 text/plain error text", (Function<StubGdelt.Request, StubGdelt.Reply>) r -> new StubGdelt.Reply(200,
+            Arguments.of("HTTP 503", (Function<StubNews.Request, StubNews.Reply>) r -> StubNews.status(503)),
+            Arguments.of("connection dropped", (Function<StubNews.Request, StubNews.Reply>) r -> StubNews.drop()),
+            Arguments.of("200 text/plain error text", (Function<StubNews.Request, StubNews.Reply>) r -> new StubNews.Reply(200,
                 "text/plain", "Your search contained a phrase that is too short", 0)),
-            Arguments.of("200 invalid JSON", (Function<StubGdelt.Request, StubGdelt.Reply>) r -> StubGdelt.json("{not json")),
-            Arguments.of("HTTP 500", (Function<StubGdelt.Request, StubGdelt.Reply>) r -> StubGdelt.status(500)));
+            Arguments.of("200 invalid XML", (Function<StubNews.Request, StubNews.Reply>) r -> StubNews.rssBody("<rss><channel>{not xml")),
+            Arguments.of("HTTP 500", (Function<StubNews.Request, StubNews.Reply>) r -> StubNews.status(500)));
     }
 
     // #12
     @ParameterizedTest(name = "provider unavailable: {0}")
     @MethodSource("unavailableProviders")
-    void everyQueryFailingNoLongerEndsTheRun(String name, Function<StubGdelt.Request, StubGdelt.Reply> reply) throws Exception {
-        gdelt.responder = reply;
+    void everyQueryFailingNoLongerEndsTheRun(String name, Function<StubNews.Request, StubNews.Reply> reply) throws Exception {
+        news.responder = reply;
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
@@ -195,7 +194,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(counts.get("searches")).isEqualTo(20);
         assertThat(counts.get("articlesRetrieved")).isEqualTo(0);
         assertThat(counts.get("articlesConsidered")).isEqualTo(0);
-        assertThat(gdelt.requests).as("one request per group, none of these answers is retried").hasSize(4);
+        assertThat(news.requests).as("one request per group, none of these answers is retried, no fallback").hasSize(4);
         List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
         assertThat(queries).hasSize(20).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("FAILED");
@@ -211,36 +210,36 @@ class SourceRetrievalIT extends AbstractRunIT {
         awaitDone(sid, (String) json(second.getResponse().getContentAsString()).get("id"));
     }
 
-    // FR-44 step 5: one 429 per group is retried once (rate-limit-wait PT0S in tests)
+    // FR-49 / FR-48: a 429 is not retried in this slice (the retry comes with FR-52) and has no fallback: its group is FAILED
     @Test
-    void aRateLimitedGroupIsRetriedOnceAndTheRunCompletes() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger limited = new java.util.concurrent.atomic.AtomicInteger();
-        gdelt.responder = req -> limited.getAndIncrement() == 0
-            ? new StubGdelt.Reply(429, "text/plain", "Please limit requests to one every 5 seconds.", 0)
-            : StubGdelt.json(StubGdelt.articles(List.of(article(gdelt.baseUrl() + "/articles/r" + req.number(), "r" + req.number()))));
+    void aRateLimitedGroupFailsWithoutRetryAndTheRunCompletes() throws Exception {
+        news.responder = req -> req.number() == 1
+            ? new StubNews.Reply(429, "text/plain", "Too Many Requests", 0)
+            : StubNews.rss(item("r" + req.number()));
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
-        assertThat(gdelt.requests).as("4 groups + 1 retry").hasSize(5);
-        assertThat(gdelt.requests.get(1).params()).as("the retry is identical").isEqualTo(gdelt.requests.get(0).params());
-        assertThat(gdelt.requests.get(1).elements()).isEqualTo(gdelt.requests.get(0).elements());
+        assertThat(news.requests).as("4 groups, the 429 is not retried").hasSize(4);
+        assertThat(news.paths.stream().filter(p -> p.equals("/rss/search")).count()).isEqualTo(4);
         List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
-        assertThat(queries.stream().filter(q -> "FAILED".equals(q.get("status")))).isEmpty();
-        assertThat(sourceItems(sid, id)).hasSize(4);
+        for (int i = 0; i < 20; i++) {
+            assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo(i < 5 ? "FAILED" : i % 5 == 0 ? "OK" : "EMPTY");
+        }
+        assertThat(sourceItems(sid, id)).hasSize(3);
     }
 
-    // FR-44 step 5: a second 429 fails the group; run-control.md FR-47: every group failing does not end the run
+    // a 429 on every group fails the groups but not the run (run-control.md FR-47)
     @Test
-    void rateLimitedTwiceOnEveryGroupFailsTheGroupsButNotTheRun() throws Exception {
-        gdelt.responder = req -> new StubGdelt.Reply(429, "text/plain", "Please limit requests to one every 5 seconds.", 0);
+    void rateLimitedOnEveryGroupFailsTheGroupsButNotTheRun() throws Exception {
+        news.responder = req -> new StubNews.Reply(429, "text/plain", "Too Many Requests", 0);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(absent(run, "failure")).isTrue();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(gdelt.requests).as("4 groups x (first attempt + one retry)").hasSize(8);
+        assertThat(news.requests).as("4 groups, one request each").hasSize(4);
         assertThat(list(plan(researchBody(sid, id)).get("queries"))).hasSize(20)
             .allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
     }
@@ -253,7 +252,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":20")));
-        assertThat(gdelt.requests).hasSize(4);
+        assertThat(news.requests).hasSize(4);
         assertThat(list(plan(researchBody(sid, id)).get("queries"))).hasSize(20).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("EMPTY");
             assertThat(q.get("articlesReturned")).isEqualTo(0);
@@ -261,11 +260,18 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(json(getSources(sid, id))).isEqualTo(json("{\"items\":[]}"));
     }
 
+    static Stream<Arguments> emptyFeeds() {
+        return Stream.of(
+            Arguments.of("empty channel", "<rss version=\"2.0\"><channel></channel></rss>"),
+            Arguments.of("channel with a title only", "<rss version=\"2.0\"><channel><title>Google News</title></channel></rss>"),
+            Arguments.of("xml declaration and no items", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss version=\"2.0\"><channel><title>x</title><link>https://news.google.com</link></channel></rss>"));
+    }
+
     // #13: the other EMPTY shapes
     @ParameterizedTest(name = "EMPTY answer: {0}")
-    @CsvSource(delimiter = '|', value = {"empty articles|{\"articles\":[]}", "empty body|", "empty object|{}"})
+    @MethodSource("emptyFeeds")
     void emptyShapesAreEmptyNotFailed(String name, String body) throws Exception {
-        gdelt.responder = req -> StubGdelt.json(body == null ? "" : body);
+        news.responder = req -> StubNews.rssBody(body);
         String sid = connectedSid();
         String id = (String) startOk(sid, B).get("id");
         Map<String, Object> run = awaitDone(sid, id);
@@ -296,7 +302,7 @@ class SourceRetrievalIT extends AbstractRunIT {
     // #1-14 NFR-1: no token in sources
     @Test
     void noStubTokenReachesSourcesOrSearchPlanColumns() throws Exception {
-        gdelt.responder = req -> StubGdelt.json(StubGdelt.articles(List.of(article(gdelt.baseUrl() + "/articles/s" + req.number(), "s" + req.number()))));
+        news.responder = req -> StubNews.rss(item("s" + req.number()));
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         awaitDone(sid, id);

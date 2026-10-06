@@ -11,8 +11,8 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.context.TestPropertySource;
 
-/** phase-02 news-search.md FR-44: no request starts at or after the search-budget end; a budget of 0 sends nothing. */
-// @trace FR-44, FR-47
+/** phase-02 news-search.md FR-44 / FR-48: no request starts at or after the search-budget end; a budget of 0 sends nothing. */
+// @trace FR-44, FR-47, FR-49
 @ExtendWith(OutputCaptureExtension.class)
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
@@ -31,8 +31,8 @@ class NewsSearchNoBudgetIT extends AbstractRunIT {
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(run.get("failure")).isNull();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(gdelt.requests).isEmpty();
-        assertThat(gdelt.rssRequests).as("Google is not asked either").isEmpty();
+        assertThat(news.requests).as("Google is not asked").isEmpty();
+        assertThat(news.paths).as("no request of any kind reaches the news stub").doesNotContain("/rss/search");
         List<Map<String, Object>> queries =
             (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
         assertThat(queries).hasSize(20).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));

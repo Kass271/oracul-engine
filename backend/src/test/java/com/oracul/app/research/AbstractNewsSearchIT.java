@@ -15,26 +15,25 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Driver of the FR-44 tests that call the search stage directly ({@code SourceRetrieval.search(plan, horizon)}, a seam that
- * exists today) without a run: the plan is built here, the GDELT stub records every request. No ChatGPT involved.
+ * Driver of the tests that call the search stage directly ({@code SourceRetrieval.search(plan, horizon)}, a seam that
+ * exists today) without a run: the plan is built here, the news stub records every request. No ChatGPT involved.
  * Subclasses pin the oracul.news.* properties of their context with {@code @TestPropertySource}.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
-// news-search.md FR-48: no 1 s wait between Google requests in ITs (a subclass may pin its own spacing)
+// no wait between Google requests in ITs (a subclass may pin its own spacing)
 @org.springframework.test.context.TestPropertySource(properties = "oracul.news.google.request-spacing=PT0S")
 abstract class AbstractNewsSearchIT {
 
     @Autowired
     protected SourceRetrieval retrieval;
 
-    protected final StubGdelt gdelt = StubGdelt.INSTANCE;
+    protected final StubNews news = StubNews.INSTANCE;
 
     @DynamicPropertySource
-    static void gdeltBaseUrl(DynamicPropertyRegistry r) {
-        r.add("oracul.news.gdelt.base-url", StubGdelt.INSTANCE::baseUrl);
-        // news-search.md FR-48: the Google News RSS requests go to the stub too (default answer 503: every group falls back to GDELT)
-        r.add("oracul.news.google.base-url", StubGdelt.INSTANCE::baseUrl);
+    static void newsBaseUrl(DynamicPropertyRegistry r) {
+        // the Google News RSS requests go to the stub (default answer: an empty feed, every query EMPTY)
+        StubNews.registerBaseUrls(r);
     }
 
     @Autowired
@@ -46,7 +45,7 @@ abstract class AbstractNewsSearchIT {
      * then reset the stub.
      */
     @BeforeEach
-    void resetGdelt() throws Exception {
+    void resetNews() throws Exception {
         String active = "select count(*) from generation_run where status in ('QUEUED','RUNNING')";
         long end = System.currentTimeMillis() + 30_000;
         while (jdbc.queryForObject(active, Integer.class) > 0 && System.currentTimeMillis() < end) {
@@ -56,7 +55,7 @@ abstract class AbstractNewsSearchIT {
             jdbc.update("update generation_run set status = 'FAILED' where status in ('QUEUED','RUNNING')");
         }
         Thread.sleep(1500); // a request already on the wire of a just-ended run
-        gdelt.reset();
+        news.reset();
     }
 
     /** A plan with one planned query per text: Q01...Qn, all in the first intent of the template plan. */
@@ -82,7 +81,8 @@ abstract class AbstractNewsSearchIT {
         return retrieval.search(plan, HorizonCode._1Y);
     }
 
-    protected static String article(String url, String title) {
-        return StubGdelt.article(url, title, "reuters.com", "English", StubGdelt.seendate(java.time.Instant.now().minusSeconds(3600)));
+    /** One Google News RSS item (title, link, pubDate one hour ago, source Reuters). */
+    protected static String item(String link, String title) {
+        return StubNews.rssItem(title, link, StubNews.pubDate(java.time.Instant.now().minusSeconds(3600)), "Reuters", "https://www.reuters.com");
     }
 }

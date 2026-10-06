@@ -20,20 +20,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * phase-02 news-search.md FR-46 "At most 30 sources per run", exhaustive over the count and round-robin classes and the
- * invariants of the spec. The stage seams are the existing ones: {@code SourceRetrieval.search} (one group of all elements,
- * the stub answers in the arrival order of the test) followed by {@code readSources}. Candidates are told apart by topic
- * (intent topicKey of their query) and quality (GDELT domain through the quality table).
+ * invariants of the spec. The stage seams are the existing ones: {@code SourceRetrieval.search} (4 Google groups; the
+ * plan is laid out so that group 1 holds every topic query, the stub answers that group in the arrival order of the
+ * test and the three others with the empty feed) followed by {@code readSources}. Candidates are told apart by topic
+ * (intent topicKey of their query) and quality (publisher domain through the quality table).
  */
 // @trace FR-46
-@TestPropertySource(properties = {
-    "oracul.news.request-spacing=PT0S",
-    "oracul.news.rate-limit-wait=PT0S",
-    "oracul.news.max-requests=1",
-})
 class SourceCapIT extends AbstractNewsSearchIT {
 
     private static final AtomicInteger RUN = new AtomicInteger();
@@ -56,8 +51,8 @@ class SourceCapIT extends AbstractNewsSearchIT {
     /** No wait for runs of other classes: every article of this class carries a unique name prefix. */
     @Override
     @org.junit.jupiter.api.BeforeEach
-    void resetGdelt() {
-        gdelt.reset();
+    void resetNews() {
+        news.reset();
     }
 
     private static String element(int topic) {
@@ -81,7 +76,10 @@ class SourceCapIT extends AbstractNewsSearchIT {
         List<SearchIntent> intents = new ArrayList<>();
         List<SearchQuery> queries = new ArrayList<>();
         SearchPlan template = PlanSupport.plan(PlanSupport.cfgA(), 20);
-        topics = Math.max(topics, 8); // maxrecords = 25 x elements: room for 200 entries; unused topics just stay EMPTY
+        boolean noTopic = cands.stream().anyMatch(c -> c.topic() < 0);
+        // 4 contiguous groups of `group` queries: group 1 holds the topic queries (and the no-topic one), its cap
+        // min(250, 25 x group) leaves room for every entry; the other groups hold unused filler queries (answered empty)
+        int group = Math.max(8, topics + (noTopic ? 1 : 0));
         for (int t = 0; t < topics; t++) {
             SearchIntent in = new SearchIntent(String.format("I%02d", t + 1), QueryBucket.WILDCARD, "topic " + t, List.of());
             in.setTopicKey(topicKey(t));
@@ -89,31 +87,34 @@ class SourceCapIT extends AbstractNewsSearchIT {
             queries.add(new SearchQuery(String.format("Q%02d", t + 1), in.getId(), QueryBucket.WILDCARD, element(t),
                 SearchQueryStatus.EMPTY, 0));
         }
-        boolean noTopic = cands.stream().anyMatch(c -> c.topic() < 0);
         if (noTopic) { // a query whose intent is not part of the plan: its sources have no topic
-            queries.add(new SearchQuery(String.format("Q%02d", topics + 1), "I99", QueryBucket.WILDCARD, "tcapnone news",
+            queries.add(new SearchQuery(String.format("Q%02d", queries.size() + 1), "I99", QueryBucket.WILDCARD, "tcapnone news",
                 SearchQueryStatus.EMPTY, 0));
+        }
+        while (queries.size() < 4 * group) {
+            queries.add(new SearchQuery(String.format("Q%02d", queries.size() + 1), intents.get(0).getId(), QueryBucket.WILDCARD,
+                "tcapfill" + queries.size() + " news", SearchQueryStatus.EMPTY, 0));
         }
         SearchPlan plan = new SearchPlan(template.getQueryBudget(), template.getExpansionMode(), template.getBuckets(), intents, queries);
 
+        Instant day = Instant.now().minus(1, ChronoUnit.DAYS);
         List<String> entries = new ArrayList<>();
         for (C c : cands) {
             String element = c.topic() < 0 ? "tcapnone news" : element(c.topic());
-            entries.add(StubGdelt.article(gdelt.baseUrl() + "/articles/" + prefix + c.name(), element + " story " + c.name(), c.domain(),
-                "English", StubGdelt.seendate(Instant.now().minus(1, ChronoUnit.DAYS))));
+            entries.add(StubNews.rssItem(element + " story " + c.name(), news.baseUrl() + "/rss/articles/" + prefix + c.name(),
+                StubNews.pubDate(day), c.domain(), "https://" + c.domain()));
         }
         for (C c : cands) {
             if (extra.containsKey(c.name())) {
-                entries.add(StubGdelt.article(gdelt.baseUrl() + "/articles/" + prefix + c.name(),
-                    element(extra.get(c.name())) + " again " + c.name(), c.domain(), "English",
-                    StubGdelt.seendate(Instant.now().minus(1, ChronoUnit.DAYS))));
+                entries.add(StubNews.rssItem(element(extra.get(c.name())) + " again " + c.name(),
+                    news.baseUrl() + "/rss/articles/" + prefix + c.name(), StubNews.pubDate(day), c.domain(), "https://" + c.domain()));
             }
         }
-        String body = StubGdelt.articles(entries);
-        gdelt.responder = req -> StubGdelt.json(body);
+        StubNews.Reply answer = StubNews.rss(entries.toArray(String[]::new));
+        news.responder = req -> req.elements().contains(element(0)) ? answer : StubNews.rss();
 
         var outcome = search(plan);
-        assertThat(gdelt.requests).as("one group holds every element").hasSize(1);
+        assertThat(news.requests).as("4 groups, the first holds every topic element").hasSize(4);
         int retrieved = outcome.articlesRetrieved();
         var stored = retrieval.readSources(outcome, HorizonCode._1Y);
         List<String> names = new ArrayList<>();
@@ -129,7 +130,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
             m.put("url", url);
             sources.add(m);
         }
-        int fetches = (int) gdelt.articleRequests.stream().filter(n -> n.startsWith(prefix)).count();
+        int fetches = (int) news.articleRequests.stream().filter(n -> n.startsWith(prefix)).count();
         return new Kept(names, sources, fetches, retrieved);
     }
 

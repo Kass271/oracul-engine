@@ -22,7 +22,7 @@ class EventConcurrencyIT extends AbstractEventIT {
     // #24
     @Test
     void batchesRunInParallelUpToTheConfiguredConcurrencyAndNotBeyond() throws Exception {
-        gdeltF240();
+        newsF240();
         responses.delay(NORMALIZATION, Duration.ofMillis(300));
         responses.delay(CLASSIFICATION, Duration.ofMillis(300));
         Ran r = run(A);

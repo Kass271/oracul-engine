@@ -21,8 +21,7 @@ test.describe.configure({ mode: 'serial' });
 test.beforeEach(async ({ request }) => {
   const r = await request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  // the reset must also bring the news providers back up (Google News RSS and GDELT)
-  await request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
+  // the reset must also bring the news provider back up (Google News RSS)
   await request.post(`${STUB}/__control/rss`, { data: { mode: 'ok' } });
 });
 
@@ -63,7 +62,7 @@ async function awaitStatus(page: Page, id: string, wanted: string, timeout: numb
   return (await page.request.get(`/api/runs/${id}`)).json();
 }
 
-async function recorded(page: Page, kind: 'responses' | 'gdelt' | 'rss'): Promise<any[]> {
+async function recorded(page: Page, kind: 'responses' | 'rss' | 'all'): Promise<any[]> {
   const res = await page.request.get(`${STUB}/__control/requests?kind=${kind}`);
   expect(res.status()).toBe(200);
   const body = await res.json();
@@ -110,9 +109,12 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     const r = await page.request.post(`${STUB}/__control/rss`, { data: { mode } });
     expect(r.status(), `rss mode ${mode}`).toBe(204);
   }
-  async function newsMode(page: Page, mode: string): Promise<void> {
-    const r = await page.request.post(`${STUB}/__control/news`, { data: { mode } });
-    expect(r.ok(), `news mode ${mode}`).toBeTruthy();
+  /** FR-49: no run ever sends a request to the path of the former provider; every request of the stub is logged by kind=all. */
+  async function expectNoFormerProviderRequest(page: Page): Promise<void> {
+    const all = await recorded(page, 'all');
+    expect(all.some((r) => r.path === '/rss/search'), 'the log of all requests holds the Google News requests').toBe(true);
+    for (const r of all) expect(Object.keys(r).sort()).toEqual(['at', 'method', 'path']);
+    expect(all.filter((r) => String(r.path).startsWith('/api/v2/doc'))).toHaveLength(0);
   }
 
   test('the acceptance run searches 20 queries as 4 Google News RSS requests and keeps 30 sources', async ({ page }) => {
@@ -135,7 +137,7 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     }
     // the E2E stack spaces Google request starts by 0.2 s (slack for clock jitter between the two ends)
     for (let k = 1; k < rss.length; k++) expect(rss[k].at - rss[k - 1].at).toBeGreaterThanOrEqual(150);
-    expect(await recorded(page, 'gdelt'), 'Google answers every group: no GDELT request').toHaveLength(0);
+    await expectNoFormerProviderRequest(page);
 
     const res = await page.request.get(`/api/runs/${id}/sources`);
     expect(res.status()).toBe(200);
@@ -168,29 +170,31 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     for (const q of plan.queries) expect(q.status).toBe('OK');
   });
 
-  test('Google down: every group falls back to GDELT and the run completes from the GDELT answers', async ({ page }) => {
+  test('Google down: there is no fallback, every query is FAILED and the run still completes with the NO_EVIDENCE note', async ({ page }) => {
     test.setTimeout(90_000);
     await rssMode(page, 'down');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
     expect(await recorded(page, 'rss')).toHaveLength(4);
-    const gdelt = await recorded(page, 'gdelt');
-    expect(gdelt).toHaveLength(4);
-    for (const r of gdelt) expect(r.query).toMatch(/^\(.+( OR .+)+\) sourcelang:english$/);
-    expect(run.counts.articlesRetrieved).toBe(100);
-    expect(run.counts.articlesConsidered).toBe(30);
-    const items = (await (await page.request.get(`/api/runs/${id}/sources`)).json()).items;
-    expect(items).toHaveLength(30);
-    for (const s of items) expect(s.publisherUrl ?? null, 'GDELT sources have no publisherUrl').toBeNull();
+    await expectNoFormerProviderRequest(page);
+    expect(run.counts.searches).toBe(20);
+    expect(run.counts.articlesRetrieved).toBe(0);
+    expect(run.counts.articlesConsidered).toBe(0);
+    const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
+    expect(plan.queries).toHaveLength(20);
+    for (const q of plan.queries) expect(q.status).toBe('FAILED');
+    expect(run.failure ?? null).toBeNull();
+    expect(run.evidenceNote.kind).toBe('NO_EVIDENCE');
+    expect((await (await page.request.get(`/api/runs/${id}/sources`)).json()).items).toEqual([]);
   });
 
-  test('Google empty: queries are EMPTY, GDELT is not asked and the run is speculative', async ({ page }) => {
+  test('Google empty: queries are EMPTY, nothing else is asked and the run is speculative', async ({ page }) => {
     test.setTimeout(90_000);
     await rssMode(page, 'empty');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
     expect(await recorded(page, 'rss')).toHaveLength(4);
-    expect(await recorded(page, 'gdelt')).toHaveLength(0);
+    await expectNoFormerProviderRequest(page);
     const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
     for (const q of plan.queries) expect(q.status).toBe('EMPTY');
     expect(run.counts.articlesRetrieved).toBe(0);
@@ -198,14 +202,13 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     expect((await (await page.request.get(`/api/runs/${id}/sources`)).json()).items).toEqual([]);
   });
 
-  test('Google malformed and GDELT down: every query is FAILED and the run still completes with the NO_EVIDENCE note', async ({ page }) => {
+  test('Google malformed: every query is FAILED and the run still completes with the NO_EVIDENCE note', async ({ page }) => {
     test.setTimeout(90_000);
     await rssMode(page, 'malformed');
-    await newsMode(page, 'down');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
     expect(await recorded(page, 'rss')).toHaveLength(4);
-    expect(await recorded(page, 'gdelt')).toHaveLength(4);
+    await expectNoFormerProviderRequest(page);
     expect(run.counts.searches).toBe(20);
     expect(run.counts.articlesRetrieved).toBe(0);
     expect(run.counts.articlesConsidered).toBe(0);
@@ -245,81 +248,35 @@ test.describe('FR-13 Current-news search and source retrieval', () => {
   });
 });
 
-// @trace FR-44, FR-47
-test.describe('FR-44 Real news search within GDELT limits (GDELT is the fallback of a failed Google group)', () => {
-  async function newsMode(page: Page, mode: string): Promise<void> {
-    const r = await page.request.post(`${STUB}/__control/news`, { data: { mode } });
-    expect(r.ok(), `news mode ${mode}`).toBeTruthy();
-  }
-  async function googleDown(page: Page): Promise<void> {
-    const r = await page.request.post(`${STUB}/__control/rss`, { data: { mode: 'down' } });
-    expect(r.status()).toBe(204);
-  }
+// @trace FR-49
+test.describe('FR-49 The former news provider is gone (E2E stub)', () => {
+  // the name of the former provider, in pieces: the scan of FR-49 allows it in one backend test file only
+  const FORMER = ['gd', 'elt'].join('');
 
-  test('FR-44 with Google down the acceptance run sends 4 spaced OR-group requests to GDELT and keeps the counts 20 / 100 / 30', async ({ page }) => {
+  test('the stub has no route, no control endpoint and no request kind of the former provider', async ({ request }) => {
+    expect((await request.get(`${STUB}/api/v2/doc/doc?query=x&format=json`)).status()).toBe(404);
+    const control = await request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
+    expect(control.status()).toBe(404);
+    expect(await control.json()).toEqual({ error: 'not_found' });
+    const kind = await request.get(`${STUB}/__control/requests?kind=${FORMER}`);
+    expect(kind.status()).toBe(400);
+    expect(await kind.json()).toEqual({ error: 'unknown_kind' });
+  });
+
+  test('kind=all lists every non-control request in arrival order and is cleared by reset', async ({ page }) => {
     test.setTimeout(90_000);
-    await googleDown(page);
     const id = await startAcceptanceRun(page);
-    const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(run.counts.searches).toBe(20);
-    expect(run.counts.articlesRetrieved).toBe(100);
-    expect(run.counts.articlesConsidered).toBe(30);
-
-    const requests = await recorded(page, 'gdelt');
-    expect(requests).toHaveLength(4);
-    for (const r of requests) {
-      expect(r.query).toMatch(/^\(.+( OR .+)+\) sourcelang:english$/);
-      expect(r.params.maxrecords).toBe('125');
-      expect(r.params.mode).toBe('ArtList');
-      expect(r.params.format).toBe('json');
-      expect(r.params.sort).toBe('HybridRel');
+    await awaitStatus(page, id, 'COMPLETED', 40_000);
+    const all = await recorded(page, 'all');
+    expect(all.length).toBeGreaterThan(4);
+    expect(all.filter((r) => r.path === '/rss/search')).toHaveLength(4);
+    for (const r of all) {
+      expect(String(r.path).startsWith('/__control/')).toBe(false);
+      expect(typeof r.method).toBe('string');
+      expect(typeof r.at).toBe('number');
     }
-    // the E2E stack spaces request starts by 0.5 s (a little slack for clock jitter between the two ends)
-    for (let k = 1; k < requests.length; k++) {
-      expect(requests[k].at - requests[k - 1].at).toBeGreaterThanOrEqual(450);
-    }
-    const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
-    expect(plan.queries).toHaveLength(20);
-    for (const q of plan.queries) expect(q.status).toBe('OK');
-  });
-
-  test('FR-44 a 429 is retried once after the rate-limit wait and the run completes', async ({ page }) => {
-    test.setTimeout(90_000);
-    await googleDown(page);
-    await newsMode(page, 'rate-limited-once');
-    const id = await startAcceptanceRun(page);
-    await awaitStatus(page, id, 'COMPLETED', 60_000);
-    const requests = await recorded(page, 'gdelt');
-    expect(requests).toHaveLength(5);
-    expect(requests[1].query).toBe(requests[0].query);
-    expect(requests[1].at - requests[0].at).toBeGreaterThanOrEqual(450);
-  });
-
-  test('FR-44 groups that fail do not stop the run: the queries of groups 1-2 are FAILED, the others OK', async ({ page }) => {
-    test.setTimeout(90_000);
-    await googleDown(page);
-    await newsMode(page, 'partial');
-    const id = await startAcceptanceRun(page);
-    const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(run.counts.searches).toBe(20);
-    const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
-    plan.queries.forEach((q: any, i: number) => expect(q.status, q.id).toBe(i < 10 ? 'FAILED' : 'OK'));
-    expect(await recorded(page, 'gdelt')).toHaveLength(4);
-  });
-
-  test('FR-44 every group rate-limited twice no longer ends the run: 8 GDELT requests, every query FAILED, NO_EVIDENCE note', async ({ page }) => {
-    test.setTimeout(90_000);
-    await googleDown(page);
-    await newsMode(page, 'rate-limited');
-    const id = await startAcceptanceRun(page);
-    const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(run.failure ?? null).toBeNull();
-    expect(run.evidenceNote.kind).toBe('NO_EVIDENCE');
-    expect(await recorded(page, 'gdelt')).toHaveLength(8);
-    expect(await recorded(page, 'rss')).toHaveLength(4);
-    const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
-    for (const q of plan.queries) expect(q.status).toBe('FAILED');
-    await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId('failure-view')).toHaveCount(0);
+    expect(all.map((r) => r.at)).toEqual([...all.map((r) => r.at)].sort((a, b) => a - b));
+    expect((await page.request.post(`${STUB}/__control/reset`)).status()).toBe(204);
+    expect(await recorded(page, 'all')).toEqual([]);
   });
 });

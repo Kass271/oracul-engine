@@ -152,7 +152,7 @@ class AlternativeRunIT extends AbstractStoryIT {
     void theAlternativeReusesThePackWithoutSearchingAndAvoidsTheParentFuture() throws Exception {
         Ran p = parent();
         Map<String, Object> before = row(p.id());
-        int gdelt0 = gdelt.requests.size();
+        int news0 = news.requests.size();
         int total0 = responses.requests.size();
         int gen0 = requests(GEN).size();
         Ran a = altRun(p);
@@ -162,7 +162,7 @@ class AlternativeRunIT extends AbstractStoryIT {
         assertThat(a.run().get("evidencePackId")).isEqualTo(p.run().get("evidencePackId"));
         List<String> purposes = purposes().subList(total0, purposes().size());
         assertThat(purposes).containsExactly(GEN, "SCENARIO_CRITIC", STORY);
-        assertThat(gdelt.requests.size()).isEqualTo(gdelt0);
+        assertThat(news.requests.size()).isEqualTo(news0);
         String g = after(GEN, gen0).get(0).inputText();
         assertThat(g).contains("Attempt: 1 | Reason: INITIAL");
         assertThat(g).contains(ALT_TASK);
@@ -472,8 +472,8 @@ class AlternativeRunIT extends AbstractStoryIT {
         altRun(p);
         int gen0 = requests(GEN).size();
         int exp0 = requests(EXPANSION).size();
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         Map<String, Object> created = startOk(p.sid(), A);
         awaitDone(p.sid(), (String) created.get("id"));
         List<StubResponses.Request> gens = after(GEN, gen0);

@@ -104,8 +104,8 @@ class ScenarioGenerationIT extends AbstractReasoningIT {
     @ParameterizedTest(name = "scenario generation failure: {0}")
     @ValueSource(strings = {"429", "500", "401"})
     void transportFailuresFailTheRunInStageExploringFutures(String kind) throws Exception {
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
         String sid = connectedSid();

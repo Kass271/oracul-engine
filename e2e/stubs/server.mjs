@@ -1,26 +1,23 @@
 // E2E stub server (port 4010). Dependency-free. NEVER forwards to real OpenAI (NFR-7): every handler is local.
-// Structured as a small route table so later slices can register more fixtures (GDELT, Responses API).
+// Structured as a small route table so later slices can register more fixtures (Responses API).
 import { createServer } from 'node:http';
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 4010);
 const MODES = ['ok', 'not_eligible', 'deny', 'token_error', 'refresh_error', 'refresh_invalid_client', 'refresh_unavailable'];
 const REFRESH_FAILURE_MODES = ['refresh_error', 'refresh_invalid_client', 'refresh_unavailable'];
-const NEWS_MODES = ['ok', 'down', 'rate-limited-once', 'rate-limited', 'partial'];
 const RSS_MODES = ['ok', 'empty', 'down', 'malformed'];
 const MODELS_MODES = ['ok', 'no-preferred', 'empty', 'unauthorized', 'unavailable'];
 const RESPONSES_MODES = ['ok', 'incomplete', 'failed', 'no-completed', 'not-eligible', 'usage-limit', 'unavailable', 'unavailable-twice', 'route-not-supported', 'unsupported-capability', 'invalid-user', 'unknown-code'];
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 
-export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], news: 'ok', newsCalls: 0, models: 'ok', responsesMode: 'ok', responsesModeCalls: 0, events: 'ok', scenario: 'ok', scenarioCalls: 0, alternativeCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, rss: 'ok', requests: { responses: [], gdelt: [], rss: [], models: [] } };
+export const state = { mode: 'ok', counter: 0, codes: new Map(), issued: [], models: 'ok', responsesMode: 'ok', responsesModeCalls: 0, events: 'ok', scenario: 'ok', scenarioCalls: 0, alternativeCalls: 0, critic: 'ok', criticCalls: 0, story: 'ok', storyCalls: 0, rss: 'ok', requests: { responses: [], rss: [], models: [], all: [] } };
 
 function reset() {
   state.mode = 'ok';
   state.counter = 0;
   state.codes.clear();
   state.issued.length = 0;
-  state.news = 'ok';
-  state.newsCalls = 0;
   state.models = 'ok';
   state.responsesMode = 'ok';
   state.responsesModeCalls = 0;
@@ -33,7 +30,7 @@ function reset() {
   state.story = 'ok';
   state.storyCalls = 0;
   state.requests.responses.length = 0;
-  state.requests.gdelt.length = 0;
+  state.requests.all.length = 0;
   state.requests.rss.length = 0;
   state.rss = 'ok';
   state.requests.models.length = 0;
@@ -55,7 +52,6 @@ const readBody = (req) =>
   });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sha1 = (v) => createHash('sha1').update(v).digest('hex');
-const seendate = () => new Date(Date.now() - 86_400_000).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 const xmlEsc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const dataBlock = (text, name) => {
   const open = `<<<ORACUL_UNTRUSTED_DATA name="${name}">>>`;
@@ -208,18 +204,6 @@ export const routes = {
   },
   'GET /__control/issued': async (req, res) => json(res, 200, { values: [...state.issued] }),
 
-  'POST /__control/news': async (req, res, url, body) => {
-    let mode;
-    try {
-      mode = JSON.parse(body || '{}').mode;
-    } catch {
-      return json(res, 400, { error: 'invalid_json' });
-    }
-    if (!NEWS_MODES.includes(mode)) return json(res, 400, { error: 'unknown_mode' });
-    state.news = mode;
-    state.newsCalls = 0;
-    empty(res, 204);
-  },
   'POST /__control/rss': async (req, res, url, body) => {
     let mode;
     try {
@@ -420,42 +404,8 @@ export const routes = {
     sse(res, responseId, output, mode);
   },
 
-  // GDELT DOC 2.0 artlist stub: the decoded query is an OR group "(<e1> OR <e2> ...) sourcelang:english" (or one element);
-  // every element is answered with the 5 articles of the old per-query stub, the first is shared by all (dedup).
-  'GET /api/v2/doc/doc': async (req, res, url) => {
-    const query = url.searchParams.get('query') ?? '';
-    const at = Date.now();
-    state.requests.gdelt.push({ query, params: Object.fromEntries(url.searchParams), at });
-    const n = state.requests.gdelt.length;
-    const call = ++state.newsCalls;
-    const limited = () => {
-      res.writeHead(429, { 'content-type': 'text/plain' });
-      res.end('Please limit requests to one every 5 seconds');
-    };
-    if (state.news === 'down') return json(res, 503, { error: 'unavailable' });
-    if (state.news === 'rate-limited' || (state.news === 'rate-limited-once' && call === 1)) return limited();
-    if (state.news === 'partial' && call <= 2) return json(res, 503, { error: 'unavailable' });
-    let group = query.replace(/ sourcelang:english$/, '').trim();
-    if (group.startsWith('(') && group.endsWith(')')) group = group.slice(1, -1);
-    const elements = group.split(' OR ').map((e) => e.trim().replace(/^"(.*)"$/, '$1'));
-    const base = 'http://stub:4010/articles';
-    const articles = elements.flatMap((element) => {
-      const key = sha1(element).slice(0, 8);
-      return [`${base}/shared?utm_source=${n}`, ...[2, 3, 4, 5].map((a) => `${base}/${key}-${a}`)].map((u, i) => ({
-        url: u,
-        url_mobile: '',
-        title: i === 0 ? 'Shared stub article' : `${element} stub article ${key}-${i + 1}`,
-        seendate: seendate(),
-        socialimage: '',
-        domain: 'reuters.com',
-        language: 'English',
-        sourcecountry: 'United States',
-      }));
-    });
-    json(res, 200, { articles });
-  },
   // Google News RSS 2.0 stub (news-search.md FR-48): the decoded q is "(<e1> OR <e2> ...) when:<N>d" (or one element);
-  // every element is answered with the 5 entries the GDELT stub gives, the first is shared by all (dedup).
+  // every element is answered with 5 entries, the first is shared by all (dedup).
   'GET /rss/search': async (req, res, url) => {
     const q = url.searchParams.get('q') ?? '';
     state.requests.rss.push({ q, params: Object.fromEntries(url.searchParams), at: Date.now() });
@@ -559,6 +509,7 @@ export const routes = {
 
 export const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  if (!url.pathname.startsWith('/__control/')) state.requests.all.push({ method: req.method, path: url.pathname, at: Date.now() });
   const handler = routes[`${req.method} ${url.pathname}`] ?? (url.pathname.startsWith('/articles/') ? routes[`${req.method} /articles/*`] : url.pathname.startsWith('/rss/articles/') ? routes[`${req.method} /rss/articles/*`] : undefined);
   if (!handler) return json(res, 404, { error: 'not_found' });
   try {

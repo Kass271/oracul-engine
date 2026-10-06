@@ -29,7 +29,7 @@ import org.w3c.dom.NodeList;
 
 /** Google News RSS search (FR-48): one request per group, never retried; the answer is parsed as plain XML (no DTD). */
 @Component
-public class GoogleNewsProvider {
+public class GoogleNewsProvider implements NewsProvider {
 
     private static final Logger log = LoggerFactory.getLogger(GoogleNewsProvider.class);
     private static final String ACCEPT = "application/rss+xml, application/xml, text/xml";
@@ -53,7 +53,7 @@ public class GoogleNewsProvider {
     /** {@code (<e1> OR <e2> ...) when:<N>d}; no parentheses around a single element. */
     public static String q(List<String> elements, com.oracul.app.api.model.HorizonCode horizon) {
         String body = elements.size() == 1 ? elements.get(0) : "(" + String.join(" OR ", elements) + ")";
-        return body + " when:" + GdeltNewsProvider.timespanDays(horizon) + "d";
+        return body + " when:" + GoogleQueryGroups.timespanDays(horizon) + "d";
     }
 
     /** Removes one trailing " - <source>" from the title (both trimmed). */
@@ -72,6 +72,7 @@ public class GoogleNewsProvider {
     }
 
     /** Never throws for provider problems: they are reported as FAILED. */
+    @Override
     public NewsProvider.Result search(String q, int maxItems, Duration timeout) {
         try {
             if (timeout.isZero() || timeout.isNegative()) {
@@ -118,8 +119,8 @@ public class GoogleNewsProvider {
                 String sourceText = source == null ? null : source.getTextContent();
                 String sourceUrl = source == null || !source.hasAttribute("url") ? null : source.getAttribute("url");
                 String title = cleanTitle(text(item, "title"), sourceText);
-                out.add(new NewsProvider.Article(text(item, "link"), title, null, null, null,
-                    parseDate(text(item, "pubDate")), sourceText == null ? null : sourceText.trim(), sourceUrl, true));
+                out.add(new NewsProvider.Article(text(item, "link"), title,
+                    parseDate(text(item, "pubDate")), sourceText == null ? null : sourceText.trim(), sourceUrl));
             }
             return out.isEmpty() ? new NewsProvider.Result(SearchQueryStatus.EMPTY, List.of())
                 : new NewsProvider.Result(SearchQueryStatus.OK, out);

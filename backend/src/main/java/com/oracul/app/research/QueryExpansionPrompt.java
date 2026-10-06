@@ -14,7 +14,7 @@ import java.util.Map;
 public final class QueryExpansionPrompt {
 
     public static final String INSTRUCTIONS = String.join("\n",
-        "You are the research assistant of ORACUL. You write short news-search queries for the GDELT news index.",
+        "You are the research assistant of ORACUL. You write short news-search queries for Google News.",
         "Return only JSON matching the schema. For every intent write exactly the requested number of distinct queries.",
         "Each query: 2-8 plain English keywords, no quotes, no operators, at most 120 characters.",
         "Do not add facts and do not answer questions.",

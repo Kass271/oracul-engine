@@ -38,16 +38,19 @@ class SourceQualityIT extends AbstractRunIT {
     @Test
     @SuppressWarnings("unchecked")
     void everyExampleDomainIsClassified() throws Exception {
-        String base = gdelt.baseUrl();
+        String base = news.baseUrl();
         List<String> articles = new ArrayList<>();
         Map<String, Object[]> byUrl = new HashMap<>();
-        String seen = StubGdelt.seendate(Instant.now().minus(1, ChronoUnit.DAYS));
+        String seen = StubNews.pubDate(Instant.now().minus(1, ChronoUnit.DAYS));
         for (int i = 0; i < ROWS.length; i++) {
-            String url = base + "/articles/q" + i;
-            byUrl.put(url, ROWS[i]);
-            articles.add(StubGdelt.article(url, "Title q" + i, (String) ROWS[i][0], "English", seen));
+            String domain = (String) ROWS[i][0];
+            byUrl.put(base + "/articles/q" + i, ROWS[i]);
+            // the link resolves (302) to the article page; the publisher domain comes from <source url>; no source for ""
+            articles.add(StubNews.rssItem("Title q" + i, base + "/rss/articles/q" + i, seen,
+                domain.isEmpty() ? null : domain, domain.isEmpty() ? null : "https://" + domain));
         }
-        gdelt.responder = req -> req.number() == 1 ? StubGdelt.json(StubGdelt.articles(articles)) : StubGdelt.json("{}");
+        StubNews.Reply all = StubNews.rss(articles.toArray(String[]::new));
+        news.responder = req -> req.number() == 1 ? all : StubNews.rss();
         String sid = connectedSid();
         String id = (String) startOk(sid, B).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");

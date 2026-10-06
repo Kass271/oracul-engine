@@ -52,15 +52,15 @@ class InsufficientEvidenceIT extends AbstractStoryIT {
         return A.replace("\"realism\":8", "\"realism\":" + realism);
     }
 
-    /** Fixture K(c, s): first GDELT request returns c + s articles, risky for EV001..EV<c>, opportunity for the rest. */
+    /** Fixture K(c, s): first /rss/search request answers c + s articles, risky for EV001..EV<c>, opportunity for the rest. */
     private Ran runK(int c, int s, String body) throws Exception {
-        gdelt.reset();
+        news.reset();
         List<Art> arts = new ArrayList<>();
         for (int i = 1; i <= c + s; i++) {
             arts.add(new Art("k-" + i, "reuters.com", "K article " + i));
-            gdelt.site("k-" + i, "Publisher " + i);
+            news.site("k-" + i, "Publisher " + i);
         }
-        gdeltArticles(arts);
+        newsArticles(arts);
         always(CLASSIFICATION, req -> {
             List<String> entries = new ArrayList<>();
             for (String id : StubResponses.eventIds(req.inputText())) {
@@ -87,7 +87,6 @@ class InsufficientEvidenceIT extends AbstractStoryIT {
 
     private static final String CRITIC = "SCENARIO_CRITIC";
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> note(Map<String, Object> run) {
         assertThat(run.get("evidenceNote")).as("evidenceNote of " + run).isNotNull();
         return (Map<String, Object>) run.get("evidenceNote");
@@ -207,7 +206,7 @@ class InsufficientEvidenceIT extends AbstractStoryIT {
     @ParameterizedTest(name = "empty pack at realism {0}")
     @ValueSource(ints = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
     void anEmptyPackIsNoEvidenceForEveryRealism(int realism) throws Exception {
-        gdelt.reset();
+        news.reset();
         Ran r = run(bodyA(realism));
         Map<String, Object> run = r.run();
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");

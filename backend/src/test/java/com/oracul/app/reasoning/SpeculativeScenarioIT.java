@@ -3,7 +3,7 @@ package com.oracul.app.reasoning;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
-import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubNews;
 import com.oracul.app.research.StubResponses;
 import com.oracul.app.result.AbstractStoryIT;
 import jakarta.servlet.http.Cookie;
@@ -142,11 +142,10 @@ class SpeculativeScenarioIT extends AbstractStoryIT {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("emptyPackClasses")
-    void anEmptyPackAddsTheSpeculativeTaskLineRightAfterTheCiteLine(String name, String news) throws Exception {
-        gdelt.reset();
-        if ("DOWN".equals(news)) {
-            gdelt.responder = req -> StubGdelt.status(503);
-            gdelt.rssResponder = req -> StubGdelt.status(503);
+    void anEmptyPackAddsTheSpeculativeTaskLineRightAfterTheCiteLine(String name, String mode) throws Exception {
+        news.reset();
+        if ("DOWN".equals(mode)) {
+            news.responder = req -> StubNews.status(503);
         }
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");

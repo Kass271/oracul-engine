@@ -22,7 +22,7 @@ class EventConcurrencyOneIT extends AbstractEventIT {
     // #25 (16 sequential answers of 300 ms need more than the usual 10 s polling window)
     @Test
     void withConcurrencyOneNeverMoreThanOneBatchIsInFlight() throws Exception {
-        gdeltF240();
+        newsF240();
         responses.delay(NORMALIZATION, Duration.ofMillis(300));
         responses.delay(CLASSIFICATION, Duration.ofMillis(300));
         Ran r = runWithin(A, 30_000);

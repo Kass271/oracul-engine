@@ -17,7 +17,6 @@ async function control(page: Page, name: string, mode: string): Promise<void> {
 async function resetStub(page: Page): Promise<void> {
   const r = await page.request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  await page.request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
   await control(page, 'events', 'ok');
   await control(page, 'scenario', 'ok');
   await control(page, 'story', 'ok');

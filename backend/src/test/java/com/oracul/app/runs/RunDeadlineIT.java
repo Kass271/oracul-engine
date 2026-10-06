@@ -2,7 +2,7 @@ package com.oracul.app.runs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubNews;
 import com.oracul.app.research.StubResponses;
 import java.time.Duration;
 import java.util.Map;
@@ -66,7 +66,7 @@ class RunDeadlineIT extends AbstractDeadlineIT {
     @Test
     void aTimedOutSearchStageStoresNothingAfterTheSweep() throws Exception {
         freshStubs();
-        gdelt.responder = req -> new StubGdelt.Reply(200, "application/json", "{}", 3000);
+        news.responder = req -> new StubNews.Reply(200, "application/rss+xml", "<rss version=\"2.0\"><channel></channel></rss>", 3000);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         waitForStage(sid, id, "SEARCHING");
@@ -91,7 +91,7 @@ class RunDeadlineIT extends AbstractDeadlineIT {
         responses.release("QUERY_EXPANSION");
         Map<String, Object> run = awaitRun(sid, id[0], 5000, m -> "FAILED".equals(m.get("status")));
         assertTimedOut(run, "RESEARCH_STRATEGY", 2);
-        assertThat(gdelt.requests).as("the check before SEARCHING stops the task").isEmpty();
+        assertThat(news.requests).as("the check before SEARCHING stops the task").isEmpty();
     }
 
     // #6

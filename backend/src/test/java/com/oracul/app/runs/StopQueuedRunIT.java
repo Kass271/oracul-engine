@@ -49,7 +49,7 @@ class StopQueuedRunIT extends AbstractStoryIT {
                 .as("a stopped QUEUED run is never started, failed or timed out").isEqualTo(rowAtStop);
             assertThat(requests("QUERY_EXPANSION")).as("only run 1 expanded queries").hasSize(1);
             assertThat(responses.modelRequests).as("only run 1 read the model catalogue").hasSize(1);
-            assertThat(gdelt.requests).as("only run 1 searched").hasSize(4);
+            assertThat(news.requests).as("only run 1 searched").hasSize(4);
             assertThat(startRun(sidB, B).andReturn().getResponse().getStatus()).as("the slot of the stopped run is free").isEqualTo(202);
         } finally {
             responses.release("QUERY_EXPANSION");

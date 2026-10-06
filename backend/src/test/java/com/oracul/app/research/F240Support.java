@@ -31,7 +31,7 @@ final class F240Support {
             for (int a = 1; a <= n; a++) {
                 if (a == 1 && r > 1) continue; // "shared" seen before: only adds a query id
                 if (a == 2 && r <= 5) continue; // blank title
-                if (a == 2 && r >= 6 && r <= 15) continue; // French (GDELT) / unusable link (Google) / 200 days old
+                if (a == 2 && r >= 6 && r <= 15) continue; // unusable link / 200 days old
                 if (a == 3 && r >= 16) continue; // the a2 entry of these queries is the same URL as a3 and came first
                 String name = a == 1 ? "shared" : "r" + r + "-a" + (a == 2 ? 3 : a);
                 out.add(new CapOracle.Cand(name, topicOfQuery.get(r - 1), 0.85));

@@ -24,8 +24,8 @@ class CriticStagesIT extends AbstractStoryIT {
         AtomicInteger calls = new AtomicInteger();
         Function<StubResponses.Request, StubResponses.Reply> fallback = responses.defaultResponder();
         always(CRITIC, req -> calls.getAndIncrement() == 0 ? StubResponses.completed(StubResponses.criticFixture("CR-ICS")) : fallback.apply(req));
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
         String sid = connectedSid();

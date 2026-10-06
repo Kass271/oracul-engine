@@ -12,7 +12,6 @@ async function control(page: Page, name: string, mode: string): Promise<void> {
 
 async function resetStub(page: Page): Promise<void> {
   expect((await page.request.post(`${STUB}/__control/reset`)).status()).toBe(204);
-  await page.request.post(`${STUB}/__control/news`, { data: { mode: 'ok' } });
   await control(page, 'events', 'ok');
   await control(page, 'scenario', 'ok');
   await control(page, 'story', 'ok');
@@ -72,7 +71,6 @@ test('FR-30 ALTERNATIVE FUTURE reuses the evidence and produces a different futu
   await expect(page.getByTestId('quick-alternative')).toBeVisible();
   await expect(page.getByTestId('quick-alternative')).toHaveText('ALTERNATIVE FUTURE');
   await expect(page.getByTestId('quick-alternative')).toBeEnabled();
-  const gdeltBefore = (await recorded(page, 'gdelt')).length;
   const rssBefore = (await recorded(page, 'rss')).length;
   const first = await (await page.request.get(`/api/runs/${run1}`)).json();
 
@@ -87,7 +85,6 @@ test('FR-30 ALTERNATIVE FUTURE reuses the evidence and produces a different futu
   expect(body.evidencePackId).toBe(first.evidencePackId);
   await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 60_000 });
 
-  expect((await recorded(page, 'gdelt')).length).toBe(gdeltBefore);
   // an ALTERNATIVE run searches nothing: no Google News request either (news-search.md FR-48)
   expect(rssBefore).toBe(4);
   expect((await recorded(page, 'rss')).length).toBe(rssBefore);

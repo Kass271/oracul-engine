@@ -5,7 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
-import com.oracul.app.research.StubGdelt;
+import com.oracul.app.research.StubNews;
 import com.oracul.app.research.StubResponses;
 import com.oracul.app.result.AbstractStoryIT;
 import jakarta.servlet.http.Cookie;
@@ -277,36 +277,31 @@ class StopRunIT extends AbstractStoryIT {
                     await();
                     return new StubResponses.Reply(200, StubResponses.DEFAULT_CATALOGUE, 0);
                 };
-                case "GOOGLE" -> gdelt.rssResponder = req -> {
-                    arrived.countDown();
-                    await();
-                    return StubGdelt.status(503); // a failed Google group must NOT fall back to GDELT after a stop
-                };
-                case "GDELT" -> {
-                    var inner = gdelt.responder;
-                    gdelt.responder = req -> {
+                case "GOOGLE" -> {
+                    var inner = news.responder;
+                    news.responder = req -> {
                         arrived.countDown();
                         await();
-                        return inner.apply(req);
+                        return inner.apply(req); // an answer that arrives after a stop must not be used
                     };
                 }
-                case "ARTICLE" -> gdelt.articleGate = open;
+                case "ARTICLE" -> news.articleGate = open;
                 default -> responses.gate(kind);
             }
         }
 
         boolean awaitArrival() throws InterruptedException {
             return switch (kind) {
-                case "MODELS", "GOOGLE", "GDELT" -> arrived.await(15, TimeUnit.SECONDS);
+                case "MODELS", "GOOGLE" -> arrived.await(15, TimeUnit.SECONDS);
                 // fetch concurrency is 8: wait until all permits are taken, the other fetches of the 12 articles are queued
-                case "ARTICLE" -> awaitTrue(() -> gdelt.articleRequests.size() >= 8, 15_000);
+                case "ARTICLE" -> awaitTrue(() -> news.articleRequests.size() >= 8, 15_000);
                 default -> responses.awaitArrived(kind, 1, Duration.ofSeconds(15));
             };
         }
 
         void release() {
             open.countDown();
-            if (!"ARTICLE".equals(kind) && !List.of("MODELS", "GOOGLE", "GDELT").contains(kind)) responses.release(kind);
+            if (!"ARTICLE".equals(kind) && !List.of("MODELS", "GOOGLE").contains(kind)) responses.release(kind);
         }
 
         private void await() {
@@ -329,9 +324,9 @@ class StopRunIT extends AbstractStoryIT {
         t.put("responses", responses.requests.size());
         t.put("models", responses.modelRequests.size());
         t.put("token", stub.requests.size());
-        t.put("gdelt", gdelt.requests.size());
-        t.put("rss", gdelt.rssRequests.size());
-        t.put("articles", gdelt.articleRequests.size());
+        t.put("news", news.requests.size());
+        t.put("paths", news.paths.size());
+        t.put("articles", news.articleRequests.size());
         return t;
     }
 
@@ -350,7 +345,6 @@ class StopRunIT extends AbstractStoryIT {
             Arguments.of("QUERY_EXPANSION", false, false),
             Arguments.of("MODELS", false, false),
             Arguments.of("GOOGLE", false, false),
-            Arguments.of("GDELT", false, false),
             Arguments.of("ARTICLE", false, false),
             Arguments.of("EVENT_NORMALIZATION", false, false),
             Arguments.of("EVENT_CLASSIFICATION", false, false),
@@ -362,8 +356,8 @@ class StopRunIT extends AbstractStoryIT {
     @ParameterizedTest(name = "stop while the {0} request is in flight")
     @MethodSource("outboundKinds")
     void aStopDuringAnOutboundRequestEndsTheRunForGood(String kind, boolean packReady, boolean scenarioReady) throws Exception {
-        gdelt.reset();
-        gdeltArticles(twelveArticles());
+        news.reset();
+        newsArticles(twelveArticles());
         Hold hold = new Hold(kind);
         hold.install();
         String sid = connectedSid();
@@ -421,8 +415,8 @@ class StopRunIT extends AbstractStoryIT {
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             for (int round = 1; round <= 6; round++) {
-                gdelt.reset();
-                gdeltArticles(twelveArticles());
+                news.reset();
+                newsArticles(twelveArticles());
                 responses.gate("STORY_WRITING");
                 String sid = connectedSid();
                 String id = (String) startOk(sid, A).get("id");

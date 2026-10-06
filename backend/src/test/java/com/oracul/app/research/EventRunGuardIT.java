@@ -75,7 +75,7 @@ class EventRunGuardIT extends AbstractEventIT {
     // #31
     @Test
     void aRunEndedByAnotherWriterSendsNoFurtherNormalizationRequest() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         responses.gate(NORMALIZATION);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
@@ -93,7 +93,7 @@ class EventRunGuardIT extends AbstractEventIT {
     // #32
     @Test
     void aRunEndedByAnotherWriterSendsNoFurtherClassificationRequestAndWritesNoEvents() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         responses.gate(CLASSIFICATION);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
@@ -110,7 +110,7 @@ class EventRunGuardIT extends AbstractEventIT {
     // #33
     @Test
     void aRunPastItsDeadlineStopsCallingChatGptAndEndsWithRunTimeout() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         responses.delay(NORMALIZATION, Duration.ofSeconds(6));
         Ran r = runWithin(A, 20_000);
         assertTimeoutFailure(r.run());
@@ -126,7 +126,7 @@ class EventRunGuardIT extends AbstractEventIT {
     // #34
     @Test
     void theTransportRetryIsNotSentAfterTheDeadline() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         always(NORMALIZATION, StubResponses.status(503, "{\"error\":\"PROVIDER-SECRET-BODY\"}"));
         Ran r = runWithin(A, 20_000);
         assertThat(requests(NORMALIZATION)).as("the retry after the 5 s retry delay is not sent past the 4 s deadline").hasSize(1);
@@ -140,7 +140,7 @@ class EventRunGuardIT extends AbstractEventIT {
     // R12: an abandoned batch task must not refresh the token or expire the connection
     @Test
     void anAbandonedBatchTaskDoesNotRefreshTheTokenOrExpireTheConnection() throws Exception {
-        gdeltArticles(v4());
+        newsArticles(v4());
         // every token answer is valid for 1 s only: the access token is always inside the refresh skew
         stub.responder = req -> stub.ok(1, StubOpenAi.ALL_SCOPES, true);
         String sid = connectedSid();

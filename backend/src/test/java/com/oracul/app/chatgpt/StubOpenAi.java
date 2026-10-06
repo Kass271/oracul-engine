@@ -115,12 +115,12 @@ public final class StubOpenAi {
         r.add("oracul.chatgpt.issuer", INSTANCE::issuer);
         r.add("oracul.chatgpt.revocation-url", INSTANCE::revocationUrl);
         com.oracul.app.research.StubResponses.registerAll(r);
-        com.oracul.app.research.StubGdelt.registerAll(r);
+        com.oracul.app.research.StubNews.registerAll(r);
     }
 
     public void reset() {
         com.oracul.app.research.StubResponses.INSTANCE.reset();
-        com.oracul.app.research.StubGdelt.INSTANCE.reset();
+        com.oracul.app.research.StubNews.INSTANCE.reset();
         requests.clear();
         revocations.clear();
         issued.clear();

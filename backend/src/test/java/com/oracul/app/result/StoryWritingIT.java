@@ -164,8 +164,8 @@ class StoryWritingIT extends AbstractStoryIT {
     @ParameterizedTest(name = "story call failure: {0}")
     @ValueSource(strings = {"429", "500", "401"})
     void transportFailuresFailTheRunInStageWritingStory(String kind) throws Exception {
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
         String sid = connectedSid();
@@ -218,8 +218,8 @@ class StoryWritingIT extends AbstractStoryIT {
     // @trace NFR-2
     @Test
     void theRunCompletesWithTheHeadlineInUnderTenSeconds() throws Exception {
-        gdelt.reset();
-        gdeltArticles(v4());
+        news.reset();
+        newsArticles(v4());
         script(NORMALIZATION, N_V4);
         script(CLASSIFICATION, C_V4);
         String sid = connectedSid();
