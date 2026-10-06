@@ -25,40 +25,45 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 /** SourceRetrieval without Spring or internet: search budget, a failing article fetch, an interrupted wait (FR-13, FR-48). */
 // @trace FR-13
 // @trace FR-48
+// @trace FR-56
 @Timeout(30)
 class SourceRetrievalUnitTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-07T12:00:00Z"), ZoneOffset.UTC);
 
-    /** Article fetcher double: the real class (package-private constructor), with the network call replaced. */
-    private static final class FakeFetcher extends ArticleMetadataFetcher {
+    /**
+     * Article fetcher double: a Mockito mock of the real class, so no constructor runs and the test does not depend on how
+     * the fetcher is built (the production constructor takes a SafeFetcher since FR-56); the network call is replaced.
+     */
+    private static final class FakeFetcher {
         final CountDownLatch release = new CountDownLatch(1);
         final boolean blocking;
         final AtomicInteger calls = new AtomicInteger();
+        final ArticleMetadataFetcher fetcher = Mockito.mock(ArticleMetadataFetcher.class);
 
         FakeFetcher(boolean blocking) {
-            super(Duration.ofSeconds(1), 1024);
             this.blocking = blocking;
-        }
-
-        @Override
-        public Optional<Fetched> fetchDetailed(String url, int maxRedirects) {
-            calls.incrementAndGet();
-            if (url.contains("/boom")) {
-                throw new IllegalStateException("unexpected fetch problem");
-            }
-            if (blocking) {
-                try {
-                    release.await(20, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+            Mockito.when(fetcher.fetchDetailed(ArgumentMatchers.anyString(), ArgumentMatchers.anyInt())).thenAnswer(inv -> {
+                String url = inv.getArgument(0);
+                calls.incrementAndGet();
+                if (url.contains("/boom")) {
+                    throw new IllegalStateException("unexpected fetch problem");
                 }
-            }
-            return Optional.empty();
+                if (blocking) {
+                    try {
+                        release.await(20, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return Optional.<ArticleMetadataFetcher.Fetched>empty();
+            });
         }
     }
 
@@ -66,16 +71,13 @@ class SourceRetrievalUnitTest {
 
     @AfterEach
     void cleanUp() {
-        fetchers.forEach(f -> {
-            f.release.countDown();
-            f.shutdown();
-        });
+        fetchers.forEach(f -> f.release.countDown());
     }
 
     private SourceRetrieval retrieval(NewsProvider provider, FakeFetcher fetcher, Duration budget) {
         fetchers.add(fetcher);
         SourceQualityTable table = new SourceQualityTable("who.int", "nature.com", "reuters.com", "medium.com");
-        return new SourceRetrieval(provider, fetcher, table, CLOCK, Duration.ofMillis(1), Duration.ofSeconds(1), budget, 2);
+        return new SourceRetrieval(provider, fetcher.fetcher, table, CLOCK, Duration.ofMillis(1), Duration.ofSeconds(1), budget, 2);
     }
 
     private static SearchPlan plan(String... texts) {

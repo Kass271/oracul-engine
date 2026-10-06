@@ -68,6 +68,8 @@ public final class StubNews {
         server.createContext("/rss/articles/", this::handleRssArticle);
         server.createContext("/articles/", this::handleArticle);
         server.createContext("/redirect/", this::handleRedirect);
+        server.createContext("/redirect-to", this::handleRedirectTo);
+        server.createContext("/big/", this::handleBig);
         server.start();
     }
 
@@ -87,6 +89,8 @@ public final class StubNews {
     /** Points the Google News client at this stub (NFR-7): a request never reaches the real internet. */
     public static void registerBaseUrls(DynamicPropertyRegistry r) {
         r.add("oracul.news.google.base-url", INSTANCE::baseUrl);
+        // FR-56: the in-process stub is on the loopback address; exactly this host name is exempt from the address check
+        r.add("oracul.news.fetch.allowed-private-hosts", () -> "127.0.0.1");
     }
 
     public void reset() {
@@ -268,6 +272,44 @@ public final class StubNews {
         ex.getResponseHeaders().add("Location", "/redirect/" + (n - 1));
         ex.sendResponseHeaders(302, -1);
         ex.close();
+    }
+
+    /** /redirect-to?location=<url-encoded> answers 302 with that Location verbatim (FR-56 cases: any scheme, host, port). */
+    private void handleRedirectTo(HttpExchange ex) throws IOException {
+        paths.add(ex.getRequestURI().getPath());
+        String raw = ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery();
+        String location = "";
+        for (String pair : raw.split("&")) {
+            if (pair.startsWith("location=")) {
+                location = URLDecoder.decode(pair.substring("location=".length()), StandardCharsets.UTF_8);
+            }
+        }
+        ex.getResponseHeaders().add("Location", location);
+        ex.sendResponseHeaders(302, -1);
+        ex.close();
+    }
+
+    /**
+     * /big/&lt;bytes&gt;?meta-at=&lt;offset&gt; answers 200 text/html of exactly &lt;bytes&gt; bytes with
+     * {@code <meta property="og:description" content="Big page text">} starting at byte &lt;offset&gt; (default 0).
+     */
+    private void handleBig(HttpExchange ex) throws IOException {
+        paths.add(ex.getRequestURI().getPath());
+        int size = Integer.parseInt(ex.getRequestURI().getPath().substring("/big/".length()));
+        int offset = 0;
+        String raw = ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery();
+        for (String pair : raw.split("&")) {
+            if (pair.startsWith("meta-at=")) {
+                offset = Integer.parseInt(pair.substring("meta-at=".length()));
+            }
+        }
+        byte[] out = new byte[size];
+        java.util.Arrays.fill(out, (byte) 'x');
+        byte[] meta = "<meta property=\"og:description\" content=\"Big page text\">".getBytes(StandardCharsets.UTF_8);
+        if (offset + meta.length <= size) {
+            System.arraycopy(meta, 0, out, offset, meta.length);
+        }
+        send(ex, 200, "text/html; charset=utf-8", out);
     }
 
     private static void send(HttpExchange ex, int status, String contentType, byte[] out) throws IOException {

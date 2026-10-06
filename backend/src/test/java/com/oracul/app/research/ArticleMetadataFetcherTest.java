@@ -9,19 +9,26 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import java.util.stream.Stream;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 /** Article metadata fetch rules against a loopback stub (no internet): failures give an empty result (FR-13, FR-48). */
 // @trace FR-13
 // @trace FR-48
+// @trace FR-56
 @Timeout(30)
 class ArticleMetadataFetcherTest {
 
@@ -57,8 +64,200 @@ class ArticleMetadataFetcherTest {
         ex.close();
     }
 
+    /** The real fetcher on a SafeFetcher that exempts the loopback address of the local server (FR-56). */
     private ArticleMetadataFetcher fetcher(Duration timeout) {
-        return new ArticleMetadataFetcher(timeout, 524288);
+        return SafeFetcherSupport.metadataFetcher(SafeFetcherSupport.fetcher(
+            new SafeFetcherSupport.Resolver(), Set.of("127.0.0.1"), timeout, 2097152, 5));
+    }
+
+    /** Without the exemption the loopback server is a blocked address: every fetch is empty and nothing is requested. */
+    // @trace FR-56
+    @Test
+    void withoutTheExemptionEveryFetchOfALoopbackServerIsEmpty() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/page", ex -> {
+            requests.incrementAndGet();
+            reply(ex, 200, "text/html", "<meta name=\"description\" content=\"secret\">");
+        });
+        server.createContext("/moved", ex -> {
+            requests.incrementAndGet();
+            ex.getResponseHeaders().add("Location", "/page");
+            reply(ex, 302, null, "");
+        });
+        server.start();
+        ArticleMetadataFetcher f = SafeFetcherSupport.metadataFetcher(SafeFetcherSupport.fetcher(
+            new SafeFetcherSupport.Resolver(), Set.of(), Duration.ofSeconds(5), 2097152, 5));
+        assertThat(f.fetch(url("/page"))).isEmpty();
+        assertThat(f.fetchDetailed(url("/page"), 5)).isEmpty();
+        assertThat(f.fetchDetailed(url("/moved"), 5)).isEmpty();
+        assertThat(f.fetch("file:///etc/passwd")).isEmpty();
+        assertThat(requests.get()).as("no request reached the blocked address").isZero();
+    }
+
+    /** A redirect from an exempt host to a blocked one is refused at the hop. */
+    // @trace FR-56
+    @Test
+    void aRedirectFromTheExemptHostToABlockedAddressGivesNoResult() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/start", ex -> {
+            requests.incrementAndGet();
+            ex.getResponseHeaders().add("Location", "http://10.0.0.5/internal");
+            reply(ex, 302, null, "");
+        });
+        server.start();
+        assertThat(fetcher(Duration.ofSeconds(5)).fetchDetailed(url("/start"), 5)).isEmpty();
+        assertThat(requests.get()).isEqualTo(1);
+    }
+
+    /** The redirect limit is min(argument, article-max-redirects), and fetch(String) uses article-max-redirects (5, was 3). */
+    // @trace FR-56
+    @Test
+    void fetchOfAStringFollowsFiveRedirectsAndTheArgumentLowersTheLimit() {
+        server.createContext("/hop/", ex -> {
+            int n = Integer.parseInt(ex.getRequestURI().getPath().substring("/hop/".length()));
+            if (n == 0) {
+                reply(ex, 200, "text/html", "<meta name=\"description\" content=\"Arrived\">");
+            } else {
+                ex.getResponseHeaders().add("Location", "/hop/" + (n - 1));
+                reply(ex, 302, null, "");
+            }
+        });
+        server.start();
+        ArticleMetadataFetcher f = fetcher(Duration.ofSeconds(5));
+        assertThat(f.fetch(url("/hop/5"))).as("5 redirects with fetch(String)").isPresent();
+        assertThat(f.fetch(url("/hop/6"))).as("6 redirects with fetch(String)").isEmpty();
+        assertThat(f.fetchDetailed(url("/hop/4"), 4)).isPresent();
+        assertThat(f.fetchDetailed(url("/hop/5"), 4)).as("the argument lowers the limit").isEmpty();
+        assertThat(f.fetchDetailed(url("/hop/6"), 50)).as("the argument cannot raise the limit above 5").isEmpty();
+    }
+
+    /** Only the bytes read are parsed: the page is cut at 2 MB (was 512 KB). */
+    // @trace FR-56
+    @Test
+    void onlyTheFirstTwoMegabytesOfAPageAreParsed() {
+        String filler = "x".repeat(2097152 - 200);
+        server.createContext("/inside", ex -> reply(ex, 200, "text/html",
+            "<meta property=\"og:description\" content=\"Inside\">" + filler + "<meta property=\"og:site_name\" content=\"Late\">"));
+        server.createContext("/beyond", ex -> reply(ex, 200, "text/html",
+            filler + filler + "<meta property=\"og:description\" content=\"Beyond\">"));
+        server.start();
+        ArticleMetadataFetcher f = fetcher(Duration.ofSeconds(5));
+        var inside = f.fetch(url("/inside"));
+        assertThat(inside).isPresent();
+        assertThat(inside.get().description()).isEqualTo("Inside");
+        var beyond = f.fetch(url("/beyond"));
+        assertThat(beyond).isPresent();
+        assertThat(beyond.get().description()).as("the tag lies beyond the 2 MB read").isNull();
+    }
+
+    private static final int TWO_MB = 2097152;
+
+    static Stream<String> pathologicalBodies() {
+        String tail = "<meta property=\"og:description\" content=\"Found\">";
+        return Stream.of(
+            "<meta ".repeat(TWO_MB / 6),
+            "<meta " + "a".repeat(TWO_MB - 6),
+            "<meta name=a content=b ".repeat(TWO_MB / 23),
+            "<meta a=\"".repeat(TWO_MB / 9),
+            "<meta" + " ".repeat(TWO_MB - 5),
+            "<meta x=y".repeat(TWO_MB / 9) + tail);
+    }
+
+    /** A pathological 2 MB page (unclosed or endless meta tags) cannot stall the fetch: it returns within seconds. */
+    // @trace FR-56
+    @ParameterizedTest
+    @MethodSource("pathologicalBodies")
+    void aPathologicalTwoMegabytePageCannotStallTheFetch(String body) {
+        server.createContext("/evil", ex -> reply(ex, 200, "text/html", body));
+        server.start();
+        ArticleMetadataFetcher f = fetcher(Duration.ofSeconds(1));
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            f.fetch(url("/evil"));
+        }, "fetch must return in a few seconds");
+    }
+
+    private static final int MAX_TAG_LENGTH = 4096;
+    private static final String FOUND_TAIL = "<meta property=\"og:description\" content=\"Found\">";
+
+    /** A closed meta tag of exactly {@code total} characters ("&lt;meta " + filler + "&gt;"), the filler built from {@code unit}. */
+    private static String closedTag(String unit, int total) {
+        int fill = total - 7;
+        StringBuilder sb = new StringBuilder("<meta ");
+        while (sb.length() < 6 + fill) {
+            sb.append(unit);
+        }
+        sb.setLength(6 + fill);
+        return sb.append('>').toString();
+    }
+
+    /** Many closed tags just under the length cap, repeated up to 2 MB, then a normal description tag. */
+    private static String manyClosedTagsThenTail(String unit) {
+        String tag = closedTag(unit, MAX_TAG_LENGTH);
+        StringBuilder sb = new StringBuilder(TWO_MB);
+        while (sb.length() + tag.length() + FOUND_TAIL.length() <= TWO_MB) {
+            sb.append(tag);
+        }
+        return sb.append(FOUND_TAIL).toString();
+    }
+
+    static Stream<String> closedTagBodiesNearTheCap() {
+        return Stream.of("a", "a=", "a ", "a =", "\"a", "'a").map(ArticleMetadataFetcherTest::manyClosedTagsThenTail);
+    }
+
+    /** Many closed tags just under the cap (where the cost sits) are parsed quickly and a later normal tag is still found. */
+    // @trace FR-56
+    @ParameterizedTest
+    @MethodSource("closedTagBodiesNearTheCap")
+    void manyClosedTagsNearTheLengthCapAreParsedQuicklyAndALaterTagIsStillFound(String body) {
+        assertThat(body.length()).isLessThanOrEqualTo(TWO_MB);
+        var meta = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> ArticleMetadataFetcher.parse(body),
+            "parse must return within about 2 seconds");
+        assertThat(meta.description()).as("the normal tag after the filler is found").isEqualTo("Found");
+    }
+
+    /** The same bodies over HTTP: the fetch returns quickly and the later tag is still found. */
+    // @trace FR-56
+    @ParameterizedTest
+    @MethodSource("closedTagBodiesNearTheCap")
+    void fetchOfManyClosedTagsNearTheLengthCapReturnsQuicklyWithTheLaterTag(String body) {
+        server.createContext("/evil", ex -> reply(ex, 200, "text/html", body));
+        server.start();
+        ArticleMetadataFetcher f = fetcher(Duration.ofSeconds(5));
+        var meta = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> f.fetch(url("/evil")),
+            "fetch must return in a few seconds");
+        assertThat(meta).isPresent();
+        assertThat(meta.get().description()).isEqualTo("Found");
+    }
+
+    private static final String DESCRIPTION_HEAD = "<meta property=\"og:description\" content=\"";
+
+    private static String descriptionTagOfLength(int total) {
+        String head = DESCRIPTION_HEAD;
+        String tail = "\">";
+        return head + "x".repeat(total - head.length() - tail.length()) + tail;
+    }
+
+    /** A tag of exactly the cap is parsed; a tag clearly over it (cap + 2, safe for either way of counting) is skipped. */
+    // @trace FR-56
+    @Test
+    void aTagOfExactlyTheCapIsParsedAndATagOverTheCapIsSkipped() {
+        String atCap = descriptionTagOfLength(MAX_TAG_LENGTH);
+        assertThat(atCap.length()).isEqualTo(MAX_TAG_LENGTH);
+        assertThat(ArticleMetadataFetcher.parse(atCap).description()).as("tag of exactly the cap").hasSize(MAX_TAG_LENGTH - DESCRIPTION_HEAD.length() - 2);
+        String over = descriptionTagOfLength(MAX_TAG_LENGTH + 2);
+        assertThat(ArticleMetadataFetcher.parse(over).description()).as("tag over the cap is skipped").isNull();
+        assertThat(ArticleMetadataFetcher.parse(over + FOUND_TAIL).description())
+            .as("parsing continues after a skipped tag").isEqualTo("Found");
+    }
+
+    /** Pathological bodies fed to the parser directly also finish within seconds. */
+    // @trace FR-56
+    @ParameterizedTest
+    @MethodSource("pathologicalBodies")
+    void theParserFinishesQuicklyOnAPathologicalTwoMegabyteBody(String body) {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            ArticleMetadataFetcher.parse(body);
+        }, "parse must return in a few seconds");
     }
 
     @Test

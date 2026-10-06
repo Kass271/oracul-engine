@@ -10,11 +10,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
-/** Row 10 and the ArticleMetadataFetcher rules: og/meta extraction, fallbacks, failure cases. */
+/** Row 10 and the ArticleMetadataFetcher rules: og/meta extraction, fallbacks, failure cases; safe fetching (FR-56). */
 // @trace FR-13
+// @trace FR-56
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=9",
@@ -89,17 +92,15 @@ class SourceMetadataIT extends AbstractRunIT {
         news.pages.put("xhtml", new StubNews.Page(200, "application/xhtml+xml",
             "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta property=\"og:description\" content=\"XHTML text\"/></head></html>"));
         news.pages.put("text-plain", new StubNews.Page(200, "text/plain", "just text"));
-        news.pages.put("big", new StubNews.Page(200, "text/html",
-            "<html><head><meta property=\"og:description\" content=\"Big page text\"></head><body>" + "x".repeat(600_000) + "</body></html>"));
         news.pages.put("script", new StubNews.Page(200, "text/html",
             "<html><head><meta property=\"og:description\" content=\"Safe text\"><script>throw new Error('boom')</script></head></html>"));
-        String[] names = {"desc-only", "og-wins", "no-meta", "blank-site", "long", "err404", "xhtml", "text-plain", "big", "script"};
+        String[] names = {"desc-only", "og-wins", "no-meta", "blank-site", "long", "err404", "xhtml", "text-plain", "script"};
         List<String> articles = new ArrayList<>();
         for (String n : names) articles.add(art(base + "/rss/articles/" + n, "Title " + n));
         articles.add(art(base + "/redirect/3", "Title redirect3"));
         articles.add(art(base + "/redirect/6", "Title redirect6"));
         Map<String, Map<String, Object>> byUrl = runWith(articles);
-        assertThat(byUrl).hasSize(12);
+        assertThat(byUrl).hasSize(11);
         // a page that was read resolves the feed link to /articles/<name>; a page that failed keeps the feed link
         java.util.function.Function<String, Map<String, Object>> s = n ->
             byUrl.containsKey(base + "/articles/" + n) ? byUrl.get(base + "/articles/" + n) : byUrl.get(base + "/rss/articles/" + n);
@@ -118,12 +119,76 @@ class SourceMetadataIT extends AbstractRunIT {
         assertThat(s.apply("xhtml").get("metadataFetched")).isEqualTo(true);
         assertThat(s.apply("xhtml").get("summary")).isEqualTo("XHTML text");
         assertThat(s.apply("text-plain").get("metadataFetched")).isEqualTo(false);
-        assertThat(s.apply("big").get("metadataFetched")).as("only the first article-max-bytes are read, the page is still parsed").isEqualTo(true);
-        assertThat(s.apply("big").get("summary")).isEqualTo("Big page text");
+        // the former "big" case (600,000 bytes, cut at 512 KB) is no longer cut at 2 MB: see bigPagesAreReadUpToTwoMegabytes
         assertThat(s.apply("script").get("summary")).isEqualTo("Safe text");
 
         assertThat(byUrl.get(base + "/redirect/0").get("metadataFetched")).as("3 redirects are followed to the page").isEqualTo(true);
         assertThat(byUrl.get(base + "/redirect/0").get("summary")).isEqualTo("Summary of redirected");
         assertThat(byUrl.get(base + "/redirect/6").get("metadataFetched")).as("more than 5 redirects: the link stays").isEqualTo(false);
+    }
+
+    private String viaRedirect(String location) {
+        return news.baseUrl() + "/redirect-to?location=" + URLEncoder.encode(location, StandardCharsets.UTF_8);
+    }
+
+    // @trace FR-56
+    @Test
+    void refusedRedirectTargetsLeaveTheFeedLinkAsContentNotRetrieved() throws Exception {
+        String base = news.baseUrl();
+        int port = news.port();
+        String[] refused = {
+            "http://localhost:" + port + "/articles/internal-1",   // not exempt, resolves to loopback
+            "http://169.254.169.254/latest/meta-data",
+            "http://10.0.0.5/x",
+            "http://[::1]:" + port + "/articles/internal-2",
+            "file:///etc/passwd",
+        };
+        List<String> articles = new ArrayList<>();
+        List<String> links = new ArrayList<>();
+        for (int i = 0; i < refused.length; i++) {
+            String link = viaRedirect(refused[i]);
+            links.add(link);
+            articles.add(art(link, "Refused " + i));
+        }
+        articles.add(art("http://127.0.0.1:" + port + "/rss/articles/ok", "Title ok"));
+        Map<String, Map<String, Object>> byUrl = runWith(articles);
+        assertThat(byUrl).hasSize(6);
+        for (int i = 0; i < refused.length; i++) {
+            Map<String, Object> s = byUrl.get(links.get(i));
+            assertThat(s).as("source with the feed link kept as url: " + refused[i]).isNotNull();
+            assertThat(s.get("metadataFetched")).as(refused[i]).isEqualTo(false);
+            assertThat(s.get("summary")).as(refused[i]).isEqualTo("Refused " + i);
+            assertThat(s.get("publisher")).as(refused[i]).isEqualTo("who.int");
+        }
+        assertThat(news.articleRequests).as("the refused hop is never requested").doesNotContain("internal-1", "internal-2");
+        Map<String, Object> ok = byUrl.get(base + "/articles/ok");
+        assertThat(ok).as("a feed link on the exempt host 127.0.0.1 keeps resolving").isNotNull();
+        assertThat(ok.get("metadataFetched")).isEqualTo(true);
+        assertThat(ok.get("summary")).isEqualTo("Summary of ok");
+    }
+
+    // @trace FR-56
+    @Test
+    void bigPagesAreReadUpToTwoMegabytesAndNoFurther() throws Exception {
+        String base = news.baseUrl();
+        String small = base + "/big/2200000";
+        String beyond = base + "/big/2200000?meta-at=2100000";
+        String inside = base + "/big/2000000?meta-at=1900000";
+        Map<String, Map<String, Object>> byUrl = runWith(List.of(
+            art(viaRedirect(small), "Title small-meta"), art(viaRedirect(beyond), "Title late-meta"),
+            art(viaRedirect(inside), "Title inside-meta")));
+        assertThat(byUrl).hasSize(3);
+        Map<String, Object> first = byUrl.get(small);
+        assertThat(first).as("resolved to the page").isNotNull();
+        assertThat(first.get("metadataFetched")).isEqualTo(true);
+        assertThat(first.get("summary")).as("meta tag at byte 0 of a 2.2 MB page").isEqualTo("Big page text");
+        Map<String, Object> late = byUrl.get(beyond);
+        assertThat(late).as("resolved to the page").isNotNull();
+        assertThat(late.get("metadataFetched")).isEqualTo(true);
+        assertThat(late.get("summary")).as("the tag lies beyond the 2 MB read").isEqualTo("Title late-meta");
+        Map<String, Object> within = byUrl.get(inside);
+        assertThat(within).as("resolved to the page").isNotNull();
+        assertThat(within.get("metadataFetched")).isEqualTo(true);
+        assertThat(within.get("summary")).as("meta at 1.9 MB was cut at 512 KB before").isEqualTo("Big page text");
     }
 }

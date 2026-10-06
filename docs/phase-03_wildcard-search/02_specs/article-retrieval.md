@@ -219,16 +219,114 @@ characters per source and pipeline.
   - Fixes the phase-01 low finding "SSRF via article redirects".
 - Errors: refused URL or hop → REFUSED ("content not retrieved"), log `article fetch refused: blocked-address` /
   `scheme`; never a run failure.
-- Ranges & invariants (unit with an injected resolver, parameterized): `http://127.0.0.1/`, `http://127.1.2.3/`,
-  `http://[::1]/`, `http://0.0.0.0/`, `http://10.0.0.5/`, `http://172.16.0.1/`, `http://172.31.255.255/`,
-  `http://192.168.1.1/`, `http://169.254.169.254/latest/meta-data`, `http://[fe80::1]/`, `http://[fd00::1]/`,
-  `http://[::ffff:10.0.0.1]/`, a name resolving to 10.0.0.7, a name resolving to 93.184.216.34 and 10.0.0.7 → refused;
-  `http://172.15.255.255/`, `http://172.32.0.1/`, `http://93.184.216.34/`, a public name → allowed;
-  `file:///etc/passwd`, `ftp://x/`, `gopher://x`, `javascript:alert(1)`, `data:text/html,x` → refused; a public URL
-  redirecting to `http://127.0.0.1:8080/actuator/health` → refused at the hop, no request to it; 5 redirects → followed,
-  6 → stopped; bodies of 2 MB − 1, 2 MB, 2 MB + 1 and 10 MB → at most 2,097,152 bytes read; exemption `stub` allows
-  `http://stub:4010/x` (resolving to 172.18.0.3) and nothing else (`http://stub2:4010/` resolving privately → refused).
-  Invariant: no connection is ever opened to a blocked address unless its host name is on the exemption list.
+
+#### Slice 02_safe-fetching — delta (step 4a)
+Scope of this slice: `SafeFetcher` itself and its use by the existing article metadata fetch
+(`ArticleMetadataFetcher`, called by `SourceRetrieval` for every kept candidate). `contentStatus`, the Google decode
+and the publisher fetch come in 08; until then "content not retrieved" means, for a source whose fetch was refused or
+stopped: `url` = the feed link (normalised), `metadataFetched` = false, `publisher` from the feed `<source>`,
+`summary` = title — exactly the existing "fetch failed" outcome of FR-13 / FR-48. No API, contract, database or UI
+change (no `data-testid`). `api/openapi.yaml` is unchanged.
+
+**Component `com.oracul.app.research.SafeFetcher`** (`@Component`)
+- `public interface HostResolver { List<InetAddress> resolve(String host) throws UnknownHostException; }` (nested);
+  production = `InetAddress.getAllByName`. A literal IP host (`127.0.0.1`, `[::1]`) is parsed, never looked up.
+- Spring constructor reads `oracul.news.fetch.allowed-private-hosts` (default empty), `oracul.news.article-max-bytes`
+  (default `2097152`, was `524288`), `oracul.news.article-max-redirects` (default `5`) and
+  `oracul.news.article-fetch-timeout` (default stays `PT3S` in this slice; 08 moves it to `PT8S`).
+- Package-private test constructor `SafeFetcher(HostResolver resolver, Set<String> allowedPrivateHosts, Duration timeout,
+  int maxBytes, int maxRedirects)`.
+- `public Result fetch(URI uri)` (configured timeout) and `public Result fetch(URI uri, Duration timeout)` (08 passes the
+  budget-cut timeout). One `GET` per hop, header `Accept: text/html,application/xhtml+xml`, `Host` = host[:port] of
+  that hop. HTTPS verifies the certificate for the host name (SNI = host name) while the socket is connected to the
+  checked address (e.g. a plain-socket client in the style of `common/RawHttpGet`).
+- `record Result(Outcome outcome, int status, String contentType, byte[] body, boolean truncated, URI finalUri,
+  int redirects)`; `enum Outcome { OK, REFUSED_SCHEME, REFUSED_ADDRESS, TOO_MANY_REDIRECTS, FAILED }`.
+  - `OK`: a non-redirect answer of any status was received; `status`/`contentType` of it, `body` = at most
+    `maxBytes` bytes, `truncated` = the server had more bytes than `maxBytes` (reading stopped, connection closed),
+    `finalUri` = URL of the answering hop, `redirects` = redirect answers followed.
+  - `REFUSED_SCHEME`: scheme of the start URL or of a `Location` is not http/https (incl. missing scheme after
+    resolution, `file:`, `ftp:`, `gopher:`, `javascript:`, `data:`); no connection is opened for it.
+  - `REFUSED_ADDRESS`: the host of the start URL or of a hop is not exempt and at least one resolved address is blocked
+    (step 2); no connection is opened to any address of that host.
+  - `TOO_MANY_REDIRECTS`: the (maxRedirects + 1)-th redirect answer arrived; its `Location` is not requested.
+  - `FAILED`: unparsable URL, unknown host, connect error, timeout (whole fetch), malformed answer, redirect status
+    without `Location`, interrupted (interrupt flag restored).
+  - Redirect = status 301, 302, 303, 307, 308 with `Location`; every other 3xx is an `OK` answer with that status.
+- Exemption list: comma-separated, entries trimmed, blanks ignored, compared case-insensitively and exactly with the
+  URL host (IPv6 literal without brackets); no wildcards, no ranges, no suffix match (`stub` ≠ `stub2`, `stub.`,
+  `x.stub`; `127.0.0.1` ≠ `localhost`). An exempt host is still resolved through the resolver and connected to the
+  resolved address.
+- Log (WARN, logger `com.oracul.app.research.SafeFetcher`): `article fetch refused: blocked-address host=<host>` or
+  `article fetch refused: scheme scheme=<scheme>`; the full URL and query string are not logged.
+
+**`ArticleMetadataFetcher`** keeps `fetch(String)`, `fetchDetailed(String, int)`, `parse`, `Metadata`, `Fetched`, the
+virtual-thread executor and its interrupt behaviour; its own `HttpClient` and the `(Duration, int)` constructor go —
+package-private constructor `ArticleMetadataFetcher(SafeFetcher fetcher)`. Every fetch goes through `SafeFetcher`; it
+returns metadata only for outcome `OK` with status 2xx and type `text/html` / `application/xhtml+xml`, parsing only the
+bytes read. Redirect limit = min(argument, `article-max-redirects`); `fetch(String)` uses `article-max-redirects` (was
+3). `SourceRetrieval` keeps calling `fetchDetailed(link, 5)`.
+
+**Test harness** (tester): `StubNews.registerBaseUrls` also registers `oracul.news.fetch.allowed-private-hosts=127.0.0.1`
+so both test bases (`AbstractRunIT` via `StubOpenAi.registerAll`, `AbstractNewsSearchIT`) exempt the in-process stub
+without a new Spring context. `StubNews` gains `GET /redirect-to?location=<url-encoded>` → 302 with that `Location`
+verbatim, and `GET /big/<bytes>?meta-at=<offset>` → 200 `text/html` of exactly `<bytes>` bytes with
+`<meta property="og:description" content="Big page text">` starting at byte `<offset>` (default 0) — used through
+`/rss/articles/…`-style redirects (`/redirect-to?location=<base>/big/…`) so the source counts as resolved.
+
+**Integration cases** (add to `SourceMetadataIT`, which already has its own configuration — no new context): run
+COMPLETED in every case; a feed link `<base>/redirect-to?location=…` with
+- `http://localhost:<stub port>/articles/internal-1` (host not exempt, resolves to loopback) → refused at the hop:
+  url = feed link, `metadataFetched` false, summary = title, `news.articleRequests` lacks `internal-1`;
+- `http://169.254.169.254/latest/meta-data`, `http://10.0.0.5/x`, `http://[::1]:<stub port>/articles/internal-2`
+  → same refused outcome;
+- `file:///etc/passwd` → refused (scheme), same outcome;
+- `<base>/big/2200000` (meta at 0) → `metadataFetched` true, summary `Big page text` (2 MB read, rest ignored);
+- `<base>/big/2200000?meta-at=2100000` → `metadataFetched` true, summary = title (tag lies beyond the bytes read);
+- `<base>/big/2000000?meta-at=1900000` → `metadataFetched` true, summary `Big page text` (was cut at 512 KB before).
+And a feed link `http://127.0.0.1:<stub port>/rss/articles/ok` keeps resolving (exemption by exact name).
+
+**Docker** (backend-builder): `docker-compose.e2e.yml` backend environment gets
+`ORACUL_NEWS_FETCH_ALLOWED_PRIVATE_HOSTS: stub`; `docker-compose.yml` gets no such variable. Compose files and
+profiles of both stack modes are unchanged, so `.oracul/stack.json` stays as it is. A plain backend test (no Spring
+context, reads `../docker-compose.e2e.yml` and `../docker-compose.yml`) asserts: the e2e file has exactly one line
+`ORACUL_NEWS_FETCH_ALLOWED_PRIVATE_HOSTS: stub` (quoted or not), no other value; the real file contains no
+`ALLOWED_PRIVATE_HOSTS`. The existing E2E `search-sources.spec.ts` (sources resolve to `http://stub:4010/articles/…`)
+keeps passing unchanged and is the live proof that the stub host is exempt.
+
+- Changes earlier behaviour: `ArticleMetadataFetcher(Duration, int)` with its own `HttpClient`, fetching any address → `ArticleMetadataFetcher(SafeFetcher)`; the unit test against a `127.0.0.1` HttpServer gets a SafeFetcher whose exemption is `127.0.0.1` with otherwise unchanged assertions, plus a case that without the exemption every fetch is empty; the fake fetcher passes a SafeFetcher to `super` (tests: backend/src/test/java/com/oracul/app/research/ArticleMetadataFetcherTest.java, backend/src/test/java/com/oracul/app/research/SourceRetrievalUnitTest.java)
+- Changes earlier behaviour: article pages on the in-process stub `127.0.0.1` were fetched without any address check → loopback is refused unless exempt; the test bases register the exemption `127.0.0.1` in `StubNews.registerBaseUrls` and the stub gains `/redirect-to` and `/big/<bytes>` (tests: backend/src/test/java/com/oracul/app/research/StubNews.java)
+- Changes earlier behaviour: response body cut at 512 KB (`article-max-bytes` 524288) → cut at 2 MB (2097152); the `big` case of `extractionRulesAndFallbacks` (600,000 characters, asserted as "only the first article-max-bytes are read") is no longer cut and moves to the `/big` cases above; `fetch(String)` follows up to 5 redirects instead of 3 (tests: backend/src/test/java/com/oracul/app/research/SourceMetadataIT.java)
+- Ranges & invariants: unit `SafeFetcherTest` with an injected resolver and a local `HttpServer`, parameterized —
+  (a) refused (`REFUSED_ADDRESS`, 0 requests reach any server): `http://127.0.0.1/`, `http://127.1.2.3/`,
+  `http://[::1]/`, `http://0.0.0.0/`, `http://[::]/`, `http://10.0.0.5/`, `http://172.16.0.1/`,
+  `http://172.31.255.255/`, `http://192.168.1.1/`, `http://169.254.169.254/latest/meta-data`, `http://[fe80::1]/`,
+  `http://[fd00::1]/`, `http://[fc00::1]/`, `http://[::ffff:10.0.0.1]/`, `http://[::ffff:127.0.0.1]/`, a name resolving
+  to 10.0.0.7, a name resolving to 93.184.216.34 and 10.0.0.7 (any blocked address refuses), `HTTP://LOCALHOST/` with
+  the resolver answering 127.0.0.1 — every address of (a) also gives `true` from the package-private pure check
+  `static boolean SafeFetcher.isBlocked(InetAddress)`; (b) allowed: `isBlocked` is `false` for 172.15.255.255,
+  172.32.0.1, 192.169.0.1, 11.0.0.1, 93.184.216.34, 2606:4700::1, ::ffff:93.184.216.34 — tested on the pure check only, never by connecting to a public address (no real internet,
+  NFR-7); (c) scheme (`REFUSED_SCHEME`, resolver never called): `file:///etc/passwd`, `ftp://x/`, `gopher://x`,
+  `javascript:alert(1)`, `data:text/html,x`, `mailto:a@b.c`; `HTTP://` and `HTTPS://` upper-case are accepted;
+  (d) redirect hops: exempt `start.test` (resolver → 127.0.0.1, server A) redirecting to
+  `http://127.0.0.1:<port B>/actuator/health` → `REFUSED_ADDRESS`, server B receives 0 requests; redirecting to
+  `file:///etc/passwd` → `REFUSED_SCHEME`; a relative `Location` resolves against the current URL; each of 301, 302,
+  303, 307, 308 is followed; 300 and 304 are returned as `OK` with that status; 302 without `Location` → `FAILED`;
+  (e) redirect count: chains of 0, 1, 4, 5 redirects → `OK` with `redirects` = 0, 1, 4, 5; 6 and an endless loop →
+  `TOO_MANY_REDIRECTS` after exactly 6 requests (the 6th `Location` is never requested); maxRedirects 0 → the first
+  redirect gives `TOO_MANY_REDIRECTS`; (f) body: 0 B, 1 B, 2 MB − 1, 2 MB, 2 MB + 1, 10 MB → `body.length` 0, 1,
+  2,097,151, 2,097,152, 2,097,152, 2,097,152 and `truncated` false, false, false, false, true, true; a 10 MB body ends
+  within the timeout (reading stops, not drained); (g) timeout per fetch (timeout 500 ms): a server that never answers,
+  a body trickling 1 byte per 100 ms, and 5 hops of 200 ms each → `FAILED` in < 2 s; (h) exemption: list
+  `" Stub , 127.0.0.1 ,"` → entries `stub`, `127.0.0.1`; `http://stub:4010/x` (resolver → 172.18.0.3) passes the check;
+  `http://STUB:4010/x` passes; `http://stub2:4010/`, `http://x.stub:4010/`, `http://stub.:4010/` (resolving to
+  172.18.0.4) → `REFUSED_ADDRESS`; `http://localhost/` with list `127.0.0.1` → `REFUSED_ADDRESS`; empty list → every
+  blocked address refused; (i) pinning: exempt `pinned.test`, resolver `pinned.test` → 127.0.0.1 → the local server
+  receives exactly one request with `Host: pinned.test:<port>` and the resolver is called exactly once per hop (no
+  second lookup); (j) log: a refusal logs one WARN `article fetch refused: blocked-address host=<host>` /
+  `article fetch refused: scheme scheme=<scheme>` without the query string. Invariants: no connection is ever opened to a
+  blocked address unless its host name is on the exemption list; at most `maxBytes` bytes of a body are ever read;
+  at most `maxRedirects + 1` requests per fetch; a refused, stopped or failed fetch never fails the run (IT cases above).
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |

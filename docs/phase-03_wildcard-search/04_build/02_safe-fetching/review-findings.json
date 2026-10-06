@@ -1,0 +1,139 @@
+{
+  "slice": "02_safe-fetching",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleMetadataFetcher.java",
+      "line": 32,
+      "fr": "FR-56",
+      "problem": "Round 2: only partly fixed. The META regex is gone and the tag scan with indexOf is now linear, but the cost moved into the ATTR regex. `([a-zA-Z:_-]+)\\s*=...` is matched with find() over each tag body of up to MAX_TAG_LENGTH (4096) characters. On a body made only of name characters (e.g. `<meta aaaa...a>`), each start position scans to the end of the tag and then backtracks, so one tag costs about n^2/2 steps, and a 2 MB page is about 2 MB x 4096/2 steps in total. Measured on JDK 25 with the exact new parse loop and ATTR pattern, on 2 MB of repeated `<meta ` + `a`x4085 + `>`: 43,151 ms. With tag length 512/1024/2048/4085 it took 4.6 s / 9.2 s / 18.2 s / 36.4 s, so lowering the cap alone does not help enough. fetchDetailed still waits with an unbounded `future.get()` (line 66), so one crafted publisher page still blocks the run's source retrieval and a fetch slot for about 40 s, well past the 3 s / 8 s article-fetch timeout (FR-56: 'cannot be abused by large or endless pages'). | Round 3: fixed. ATTR is now `(?<![a-zA-Z:_-])([a-zA-Z:_-]++)\\s*+=\\s*(...)` (lookbehind on the name start, possessive name and whitespace). Measured on JDK with the exact pattern over 2 MB of closed 4089-char tag bodies for 19 filler shapes (a, a=, a , a =, \"a, 'a, a\\t, =, = , a= , a=\", a=', space, a=\" , a= =, a:-_=, =\", a=\"b', a= \"): 7-50 ms each. Attribute extraction is unchanged on normal tags (property/content/data-x/name = description). fetchDetailed now waits at most 10 s and cancels on timeout.",
+      "fix": "Make the attribute match linear. For example, anchor it to a name boundary and stop the name from backtracking: `(?<![a-zA-Z:_-])([a-zA-Z:_-]++)\\s*+=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))`. Measured on the same 2 MB input this gives 39 ms, and 15-58 ms on the other shapes (`a=a=...`, `a a ...`, `a\\ta\\t...`, `a =a =...`). A hand-written attribute scanner also works. As a second guard, restore a bounded wait in fetchDetailed (timeout + small margin, cancel on timeout).",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ArticleMetadataFetcherTest.java",
+      "line": 155,
+      "fr": "FR-56",
+      "problem": "Round 2: still open. The new pathologicalBodies() matrix (6 shapes, fetch and parse) only covers unclosed tags (where parse stops at the missing `>`) and one huge tag over 4096 characters (which is skipped). It has no case of many closed tags just under MAX_TAG_LENGTH, which is where the cost now sits (see R1). Both new parameterized tests pass while 2 MB of `<meta ` + `a`x4085 + `>` takes about 43 s to parse, so the test hides the defect. | Round 3: fixed. closedTagBodiesNearTheCap() adds 6 closed-tag fillers at exactly MAX_TAG_LENGTH, repeated to 2 MB, with a 2 s parse bound and a 5 s fetch bound. Both also assert that a later og:description is still found. aTagOfExactlyTheCapIsParsedAndATagOverTheCapIsSkipped covers the boundary and that parsing goes on after a skipped tag. All 39 cases are green, and the new cases take 14-80 ms.",
+      "fix": "Add closed-tag shapes near the cap to pathologicalBodies(): (`<meta ` + `a`x(MAX_TAG_LENGTH-7) + `>`) repeated to 2 MB, the same with `a=`, `a `, `a =`, `\"a` and `'a` fillers, and one tag of exactly MAX_TAG_LENGTH and one of MAX_TAG_LENGTH+1 (the first is parsed, the second is skipped). Keep the assertTimeoutPreemptively bound, but use about 2 s for the parse test so a 10x slowdown fails. Also assert that a normal og:description tag after the filler is still found, so 'fast' cannot mean 'gave up'.",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleMetadataFetcher.java",
+      "line": 80,
+      "fr": "FR-56",
+      "problem": "'Redirect limit = min(argument, article-max-redirects)' is applied after the fact (`r.redirects() > limit`). SafeFetcher still follows up to article-max-redirects hops, so a call with a lower argument (e.g. fetchDetailed(url, 2)) still requests the hops past its own limit. The outcome is the same and every hop is still address-checked. The only production caller passes 5 = max, so a user cannot hit this today.",
+      "fix": "Give SafeFetcher a per-call redirect limit (e.g. an overload fetch(URI, Duration, int maxRedirects) capped at the configured value), or accept the post-filter and document it.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SafeFetcher.java",
+      "line": 272,
+      "fr": "FR-56",
+      "problem": "The fallback over several resolved addresses never runs. On JDK 25, a failed Socket.connect closes the socket, so the loop always hits `if (socket.isClosed()) break;` after the first address. A host whose first address is unreachable fails, even when a later checked address would work. This is no regression: the old HttpClient also used only the first address.",
+      "fix": "Create a new Socket per address attempt inside the loop, and set `current` each time so abort still closes it. Or drop the loop and connect to addresses.get(0) on purpose.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SafeFetcher.java",
+      "line": 303,
+      "fr": "FR-56",
+      "problem": "The hand-written request sends no User-Agent. The old HttpClient sent `Java-http-client/<version>`. A live comparison against real sites gave the same status for most (bbc, cnn, npr, dw, aljazeera, apnews, reuters, ft, bloomberg). theguardian.com once answered 406 to SafeFetcher where HttpClient got 200, and later 200 to both, so the evidence is weak. Some CDNs reject requests with no User-Agent, which would quietly lower metadataFetched in real mode.",
+      "fix": "Send a fixed `User-Agent` header, e.g. `Oracul/1.0 (+article metadata)` or the previous Java-http-client value.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/research/SafeFetcher.java",
+      "line": 223,
+      "fr": "FR-56",
+      "problem": "isBlocked unwraps only IPv4-mapped IPv6 (::ffff:a.b.c.d). Other IPv6 forms that embed an IPv4 address are allowed: IPv4-compatible ::a.b.c.d (e.g. ::127.0.0.1, ::10.0.0.1), NAT64 64:ff9b::/96 and 6to4 2002::/16. The spec lists only the mapped form, and in the Docker (IPv4-only) deployment these are rarely routable, so this is low.",
+      "fix": "Also unwrap ::/96 (except :: and ::1), 64:ff9b::/96 and 2002:wwxx:yyzz::/48, and check the embedded IPv4 address. Add these to the blockedAddresses parameter list.",
+      "status": "open"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SafeFetcherSupport.java",
+      "line": 25,
+      "fr": "FR-56",
+      "problem": "SafeFetcherTest and ArticleMetadataFetcherTest reach SafeFetcher only through reflection, a RED-phase bridge for a class that did not exist yet. SafeFetcher exists now, so a renamed or re-typed method, constructor or record field only shows up at test runtime as 'missing', and IDE refactors skip the tests.",
+      "fix": "Replace the reflective bridge with direct calls to SafeFetcher, its constructor and Result. Keep the scripted resolver as a lambda of SafeFetcher.HostResolver.",
+      "status": "open"
+    },
+    {
+      "id": "R8",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SafeFetcherTest.java",
+      "line": 644,
+      "fr": "FR-56",
+      "problem": "anExemptNameResolvingToAPrivateDockerAddressPassesTheCheck really opens a TCP connection to 172.18.0.3:4010 (1 s timeout). On a developer machine running the E2E Docker network (Linux), that address can be a live container, so the test touches real local infrastructure and its timing depends on the machine.",
+      "fix": "Map `stub` to an address that passes the exemption and answers locally (e.g. the 127.0.0.1 test server), and assert OK and the request count. Or assert only that the outcome is not REFUSED_ADDRESS with a resolver address that is guaranteed unroutable (e.g. 192.0.2.1 TEST-NET with a 200 ms timeout). Note that 192.0.2.1 is not a blocked address, so the exemption would need another private address that is known to be closed.",
+      "status": "open"
+    },
+    {
+      "id": "R9",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleMetadataFetcher.java",
+      "line": 31,
+      "fr": "FR-56",
+      "problem": "The new outer wait WAIT_LIMIT_SECONDS = 10 is a fixed number. It does not depend on oracul.news.article-fetch-timeout, which the spec makes configurable (PT3S now, PT8S from slice 08, settable via env). If an operator sets the timeout above 10 s, legal slow fetches are cut at 10 s with no sign of why. If 08 passes a budget-cut timeout, the margin is also not tied to it. No test covers the outer wait.",
+      "fix": "Derive the wait from the SafeFetcher timeout plus a small margin (e.g. timeout + 2 s for parsing), or have fetchDetailed take the timeout it passes on.",
+      "status": "open"
+    },
+    {
+      "id": "R10",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SafeFetcherTest.java",
+      "line": 1104,
+      "fr": "FR-56",
+      "problem": "aFetchThatTimedOutDuringTheLookupNeverConnectsAfterwards uses wall-clock timing: a 1000 ms busy-wait resolver (SafeFetcherSupport.Resolver.uninterruptibleDelayMs), a 200 ms fetch timeout, an 800 ms release bound and a fixed sleep(1300). testing-rules says to wait for a condition and never use Thread.sleep. The test adds 1.5 s to every gate run, the second-slowest case in the class. Flake risk is low. Measured on JDK 25 with the exact production SafeFetcher and the same resolver shape, 60 runs each with 0, 24 and 48 CPU- and allocation-burning threads on 12 cores: release time max 213, 224 and 250 ms, never near 800 ms. The no-request assertion cannot turn red under load either. A delayed worker only makes it pass without proving anything, and remainingMillis(deadline) would refuse to connect after the deadline anyway. So this is not a medium flake, only a fixed-sleep and speed issue.",
+      "fix": "Gate the resolver on latches instead of time. Add `CountDownLatch gate` and `CountDownLatch returned` to Resolver. The lookup waits on gate.await() in a loop that ignores InterruptedException, then counts down returned in a finally block. Test flow: fetch with a 200 ms timeout, assert FAILED and elapsed < 2 s (the same 4x margin as the other timeout tests), then gate.countDown(), await(returned, 5). Then confirm the worker is done by having f.raw() shutdown and awaitTermination on its executor. Or keep one short bounded check: Awaitility during(300 ms).atMost(1 s) that raw.requests stays empty. This drops the 1000 ms busy-wait and the 1300 ms sleep.",
+      "status": "open"
+    },
+    {
+      "id": "R11",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SafeFetcher.java",
+      "line": 372,
+      "fr": "FR-56",
+      "problem": "readAnswer treats any 1xx head as the final answer (`status / 100 == 1` gives OK with an empty body) and never reads the response that follows it. RFC 9110 15.2 says a client MUST parse one or more 1xx responses before the final response, even unsolicited ones. A publisher that sends `103 Early Hints` over HTTP/1.1 (e.g. Node res.writeEarlyHints) before its `200` page would give OK with status 103 and no body. That silently loses og:description, and metadataFetched is false. The new test bodylessStatusesAreOkWithAnEmptyBody (line 1036, statuses 100/102/199) now enshrines this. The slice spec's 'OK: a non-redirect answer of any status' does not require it, because an interim 1xx is not an answer. Rare in practice, so low.",
+      "fix": "In readAnswer, loop while the status is 1xx other than 101: skip the interim head up to its blank line, then read the next status line, all within the same deadline. Change the test to send `HTTP/1.1 103 Early Hints\\r\\nLink: </a.css>\\r\\n\\r\\nHTTP/1.1 200 OK...body` and assert OK, 200 and the body. Keep 204/304 (and 101 if wanted) as the empty-body cases.",
+      "status": "open"
+    }
+  ]
+}
