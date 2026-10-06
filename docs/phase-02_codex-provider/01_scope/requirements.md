@@ -179,3 +179,4 @@ tests) stay in force.
 - Multiple ChatGPT accounts / profile switching
 - Renaming the phase folder (no factory command; the name is historic)
 - Fixing phase-01 low findings (request-log Basic header redaction, SSRF via article redirects) — listed for a later phase
+- Fixing the FR-48 real-Google defects found in the release review (2026-10-06, user decision): OR-group queries return 0 real items (one request per query needed), Google-host redirects counted as resolved links, and stubs that do not answer like real Google. FR-48 ships as approved; these are known defects (see 05_release/real-check.md) and are fixed in the next phase

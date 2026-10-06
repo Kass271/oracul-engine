@@ -1,0 +1,67 @@
+{
+  "slice": "release",
+  "round": 1,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SourceRetrieval.java",
+      "line": 155,
+      "fr": "FR-48",
+      "problem": "Real runs find almost no news. SourceRetrieval merges the planned queries into at most 4 OR-groups, and GoogleNewsProvider.q (line 54) sends each group as '(\"<phrase 1>\" OR \"<phrase 2>\" ...) when:<N>d'. Real Google News RSS does not evaluate that as an OR of phrases. The reviewer checked on 2026-10-06: '(\"energy crisis supply shortage warnings\" OR \"geopolitical fragmentation trade bloc tensions\") when:90d' returned 0 items, and 'energy crisis supply shortage warnings when:90d' alone returned 75. 05_release/real-check.md records the same result on a real run: 20/20 queries EMPTY, 0 articles, and the run ended with the NO_EVIDENCE note. A 0-item answer counts as EMPTY, not FAILED, so the GDELT fallback is never tried either. FR-48 exists 'so real runs find news', and NFR-8 check 2 makes GREEN depend on a real run, so the phase goal is not met. The code follows FR-48 acceptance 1 literally ('merged into at most 4 OR-group requests'), so the fix also needs a scope change to FR-48 / news-search.md. Re-verified by this review on 2026-10-06 with real calls: the quoted two-phrase OR-group returned 0 items, the bare query returned 75. (A top-level OR of two short quoted phrases does return items, but the planned queries are 4–6-word model phrases inside parentheses, which is the shape that fails.)",
+      "fix": "Change FR-48 / news-search.md to one Google request per planned query, sent serially at least 1 s apart within the search budget (20 queries is about 20 s of the 75 s budget). Keep per-query attribution, so the attribute() step is no longer needed for Google. Use GDELT per query (or per OR-group, where GDELT's syntax does work) only when Google FAILED. Then build q from the bare query text plus ' when:<N>d', without quotes or parentheses. Status wontfix: user decision 2026-10-06 — this part is rewritten in the next phase. Recorded as a known defect in 01_scope/requirements.md (Out of scope) and 05_release/real-check.md; it does not block the phase close.",
+      "status": "wontfix"
+    },
+    {
+      "id": "R2",
+      "severity": "high",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SourceRetrieval.java",
+      "line": 402,
+      "fr": "FR-48",
+      "problem": "Real Google News article links are 'resolved' to a Google page, so every Google source gets the wrong publisher and summary. prepare() counts a link as resolved whenever the fetch followed at least 1 redirect and ended at a different URL. The reviewer checked on 2026-10-06: a real link https://news.google.com/rss/articles/CBMi...?oc=5 answers 302 to the same path with '&hl=en-US&gl=US&ceid=US:en' added. That page is 200 text/html with og:site_name 'Google News' and og:description 'Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.' As a result, build() stores the Google URL with the extra parameters as the source url, sets publisher = 'Google News' (siteName wins over the RSS <source> text), sets summary to that generic Google sentence and sets metadataFetched=true. This breaks FR-48 acceptance 2 (publisher = the item's source; the redirect must lead to the publisher's URL, otherwise keep the Google link) for every real Google source. It also gives event normalization a useless summary for every article. The spec assumption 'no redirect — real Google answers its own page' (news-search.md step 8) is false. Re-verified 2026-10-06: a fresh real link answered 302 to the same news.google.com path plus &hl=en-US&gl=US&ceid=US:en, then 200 text/html with og:site_name 'Google News'. UrlNormalizer keeps hl/gl/ceid, so finalUrl != link and prepare() counts it as resolved.",
+      "fix": "Count a link as resolved only when the final URL's host is not the Google News host (the host of the link / oracul.news.google.base-url, e.g. news.google.com). Otherwise use the not-resolved path: Google link, metadataFetched false, publisher = source text, summary = title. Update news-search.md step 8 and its resolution classes to match. Status wontfix: user decision 2026-10-06 — this part is rewritten in the next phase. Recorded as a known defect in 01_scope/requirements.md (Out of scope) and 05_release/real-check.md; it does not block the phase close.",
+      "status": "wontfix"
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "e2e/stubs/server.mjs",
+      "line": 459,
+      "fr": "FR-48",
+      "problem": "The Google News stub (E2E, and the backend IT stubs built the same way) hides both real-provider defects above. GET /rss/search splits any q on ' OR ' and returns 5 items per element, so an OR-group of quoted phrases looks productive. GET /rss/articles/* redirects straight to a publisher page, so a Google-to-Google redirect that ends on a 'Google News' page is never tested. 171/171 E2E were green while the real run found 0 articles. Missing exhaustive test for the Google request/response contract: the query shapes ORACUL sends must be answered the way real Google answers them, and the link-resolution classes must include the real 302-to-Google answer.",
+      "fix": "Make the stub follow the measured real behaviour. A q containing ' OR ' between multi-word or quoted phrases returns 0 items, and a single bare query returns items. Add a link mode that answers 302 to the same news.google host path with &hl=… and then serves a 200 page with og:site_name 'Google News'. Add a backend IT resolution class for it (expected: Google link, publisher = RSS source text, metadataFetched false, summary = title) and an E2E/IT assertion that a normal run gets articles for each sent query. Status wontfix: user decision 2026-10-06 — this part is rewritten in the next phase. Recorded as a known defect in 01_scope/requirements.md (Out of scope) and 05_release/real-check.md; it does not block the phase close.",
+      "status": "wontfix"
+    },
+    {
+      "id": "R4",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "security",
+      "file": "docker-compose.yml",
+      "line": 24,
+      "fr": "FR-37",
+      "problem": "The real-mode stack publishes the backend ('8080:8080') and the frontend ('4200:80') on every host interface, so anyone on the same network can reach the API. DELETE /api/auth/chatgpt/registration needs no session or credentials and resets the whole installation: it revokes every session's refresh token and clears the issued client id. Any LAN host can therefore sign the user out and force a new registration at any time, and can also create unlimited pending authorizations via /api/auth/chatgpt/authorize. ORACUL is specified as a local app (FR-41 'the browser must run on the same computer', NFR-9 loopback redirect), so nothing needs the LAN binding.",
+      "fix": "Bind both published ports to loopback: '127.0.0.1:8080:8080' and '127.0.0.1:4200:80' (and '127.0.0.1:4010:4010' for the stub in docker-compose.e2e.yml). Check that the README and E2E base URLs (localhost / 127.0.0.1) still work. Verified fixed: docker-compose.yml now publishes 127.0.0.1:8080:8080 and 127.0.0.1:4200:80, and docker-compose.e2e.yml publishes 127.0.0.1:4010:4010. README (localhost:4200, 127.0.0.1:4200/callback) and the Playwright baseURL (localhost:4200) still reach loopback.",
+      "status": "fixed"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/NewsSearchGroupingMax0IT.java",
+      "line": 7,
+      "fr": "FR-44",
+      "problem": "The backend suite uses about 26 distinct @TestPropertySource property sets, and each starts its own Spring context. The FR-44 group-size classes alone (NewsSearchGroupingMax0IT, Max1IT, Max10IT, MaxMinus1IT) are four subclasses that differ only in oracul.news.max-requests. This goes against testing-rules 'one shared Spring context'. Behaviour is covered, so this is speed only.",
+      "fix": "Test the group-size classes on GdeltQueryGroups.groupSizes as a parameterized unit test, and keep one IT on the shared context.",
+      "status": "open"
+    }
+  ]
+}

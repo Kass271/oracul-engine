@@ -5,7 +5,7 @@ services:
     build:
       context: e2e/stubs
     ports:
-      - "4010:4010"
+      - "127.0.0.1:4010:4010"
   db:
     volumes:
       - db-e2e-data:/var/lib/postgresql
