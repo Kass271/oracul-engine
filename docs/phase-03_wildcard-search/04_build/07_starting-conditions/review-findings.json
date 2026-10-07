@@ -1,0 +1,31 @@
+{
+  "slice": "07_starting-conditions",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/StubResponses.java",
+      "line": 428,
+      "fr": "FR-58",
+      "problem": "The javadoc of criticFixture still says 'CR-PASS / CR-ICS / CR-CERT'. Since FR-58, CR-JUMP is the standard 'critic fails once' fixture and CR-ICS is only the rejected legacy answer. A reader who goes by the comment may script CR-ICS where they want a regeneration, and then gets a retry-then-PASS instead.",
+      "fix": "Change the comment to 'CR-PASS / CR-JUMP / CR-CERT, plus CR-ICS (legacy answer, now a parse error)'.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/CriticParser.java",
+      "line": 32,
+      "fr": "FR-58",
+      "problem": "Style only. The parser lists IGNORED_COUNTER_SIGNALS as excluded in two places: the TYPES filter at line 32 and the lookup loop at line 95. Line 32 is also much longer than the rest of the file. Today the result is correct: the six types appear in spec order because the openapi enum order is kept. But a later enum change would have to update both places.",
+      "fix": "Add one private static final List<CriticIssueType> ACCEPTED (the generated values without IGNORED_COUNTER_SIGNALS). Build TYPES from it and look types up in it.",
+      "status": "open"
+    }
+  ]
+}

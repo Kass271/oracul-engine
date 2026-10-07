@@ -6,12 +6,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.oracul.app.api.model.EvidencePack;
 import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.StructuredScenario;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.JsonNode;
 
 /** scenario-reasoning.md "Slice 10_critic" "Prompt unit rows": pure tests of the SCENARIO_CRITIC request. */
-// @trace FR-22
+// @trace FR-22, FR-58
 class ScenarioCriticPromptTest {
 
     private static final String D = "2027-03-01";
@@ -28,12 +34,56 @@ class ScenarioCriticPromptTest {
         return ReasoningHarness.criticInputText(pack, s, attempt, reason);
     }
 
+    // @trace FR-58
     @Test
-    void instructionsAreClosedEvidenceModePlusTheCriticRulesWithNoBraceOrAngle() {
+    void instructionsAreTheStartingConditionsBlockPlusTheCriticRulesWithNoBraceOrAngle() {
         String ins = ReasoningHarness.criticInstructions();
-        assertThat(ins).startsWith(ReasoningHarness.closedEvidenceMode() + "\n");
+        assertThat(ins).startsWith(ScenarioFixtures.STARTING_CONDITIONS + "\n");
+        assertThat(ins).startsWith((String) ReasoningHarness.constant("StartingConditions", "INSTRUCTIONS") + "\n");
         assertThat(ins).isEqualTo(CriticFixtures.INSTRUCTIONS);
         assertThat(ins).doesNotContain("{").doesNotContain("<").doesNotEndWith("\n");
+        assertThat(ins).doesNotContain("Address the counter-signals").doesNotContain("ONLY source").doesNotContain("IGNORED_COUNTER_SIGNALS");
+        assertThat(ins).contains("is intended: never report it as wildcard forcing");
+        assertThat((String) ReasoningHarness.constant("ScenarioCriticPrompt", "RULES")).isEqualTo(CriticFixtures.CRITIC_RULES);
+    }
+
+    // @trace FR-58
+    @Test
+    void theSerialisedTextFormatHasExactlyTheSixIssueTypes() {
+        Map<String, Object> body = ReasoningHarness.criticBody("m", ReasoningHarness.gp(HorizonCode._5Y), scV4(), 1, "INITIAL");
+        JsonNode text = MAPPER.valueToTree(body.get("text"));
+        JsonNode types = text.get("format").get("schema").get("properties").get("issues").get("items").get("properties").get("type").get("enum");
+        List<String> values = new ArrayList<>();
+        types.forEach(n -> values.add(n.asText()));
+        assertThat(values).containsExactly("UNSUPPORTED_FACTUAL_JUMP", "CONTRADICTION", "UNREALISTIC_TIMELINE", "WILDCARD_FORCING",
+            "SETTINGS_MISMATCH", "INAPPROPRIATE_CERTAINTY");
+    }
+
+    // @trace FR-58
+    @ParameterizedTest(name = "critic attempt {0}, reason {1}")
+    @MethodSource("attemptsAndReasons")
+    void everyCriticRequestCarriesTheStartingConditionsAndNoIgnoredCounterSignals(int attempt, String reason) {
+        Map<String, Object> body = ReasoningHarness.criticBody("m", ReasoningHarness.gp(HorizonCode._5Y), scV4(), attempt, reason);
+        assertThat(body.get("instructions")).isEqualTo(CriticFixtures.INSTRUCTIONS);
+        assertThat((String) body.get("instructions")).startsWith(ScenarioFixtures.STARTING_CONDITIONS + "\n");
+        JsonNode textFormat = MAPPER.valueToTree(body.get("text"));
+        assertThat(textFormat.equals(MAPPER.readTree(CriticFixtures.TEXT_FORMAT_JSON))).as("text format " + textFormat).isTrue();
+        String json = MAPPER.writeValueAsString(body);
+        assertThat(json).doesNotContain("IGNORED_COUNTER_SIGNALS").doesNotContain("Address the counter-signals");
+        assertThat(json).doesNotContain("\"tools\"").doesNotContain("tool_choice").doesNotContain("web_search");
+        String input = MAPPER.valueToTree(body.get("input")).get(0).get("content").get(0).get("text").asText();
+        assertThat(input).contains("\nCritique the scenario in structured-scenario against the Evidence Pack in evidence-pack under the settings above.\n");
+        assertThat(input).contains("Attempt: " + attempt + " | Reason: " + reason + "\n");
+    }
+
+    static Stream<Arguments> attemptsAndReasons() {
+        List<Arguments> out = new ArrayList<>();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            for (String reason : List.of("INITIAL", "SCHEMA_CORRECTION", "GUARD_REGENERATION", "CRITIC_REGENERATION", "ALTERNATIVE_DISTINCT")) {
+                out.add(Arguments.of(attempt, reason));
+            }
+        }
+        return out.stream();
     }
 
     @Test

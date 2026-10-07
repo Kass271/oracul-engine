@@ -97,9 +97,9 @@ const storyDefault = (d) =>
 
 const SCENARIO_MODES = ['ok', 'invalid-once', 'invalid', 'e099', 'guard-fail-once', 'guard-fail', 'bad-after-first', 'alt-repeat-once', 'alt-repeat'];
 const CRITIC_MODES = ['ok', 'fail-once', 'fail', 'malformed', 'rate-limited'];
-// critic-validation fixtures (scenario-reasoning.md FR-22)
+// critic-validation fixtures (scenario-reasoning.md FR-22; FR-58: CR_JUMP replaces the legacy ignored-counter-signals fixture)
 const CR_PASS = '{"verdict":"PASS","issues":[]}';
-const CR_ICS = '{"verdict":"FAIL","issues":[{"type":"IGNORED_COUNTER_SIGNALS","description":"The scenario ignores the counter-signals of the Evidence Pack."}]}';
+const CR_JUMP = '{"verdict":"FAIL","issues":[{"type":"UNSUPPORTED_FACTUAL_JUMP","description":"Step 3 does not follow from the facts and inferences before it."}]}';
 const CR_CERT = '{"verdict":"FAIL","issues":[{"type":"INAPPROPRIATE_CERTAINTY","description":"P1 is stated as a certain fact."},{"type":"UNREALISTIC_TIMELINE","description":"The future event comes too early for the causal chain."}]}';
 const q = (v) => JSON.stringify(v);
 
@@ -389,8 +389,8 @@ export const routes = {
       const m = state.critic;
       if (m === 'rate-limited') return json(res, 429, { error: 'rate_limited' });
       if (m === 'malformed') output = 'not json';
-      else if (m === 'fail-once') output = call === 1 ? CR_ICS : CR_PASS;
-      else if (m === 'fail') output = call === 1 ? CR_ICS : CR_CERT;
+      else if (m === 'fail-once') output = call === 1 ? CR_JUMP : CR_PASS;
+      else if (m === 'fail') output = call === 1 ? CR_JUMP : CR_CERT;
       else output = CR_PASS;
     } else if (purpose === 'STORY_WRITING') {
       const call = ++state.storyCalls;

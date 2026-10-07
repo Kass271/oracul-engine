@@ -54,7 +54,9 @@ class StoryWritingIT extends AbstractStoryIT {
         assertStoryCompleted(r.run());
         for (StubResponses.Request any : responses.requests) assertNoToolKeys(any);
         String closed = com.oracul.app.reasoning.ScenarioFixtures.CLOSED_EVIDENCE_MODE;
-        assertThat(instructionsOf(requests(GEN).get(0))).startsWith(closed);
+        // @trace FR-58
+        assertThat(instructionsOf(requests(GEN).get(0)))
+            .startsWith(com.oracul.app.reasoning.ScenarioFixtures.STARTING_CONDITIONS + "\n");
         assertThat(instructionsOf(sreq(1))).startsWith(closed);
         String block = StubResponses.dataBlock(s(1), "structured-scenario");
         assertThat(com.oracul.app.reasoning.ReasoningHarness.comparable(block)).isEqualTo(scenarioOf(structuredRaw(r)));

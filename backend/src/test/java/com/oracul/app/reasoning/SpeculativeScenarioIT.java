@@ -161,6 +161,7 @@ class SpeculativeScenarioIT extends AbstractStoryIT {
             .endsWith("WILDCARDS\nNew pandemic: 8 | Humanoid robot boom: 6\nWildcard: New pandemic 8/10\nno current sources found\n"
                 + "Wildcard: Humanoid robot boom 6/10\nno current sources found")
             .doesNotContain("CORE EVIDENCE").doesNotContain("COUNTER-SIGNALS");
+        // @trace FR-58
         assertThat(instructionsOf(req)).as("instructions are unchanged").isEqualTo(ScenarioFixtures.INSTRUCTIONS);
         assertThat(req.inputText().split(java.util.regex.Pattern.quote(SPECULATIVE_TASK), -1)).hasSize(2);
         assertThat(requests(CRITIC)).as("critic as in normal mode").hasSize(1);

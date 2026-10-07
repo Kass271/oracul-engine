@@ -23,7 +23,7 @@ class CriticStagesIT extends AbstractStoryIT {
     void theCriticRunsInStageEightAndTheRegenerationInStageNine() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         Function<StubResponses.Request, StubResponses.Reply> fallback = responses.defaultResponder();
-        always(CRITIC, req -> calls.getAndIncrement() == 0 ? StubResponses.completed(StubResponses.criticFixture("CR-ICS")) : fallback.apply(req));
+        always(CRITIC, req -> calls.getAndIncrement() == 0 ? StubResponses.completed(StubResponses.criticFixture("CR-JUMP")) : fallback.apply(req));
         news.reset();
         newsArticles(v4());
         script(NORMALIZATION, N_V4);

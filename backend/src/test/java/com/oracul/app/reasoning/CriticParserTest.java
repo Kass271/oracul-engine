@@ -12,11 +12,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** scenario-reasoning.md "Slice 10_critic" FR-22 CriticParser rows C1-C7. */
-// @trace FR-22
+// @trace FR-22, FR-58
 class CriticParserTest {
 
-    private static final String TYPES = "UNSUPPORTED_FACTUAL_JUMP, CONTRADICTION, UNREALISTIC_TIMELINE, IGNORED_COUNTER_SIGNALS, "
-        + "WILDCARD_FORCING, SETTINGS_MISMATCH, INAPPROPRIATE_CERTAINTY";
+    /** The six types the parser accepts from phase 03 on (wildcard-evidence.md FR-58), in the order of the error message. */
+    private static final List<String> TYPE_LIST = List.of("UNSUPPORTED_FACTUAL_JUMP", "CONTRADICTION", "UNREALISTIC_TIMELINE",
+        "WILDCARD_FORCING", "SETTINGS_MISMATCH", "INAPPROPRIATE_CERTAINTY");
+    private static final String TYPES = String.join(", ", TYPE_LIST);
 
     private static void assertErrors(Critiqued c, String... errors) {
         assertThat(c.verdict()).as("no critique expected, got " + c).isEmpty();
@@ -44,9 +46,9 @@ class CriticParserTest {
     // C2
     @Test
     void aFailKeepsItsIssuesInOrder() {
-        Critiqued ics = valid(parseCritic(CriticFixtures.CR_ICS));
-        assertThat(ics.verdict()).contains("FAIL");
-        assertThat(ics.issues()).containsExactly("IGNORED_COUNTER_SIGNALS | " + CriticFixtures.ICS_DESCRIPTION);
+        Critiqued jump = valid(parseCritic(CriticFixtures.CR_JUMP));
+        assertThat(jump.verdict()).contains("FAIL");
+        assertThat(jump.issues()).containsExactly("UNSUPPORTED_FACTUAL_JUMP | " + CriticFixtures.JUMP_DESCRIPTION);
         Critiqued cert = valid(parseCritic(CriticFixtures.CR_CERT));
         assertThat(cert.issues()).containsExactly("INAPPROPRIATE_CERTAINTY | " + CriticFixtures.CERT_1,
             "UNREALISTIC_TIMELINE | " + CriticFixtures.CERT_2);
@@ -102,7 +104,7 @@ class CriticParserTest {
     @Test
     void verdictAndIssuesMustAgree() {
         assertErrors(parseCritic("{\"verdict\":\"FAIL\",\"issues\":[]}"), "verdict FAIL needs at least 1 issue");
-        assertErrors(parseCritic(CriticFixtures.CR_ICS.replace("\"verdict\":\"FAIL\"", "\"verdict\":\"PASS\"")),
+        assertErrors(parseCritic(CriticFixtures.CR_JUMP.replace("\"verdict\":\"FAIL\"", "\"verdict\":\"PASS\"")),
             "verdict PASS must have no issues");
         assertErrors(parseCritic(fail("   ")), "issues[0].description must not be blank");
     }
@@ -132,5 +134,58 @@ class CriticParserTest {
     void markupAndPipesInADescriptionAreKeptVerbatim() {
         String d = "<img src=x onerror=alert(1)> a|b";
         assertThat(valid(parseCritic(fail(d))).issues()).containsExactly("CONTRADICTION | " + d);
+    }
+
+    // ---- slice 07_starting-conditions (FR-58): the type domain is exactly six values --------------------------------------------
+
+    private static String issue(String type) {
+        return "{\"type\":\"" + type + "\",\"description\":\"d " + type + "\"}";
+    }
+
+    // @trace FR-58
+    @ParameterizedTest(name = "type {0} alone is valid")
+    @ValueSource(strings = {"UNSUPPORTED_FACTUAL_JUMP", "CONTRADICTION", "UNREALISTIC_TIMELINE", "WILDCARD_FORCING", "SETTINGS_MISMATCH",
+        "INAPPROPRIATE_CERTAINTY"})
+    void eachOfTheSixTypesAloneIsValidAndKept(String type) {
+        Critiqued c = valid(parseCritic("{\"verdict\":\"FAIL\",\"issues\":[" + issue(type) + "]}"));
+        assertThat(c.verdict()).contains("FAIL");
+        assertThat(c.issues()).containsExactly(type + " | d " + type);
+    }
+
+    // @trace FR-58
+    @Test
+    void aFailWithAllSixTypesKeepsThemInOrder() {
+        Critiqued c = valid(parseCritic("{\"verdict\":\"FAIL\",\"issues\":[" + String.join(",", TYPE_LIST.stream().map(CriticParserTest::issue).toList()) + "]}"));
+        assertThat(c.issues()).containsExactlyElementsOf(TYPE_LIST.stream().map(t -> t + " | d " + t).toList());
+    }
+
+    // @trace FR-58
+    @ParameterizedTest(name = "type \"{0}\" is rejected")
+    @ValueSource(strings = {"IGNORED_COUNTER_SIGNALS", "OTHER", "contradiction", "Contradiction", "", " CONTRADICTION"})
+    void everyOtherTypeStringIsATypeError(String type) {
+        assertErrors(parseCritic("{\"verdict\":\"FAIL\",\"issues\":[" + issue(type) + "]}"), "issues[0].type must be one of " + TYPES);
+    }
+
+    // @trace FR-58
+    @Test
+    void theErrorNamesTheFirstOffendingIndex() {
+        assertErrors(parseCritic("{\"verdict\":\"FAIL\",\"issues\":[" + issue("CONTRADICTION") + "," + issue("IGNORED_COUNTER_SIGNALS") + "]}"),
+            "issues[1].type must be one of " + TYPES);
+        assertErrors(parseCritic("{\"verdict\":\"FAIL\",\"issues\":[" + issue("OTHER") + "," + issue("IGNORED_COUNTER_SIGNALS") + "]}"),
+            "issues[0].type must be one of " + TYPES);
+    }
+
+    // @trace FR-58
+    @Test
+    void aPassCarryingAnIgnoredCounterSignalsIssueReportsTheTypeErrorNotThePassRule() {
+        assertErrors(parseCritic("{\"verdict\":\"PASS\",\"issues\":[" + issue("IGNORED_COUNTER_SIGNALS") + "]}"),
+            "issues[0].type must be one of " + TYPES);
+    }
+
+    // @trace FR-58
+    @Test
+    void theLegacyCritiqueFixtureIsRejected() {
+        assertErrors(parseCritic(CriticFixtures.CR_ICS), "issues[0].type must be one of " + TYPES);
+        assertErrors(parseCritic(CriticFixtures.fixture("CR-ICS")), "issues[0].type must be one of " + TYPES);
     }
 }

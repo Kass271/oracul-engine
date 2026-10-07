@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { evidence } from './evidence';
 
 const STUB = 'http://localhost:4010';
-const INSTRUCTIONS_START = 'You are the scenario reasoning component of ORACUL.';
-const ICS_LINE = 'IGNORED_COUNTER_SIGNALS | The scenario ignores the counter-signals of the Evidence Pack.';
+const INSTRUCTIONS_START = 'You are the scenario reasoning component of ORACUL. You are NOT a researcher and you do NOT summarise news.\n';
+const JUMP_LINE = 'UNSUPPORTED_FACTUAL_JUMP | Step 3 does not follow from the facts and inferences before it.';
 const CERT_1 = 'P1 is stated as a certain fact.';
 const CERT_2 = 'The future event comes too early for the causal chain.';
 
@@ -97,7 +97,7 @@ async function awaitTerminal(page: Page, id: string, timeout: number): Promise<a
   return (await page.request.get(`/api/runs/${id}`)).json();
 }
 
-// @trace FR-22
+// @trace FR-22, FR-58
 test.describe('FR-22 Critic validation', () => {
   test('FR-22 a passing critic is called once between the scenario and the story and shows nothing', async ({ page }) => {
     test.setTimeout(120_000);
@@ -117,6 +117,7 @@ test.describe('FR-22 Critic validation', () => {
     expect(keys).not.toContain('tool_choice');
     expect(keys.filter((k) => k.startsWith('web_search'))).toEqual([]);
     expect(critic[0].instructions.startsWith(INSTRUCTIONS_START)).toBe(true);
+    expect(JSON.stringify(critic[0])).not.toContain('IGNORED_COUNTER_SIGNALS');
 
     const run = await (await page.request.get(`/api/runs/${id}`)).json();
     expect(run.hasOpenCriticIssues).toBe(false);
@@ -136,7 +137,7 @@ test.describe('FR-22 Critic validation', () => {
     const second = inputText(generation[1]);
     expect(second).toContain('Reason: CRITIC_REGENERATION');
     expect(second).toContain('name="critique"');
-    expect(second).toContain(ICS_LINE);
+    expect(second).toContain(JUMP_LINE);
     const structured = await (await page.request.get(`/api/runs/${id}/structured-scenario`)).json();
     expect(structured.criticReports.map((c: any) => c.verdict)).toEqual(['FAIL', 'PASS']);
   });

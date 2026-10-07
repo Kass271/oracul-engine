@@ -29,7 +29,7 @@ public final class CriticParser {
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
         .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
         .build();
-    private static final String TYPES = Arrays.stream(CriticIssueType.values()).map(CriticIssueType::getValue)
+    private static final String TYPES = Arrays.stream(CriticIssueType.values()).filter(t -> t != CriticIssueType.IGNORED_COUNTER_SIGNALS).map(CriticIssueType::getValue)
         .collect(Collectors.joining(", "));
 
     private static final class Invalid extends RuntimeException {
@@ -92,7 +92,7 @@ public final class CriticParser {
             for (int i = 0; i < typeNames.size(); i++) {
                 CriticIssueType type = null;
                 for (CriticIssueType t : CriticIssueType.values()) {
-                    if (t.getValue().equals(typeNames.get(i))) {
+                    if (t != CriticIssueType.IGNORED_COUNTER_SIGNALS && t.getValue().equals(typeNames.get(i))) {
                         type = t;
                     }
                 }

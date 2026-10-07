@@ -14,21 +14,14 @@ public final class ScenarioGenerationPrompt {
 
     static final String RULES = String.join("\n",
         "Return only JSON matching the schema.",
-        "Information classes: FACT = a statement taken from the Evidence Pack that cites its Evidence IDs; "
-            + "INFERENCE = a conclusion drawn from facts (basedOn lists the fact ids); SPECULATION = a clearly "
-            + "hypothetical consequence; FUTURE_EVENT = the single future event of the scenario.",
-        "Consider at least two candidate futures, evaluate each against the evidence, the settings and the "
-            + "counter-signals, and select exactly one.",
-        "Build the causal chain from facts through inferences and speculations to the future event. Number the "
-            + "steps 1..n. The future event is the last step and carries its year.",
-        "Realism 10 means short causal chains and strong evidence; Realism 1 allows a highly imaginative future, "
-            + "but never invented current facts.",
-        "Darkness and Optimism set the tone of the future; they never permit invented evidence.",
-        "Use a wildcard only where the evidence gives it a coherent relationship to the scenario; never force it.",
+        "Information classes: FACT = a statement about the present taken from the Evidence Pack that cites its Evidence IDs; INFERENCE = a conclusion drawn from facts (basedOn lists the fact ids); SPECULATION = a clearly hypothetical development; FUTURE_EVENT = the single future event of the scenario.",
+        "Consider at least two candidate futures, evaluate each against the starting conditions and the parameters, and select exactly one.",
+        "Build the causal chain from the facts of the starting conditions through inferences and speculations to the future event. Number the steps 1..n. The future event is the last step and carries its year.",
+        "Wildcard level 1-3 means a modest development, 4-7 a serious and disruptive one, 8-10 an extreme one. Realism 10 means short causal chains close to established developments; Realism 1 allows a highly imaginative future. No setting permits invented current facts.",
         "The future event date must lie inside the window given in SETTINGS.",
-        "Address the counter-signals of the Evidence Pack in counterSignalsConsidered.");
+        "Leave counterSignalsConsidered empty: the Evidence Pack has no counter-signal section.");
 
-    public static final String INSTRUCTIONS = ClosedEvidenceMode.INSTRUCTIONS + "\n" + RULES;
+    public static final String INSTRUCTIONS = StartingConditions.INSTRUCTIONS + "\n" + RULES;
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final Object TEXT = JSON.readValue(ScenarioSchema.TEXT_FORMAT_JSON, Map.class);
@@ -87,7 +80,7 @@ public final class ScenarioGenerationPrompt {
         lines.add("Cutoff date: " + window.cutoff());
         lines.add("Future event date window: after " + window.cutoff() + " and no later than " + window.end());
         lines.add("TASK");
-        lines.add("Construct one scenario from the Evidence Pack in evidence-pack under the settings above.");
+        lines.add("Construct one scenario from the starting conditions in evidence-pack under the settings above.");
         lines.add("Cite Evidence IDs exactly as written in the pack. Use claim ids F1, F2, … for facts, I1, I2, … "
             + "for inferences and P1, P2, … for speculations.");
         if (com.oracul.app.research.WildcardPackRenderer.evidenceIds(pack).isEmpty()) {

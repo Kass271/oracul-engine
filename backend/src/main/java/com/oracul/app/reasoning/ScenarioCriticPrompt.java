@@ -15,22 +15,19 @@ public final class ScenarioCriticPrompt {
 
     static final String RULES = String.join("\n",
         "Return only JSON matching the schema.",
-        "You are the critic of ORACUL. Check the scenario in structured-scenario against the Evidence Pack in "
-            + "evidence-pack and the settings in SETTINGS. Do not rewrite the scenario.",
+        "You are the critic of ORACUL. Check the scenario in structured-scenario against the Evidence Pack in evidence-pack and the settings in SETTINGS. Do not rewrite the scenario.",
+        "The scenario is meant to extrapolate from the sources according to the settings. A strong, extreme or unlikely development that matches the wildcard levels, Darkness, Optimism, Realism and the time horizon is intended: never report it as wildcard forcing, as an unrealistic timeline or outcome, or as a settings mismatch.",
         "Report one issue for each problem of these types:",
-        "UNSUPPORTED_FACTUAL_JUMP: a step of the causal chain does not follow from the facts and inferences before it.",
+        "UNSUPPORTED_FACTUAL_JUMP: a claim about the present is not supported by the Evidence Pack, or a step of the causal chain does not follow from the steps before it.",
         "CONTRADICTION: claims of the scenario contradict each other or the Evidence Pack.",
-        "UNREALISTIC_TIMELINE: the future event cannot plausibly happen within the time horizon.",
-        "IGNORED_COUNTER_SIGNALS: counter-signals of the Evidence Pack are missing from counterSignalsConsidered or "
-            + "are dismissed without reason.",
-        "WILDCARD_FORCING: a wildcard is used without a coherent relationship to the evidence.",
-        "SETTINGS_MISMATCH: the scenario does not match Realism, Darkness, Optimism, the time horizon or the "
-            + "wildcard intensities.",
+        "UNREALISTIC_TIMELINE: the future event cannot happen within the time horizon even at the intensity the settings ask for.",
+        "WILDCARD_FORCING: a wildcard appears without any causal connection to the rest of the scenario.",
+        "SETTINGS_MISMATCH: the scenario is milder, weaker or in another direction than the wildcard levels, Darkness, Optimism, Realism or the time horizon ask for.",
         "INAPPROPRIATE_CERTAINTY: inferences, speculations or the future event are stated as certain facts.",
         "verdict: FAIL when you report at least one issue, otherwise PASS with an empty issues list.",
         "description: one or two sentences that name the claim ids or Evidence IDs concerned.");
 
-    public static final String INSTRUCTIONS = ClosedEvidenceMode.INSTRUCTIONS + "\n" + RULES;
+    public static final String INSTRUCTIONS = StartingConditions.INSTRUCTIONS + "\n" + RULES;
 
     static final String TEXT_FORMAT_JSON = "{\"format\":{\"type\":\"json_schema\",\"name\":\"scenario_critique\","
         + "\"strict\":true,\"schema\":{\"type\":\"object\",\"additionalProperties\":false,"
@@ -38,7 +35,7 @@ public final class ScenarioCriticPrompt {
         + "\"enum\":[\"PASS\",\"FAIL\"]},\"issues\":{\"type\":\"array\",\"items\":{\"type\":\"object\","
         + "\"additionalProperties\":false,\"required\":[\"type\",\"description\"],\"properties\":{"
         + "\"type\":{\"type\":\"string\",\"enum\":[\"UNSUPPORTED_FACTUAL_JUMP\",\"CONTRADICTION\","
-        + "\"UNREALISTIC_TIMELINE\",\"IGNORED_COUNTER_SIGNALS\",\"WILDCARD_FORCING\",\"SETTINGS_MISMATCH\","
+        + "\"UNREALISTIC_TIMELINE\",\"WILDCARD_FORCING\",\"SETTINGS_MISMATCH\","
         + "\"INAPPROPRIATE_CERTAINTY\"]},\"description\":{\"type\":\"string\"}}}}}}}}";
 
     private static final JsonMapper JSON = JsonMapper.builder()

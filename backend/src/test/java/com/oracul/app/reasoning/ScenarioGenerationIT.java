@@ -14,7 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** Rows #1-#4 and #15 of scenario-reasoning.md "Slice 08_validated-scenario": the SCENARIO_GENERATION request and its failures. */
-// @trace FR-19, FR-38, FR-39
+// @trace FR-19, FR-38, FR-39, FR-58
 class ScenarioGenerationIT extends AbstractReasoningIT {
 
     private static final String SETTINGS_HEAD =
@@ -39,7 +39,14 @@ class ScenarioGenerationIT extends AbstractReasoningIT {
         assertThat(body.get("store")).isEqualTo(false);
         for (StubResponses.Request any : responses.requests) assertNoToolKeys(any);
         assertThat(instructionsOf(req)).isEqualTo(ScenarioFixtures.INSTRUCTIONS);
-        assertThat(instructionsOf(req)).startsWith("You are the scenario reasoning component of ORACUL.\nYou are NOT a researcher.");
+        // @trace FR-58
+        assertThat(instructionsOf(req)).startsWith(
+            "You are the scenario reasoning component of ORACUL. You are NOT a researcher and you do NOT summarise news.\n");
+        assertThat(instructionsOf(req)).doesNotContain("Address the counter-signals").doesNotContain("ONLY source");
+        assertThat(req.inputText()).contains("Realism: 8 | Darkness: 9 | Optimism: 2 | Horizon: 5 years\nWildcards: New pandemic 8 | Humanoid robot boom 6\n");
+        assertThat(req.inputText()).contains("\nTASK\nConstruct one scenario from the starting conditions in evidence-pack under the settings above.\n");
+        assertThat(req.inputText()).doesNotContain("Construct one scenario from the Evidence Pack");
+        assertThat(StubResponses.dataBlock(req.inputText(), "evidence-pack")).isEqualTo(pack(r).get("promptText"));
         assertThat(req.inputText()).startsWith(SETTINGS_HEAD + cutoffDate(r) + "\n");
         assertThat(body.get("text")).isEqualTo(jsonOf(ScenarioFixtures.TEXT_FORMAT_JSON));
         assertThat(req.headers().get("authorization")).startsWith("Bearer ");

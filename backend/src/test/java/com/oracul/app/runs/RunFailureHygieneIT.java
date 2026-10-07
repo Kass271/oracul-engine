@@ -68,7 +68,14 @@ class RunFailureHygieneIT extends AbstractDeadlineIT {
             "{\"code\":\"CHATGPT_RATE_LIMITED\",\"message\":\"ChatGPT usage limit reached — try again later\"}"));
         assertThat(requests(STORY)).hasSize(1);
         String raw = getRun(sid, id).andReturn().getResponse().getContentAsString();
-        assertThat(raw).doesNotContain("rate_limited").doesNotContain("429").doesNotContain("PROVIDER-SECRET");
+        // "429" is checked as a standalone token only: run ids, evidence pack ids and timestamps are random
+        // hex/digit runs that may legitimately contain the digits 429.
+        assertThat(raw).doesNotContain("rate_limited").doesNotContain("PROVIDER-SECRET")
+            .doesNotContainPattern("(?<![0-9A-Za-z])429(?![0-9A-Za-z])");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> failure = (Map<String, Object>) run.get("failure");
+        assertThat(String.valueOf(failure.get("code"))).doesNotContain("429");
+        assertThat(String.valueOf(failure.get("message"))).doesNotContain("429");
     }
 
     // #3

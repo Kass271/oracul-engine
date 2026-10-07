@@ -112,7 +112,7 @@ class ModelResolutionIT extends AbstractPlanUsageIT {
     void theModelIsResolvedOncePerRunAndTheSameSlugServesRegenerationsAndCorrections() throws Exception {
         responses.modelsResponder = req -> StubResponses.catalogue(e("model-b", "list"), e("model-c", "list"));
         // the critic fails once: a regeneration; then everything passes
-        scriptCritic(cr("CR-ICS"), cr("CR-PASS"));
+        scriptCritic(cr("CR-JUMP"), cr("CR-PASS"));
         Ran r = runV4(A);
         assertStoryCompleted(r.run());
         assertThat(requests(GEN)).as("initial + critic regeneration").hasSize(2);

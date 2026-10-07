@@ -3,7 +3,9 @@ import { evidence } from './evidence';
 
 const STUB = 'http://localhost:4010';
 const MARKER_START = '<<<ORACUL_UNTRUSTED_DATA name="';
-const INSTRUCTIONS_START = 'You are the scenario reasoning component of ORACUL.\nYou are NOT a researcher.';
+const STORY_INSTRUCTIONS_START = 'You are the scenario reasoning component of ORACUL.\nYou are NOT a researcher.';
+const GENERATION_INSTRUCTIONS_START =
+  'You are the scenario reasoning component of ORACUL. You are NOT a researcher and you do NOT summarise news.\n';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 test.describe.configure({ mode: 'serial' });
@@ -102,7 +104,7 @@ function plusYears(date: string, years: number): string {
   return `${Number(y) + years}-${m}-${d}`;
 }
 
-// @trace FR-23, FR-25
+// @trace FR-23, FR-25, FR-58
 test.describe('FR-23 / FR-25 Future story and metadata', () => {
   test('FR-23 FR-25 the acceptance run ends in the labelled story with the metadata panel', async ({ page }) => {
     test.setTimeout(120_000);
@@ -163,9 +165,13 @@ test.describe('FR-23 / FR-25 Future story and metadata', () => {
       expect(keys.filter((k) => k.startsWith('web_search'))).toEqual([]);
     }
     const purposes = requests.map(purposeOf);
-    for (const purpose of ['SCENARIO_GENERATION', 'STORY_WRITING']) {
+    // FR-58: SCENARIO_GENERATION starts with the starting-conditions block, STORY_WRITING keeps Closed Evidence Mode
+    for (const [purpose, start] of [
+      ['SCENARIO_GENERATION', GENERATION_INSTRUCTIONS_START],
+      ['STORY_WRITING', STORY_INSTRUCTIONS_START],
+    ]) {
       const req = requests.find((r) => purposeOf(r) === purpose);
-      expect(req.instructions.startsWith(INSTRUCTIONS_START), purpose).toBe(true);
+      expect(req.instructions.startsWith(start), purpose).toBe(true);
     }
     expect(purposes.filter((p) => p === 'STORY_WRITING')).toHaveLength(1);
     expect(purposes[purposes.length - 1]).toBe('STORY_WRITING');
