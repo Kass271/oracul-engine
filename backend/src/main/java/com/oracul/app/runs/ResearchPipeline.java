@@ -220,7 +220,11 @@ public class ResearchPipeline {
             withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), total, 0, 0)
             .sourcesKept(found.size()).sourcesWithContent(withEvents.getSourcesWithContent());
         int realism = cfg.getRealism();
-        var decision = EvidenceNotes.decide(total, total, realism, minCore);
+        List<String> missing = pack.getWildcardSections() == null ? List.of() : pack.getWildcardSections().stream()
+            .filter(w -> w.getKind() != com.oracul.app.api.model.WildcardPipelineKind.GENERAL
+                && (w.getItems() == null || w.getItems().isEmpty()))
+            .map(com.oracul.app.api.model.PackWildcardSection::getLabel).toList();
+        var decision = EvidenceNotes.decide(total, missing, realism, minCore);
         Boolean packed = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
                 s.setRollbackOnly();
@@ -231,7 +235,7 @@ public class ResearchPipeline {
             if (decision.isPresent()) {
                 var d = decision.get();
                 runs.storePack(runId, packId, withPack, d.kind().getValue(), d.coreItems(), d.coreNeeded(),
-                    d.suggestedRealism(), now());
+                    d.suggestedRealism(), d.wildcardsWithoutSources(), now());
             } else {
                 runs.storePack(runId, packId, withPack, now());
             }

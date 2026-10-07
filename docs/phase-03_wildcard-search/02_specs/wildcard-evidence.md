@@ -451,11 +451,108 @@ it is no longer requested or accepted); no rename, so `contract-notes.md` gets n
   future is speculative. Realism 8 couldn't be fully met: only 2 core evidence items (needs 3). This future is less
   grounded.`, `suggestedRealism` 6; E2E thresholds (medium/low 0) with groups [4, 0] at realism 8 →
   MISSING_WILDCARD_SOURCES, message exactly `No current sources found for: Energy crisis. This part of the future is
-  speculative.`; groups [4, 0, 0] → `… for: AI takeover, Energy crisis. …` in pipeline order; groups [4, 4] → no note;
+  speculative.`; groups [4, 0, 0] (New pandemic, Energy crisis, custom AI takeover — custom pipelines come after the
+  catalogue ones) → `… for: Energy crisis, AI takeover. …` in pipeline order; groups [4, 4] → no note;
   GENERAL with 0 sources → NO_EVIDENCE (GENERAL is never named). Message length ≤ 2000 for 33 labels of 40 characters.
   Invariants: `wildcardsWithoutSources` = labels of exactly the empty groups (in order) whenever the pack is not empty;
   kind NO_EVIDENCE ⇔ pack empty; `suggestedRealism` present ⇔ kind INSUFFICIENT_EVIDENCE and realism > 1; for every
   run of the suites: no GDELT path recorded (FR-49) and status ∈ {COMPLETED, FAILED, STOPPED}.
+
+#### Slice 09_wildcard-results — FR-59 delta (step 4a)
+Scope of this slice: FR-59 steps 1–7 and its rules, on top of slices 01–08 (the pack, its sections and the query
+statuses already exist). The contract `api/openapi.yaml` 0.7.0 already has the shape (`EvidenceNoteKind`
+`MISSING_WILDCARD_SOURCES`, `EvidenceNote.wildcardsWithoutSources` maxItems 33 with items 1–40 characters, `message`
+1–2000); this slice changes descriptions only (contract-notes.md "Slice 09"). No path, status or `ApiError.code`
+changes, no new error, no rename. `.oracul/stack.json`, the compose files and the E2E stub are unchanged — the FR-61
+Google modes `ok`, `empty`, `empty-for` (term `W02`), `down` and `publisher-fail` cover every case.
+
+**Component `com.oracul.app.runs.EvidenceNotes`** (pure, static, no Spring):
+- `public record Decision(EvidenceNoteKind kind, int coreItems, int coreNeeded, Integer suggestedRealism,
+  List<String> wildcardsWithoutSources)` — `wildcardsWithoutSources` is never null: an unmodifiable copy of `missing`
+  when kind ≠ NO_EVIDENCE and `missing` is non-empty, else `List.of()`.
+- `public static Optional<Decision> decide(int total, List<String> missing, int realism, MinCoreThresholds thresholds)`
+  — exactly FR-59 steps 1–6 with core = total; `missing` is not mutated and keeps its order (no sorting, no
+  de-duplication); realism outside 1–10 → `IllegalArgumentException` (from `MinCoreThresholds.forRealism`).
+- The phase-02 overload `decide(int core, int total, int realism, MinCoreThresholds)` stays and answers as before (no
+  wildcards), so `EvidenceNotesTest` compiles and stays green without an edit.
+- `public static String missingSentence(List<String> labels)` = `No current sources found for: ` + labels joined by
+  `, ` + `. This part of the future is speculative.`
+- `public static String message(EvidenceNoteKind kind, int realism, int coreItems, int coreNeeded, List<String>
+  wildcards)`: NO_EVIDENCE → `No current news could be used — this future is speculative, not grounded in evidence.`
+  (wildcards ignored); INSUFFICIENT_EVIDENCE → (wildcards non-empty ? `missingSentence(wildcards) + " "` : `""`) +
+  `Realism <r> couldn't be fully met: only <coreItems> core evidence item|items (needs <coreNeeded>). This future is
+  less grounded.` (`item` iff coreItems = 1); MISSING_WILDCARD_SOURCES → `missingSentence(wildcards)`. The 4-argument
+  `message` / `note` stay (= empty list).
+- `public static EvidenceNote note(EvidenceNoteKind kind, int realism, int coreItems, int coreNeeded, List<String>
+  wildcards)` — sets `wildcardsWithoutSources` iff wildcards is non-empty and kind ≠ NO_EVIDENCE.
+
+**Stage RANKING (`ResearchPipeline`)**: missing = the `label` of every `pack.wildcardSections` entry whose `kind` is
+CATALOGUE or CUSTOM and whose `items` are empty, in section (= pipeline) order; GENERAL is never named. Then
+`decide(total, missing, realism, minCore)` and, in the existing guarded RANKING transaction, `storePack` also writes
+`evidence_note_wildcards`.
+
+**Persistence**: Flyway `backend/src/main/resources/db/migration/V14__run_evidence_note_wildcards.sql` =
+`ALTER TABLE generation_run ADD COLUMN evidence_note_wildcards JSONB NULL;`. Value: JSON array of the decision's
+`wildcardsWithoutSources` when non-empty (`["Energy crisis"]`), else NULL. It is read with the other note columns;
+`insertAlternativeQueued` copies `p.evidence_note_wildcards`; `RunService` builds the note with the 5-argument `note`
+(NULL → `[]`). Runs stored before this slice (column NULL) answer byte-identically to today. A rolled-back RANKING
+commit leaves the column NULL (as `evidence_note_kind`).
+
+**Wire** (`GET /api/runs/{id}`, `POST /api/runs/{id}/alternatives`, `POST /api/runs/{id}/stop`): `wildcardsWithoutSources`
+is absent (never `null` / `[]`) when there is none (existing `EvidenceNoteMixin`, NON_EMPTY); it can only appear with
+kind INSUFFICIENT_EVIDENCE or MISSING_WILDCARD_SOURCES; `suggestedRealism` is absent for MISSING_WILDCARD_SOURCES.
+
+**UI**: unchanged elements. Run view route `/futures/:runId`: `evidence-note` with `evidence-note-message` = exactly
+`evidenceNote.message` for every kind, `lower-realism` iff `suggestedRealism` (so never for MISSING_WILDCARD_SOURCES).
+The SOURCES view of an empty pack shows only `sources-empty` `No sources` (wildcard-result-views.md FR-60 delta).
+
+**Test plan** (body PE = realism 8, darkness 9, optimism 2, horizon 5y, wildcards `biology-new-pandemic` 8 then
+`energy-energy-crisis` 3, no custom → W01 CATALOGUE `New pandemic` heading `New pandemic 8/10` with Q01–Q03, W02
+CATALOGUE `Energy crisis` heading `Energy crisis 3/10` with Q04–Q06):
+- Backend IT (AbstractStoryIT harness, thresholds 0 unless stated; StubNews `newsArticlesPerPipeline`):
+  1. FR-59 acceptance 1 — W01 4 articles, W02 empty feed → COMPLETED with a story in normal mode (no speculative TASK
+     line); `evidenceNote` equals exactly `{kind: MISSING_WILDCARD_SOURCES, message: "No current sources found for:
+     Energy crisis. This part of the future is speculative.", coreItems: 4, coreNeeded: 0, wildcardsWithoutSources:
+     ["Energy crisis"]}`; no `suggestedRealism`; DB `evidence_note_kind` `MISSING_WILDCARD_SOURCES`,
+     `evidence_note_wildcards` `["Energy crisis"]`; Q04–Q06 EMPTY; the W02 pack section reads `no current sources
+     found`.
+  2. FR-59 acceptance 2 — empty feed under PE → note exactly `{kind: NO_EVIDENCE, message: "No current news could be
+     used — this future is speculative, not grounded in evidence.", coreItems: 0, coreNeeded: 0}` (no
+     `wildcardsWithoutSources`), column NULL; `getFutureResult.sources` `[]` and every `wildcardGroups[*].sources` `[]`.
+  3. FR-59 acceptance 3 — `oracul.search.query-generation-window` PT1S, `search-window` PT2S, `stage-budget` PT3S;
+     StubNews responder: a request whose `StubNews.stubQuery` is pipeline 2 (`W02 stub query <i>`) is answered only
+     after 4 s (e.g. `StubNews.slow(4000, …)` for those requests), W01's first query answers 4 articles at once (the
+     `firstQueryItems` shape) → Q04–Q06 FAILED with `articlesReturned` 0 (cut off or never sent, never EMPTY), Q01 OK,
+     note MISSING_WILDCARD_SOURCES naming exactly `["Energy crisis"]`, run COMPLETED with a story.
+  4. FR-59 acceptance 4 — in runs 1–3 and a run with every `/rss/search` answering 503: the StubNews request log holds
+     only `/rss/search`, Google article page, decode and publisher requests; `/rss/search` requests = planned queries
+     (6); no other path is requested.
+  5. With `@TestPropertySource` thresholds 5 / 3 / 1 (as InsufficientEvidenceIT): PE, W01 2 articles, W02 empty →
+     `{kind: INSUFFICIENT_EVIDENCE, message: "No current sources found for: Energy crisis. This part of the future is
+     speculative. Realism 8 couldn't be fully met: only 2 core evidence items (needs 3). This future is less
+     grounded.", coreItems: 2, coreNeeded: 3, wildcardsWithoutSources: ["Energy crisis"]}`, `suggestedRealism` 6.
+  6. PE + custom `{label: "AI takeover", intensity: 7}` (W03 CUSTOM), W01 4 articles, W02 and W03 empty → message
+     `No current sources found for: Energy crisis, AI takeover. This part of the future is speculative.`,
+     `wildcardsWithoutSources` `["Energy crisis", "AI takeover"]`.
+  7. GENERAL (body B): empty feed → NO_EVIDENCE without `wildcardsWithoutSources`; 1 article → no note.
+  8. ALTERNATIVE of run 1 — the created and the finished alternative carry an `evidenceNote` equal to the parent's
+     (incl. `wildcardsWithoutSources`), and its `evidence_note_wildcards` equals the parent's.
+- Frontend unit (`src/app/runs/`, route harness as `evidence-note.spec.ts`): a COMPLETED run with a
+  MISSING_WILDCARD_SOURCES note and no `suggestedRealism` → `evidence-note-message` = its message, no `lower-realism`;
+  an INSUFFICIENT_EVIDENCE note with the prefixed message and `suggestedRealism` 6 → message shown verbatim,
+  `lower-realism` present.
+- E2E (stub stack; see wildcard-result-views.md FR-60 delta for the shared E2E file): mode `empty-for` term `W02` with
+  PE → `evidence-note-message` exactly `No current sources found for: Energy crisis. This part of the future is
+  speculative.`, `lower-realism` absent, `GET /api/runs/{id}` note as IT 1 but `coreNeeded` 0 (E2E medium threshold
+  0); the same with realism 10 → `No current sources found for: Energy crisis. This part of the future is speculative.
+  Realism 10 couldn't be fully met: only 4 core evidence items (needs 5). This future is less grounded.` and
+  `lower-realism` visible; mode `empty` → the NO_EVIDENCE text and `sources-empty` `No sources`; every case: `GET
+  http://localhost:4010/__control/requests?kind=all` has no path starting `/api/v2/doc` and `kind=rss` has exactly 6
+  requests.
+
+- Changes earlier behaviour: a new run whose pack had items while a CATALOGUE / CUSTOM pipeline kept no source, and whose evidence met the realism, had no `evidenceNote` → it carries kind MISSING_WILDCARD_SOURCES with the missing sentence and `wildcardsWithoutSources`; fixture V4 under body A (W01 S001–S004, W02 `Humanoid robot boom` empty, thresholds 0) now has the note `{kind: MISSING_WILDCARD_SOURCES, message: "No current sources found for: Humanoid robot boom. This part of the future is speculative.", coreItems: 4, coreNeeded: 0, wildcardsWithoutSources: ["Humanoid robot boom"]}` and still no `suggestedRealism`: WildcardPackRunIT dataset "V4 under body A" (`evidenceNote` null → this note; the GENERAL, seven-source and empty datasets unchanged), SpeculativeScenarioIT `aNonEmptyPackNeverGetsTheSpeculativeTaskLine` (`evidenceNote` null → this note), OptionalWireFieldsAbsentIT (`wildcardsWithoutSources` moves from the "absent" walk to "present" on `GET /api/runs/{id}` with exactly `["Humanoid robot boom"]`) (tests: backend/src/test/java/com/oracul/app/result/WildcardPackRunIT.java, backend/src/test/java/com/oracul/app/reasoning/SpeculativeScenarioIT.java, backend/src/test/java/com/oracul/app/result/OptionalWireFieldsAbsentIT.java)
+- Changes earlier behaviour: the INSUFFICIENT_EVIDENCE message was only the realism sentence → it is prefixed by the missing sentence and one space when a wildcard has no source; no existing test has an insufficient run with an empty wildcard group (InsufficientEvidenceIT N(n) fills every group, insufficient-evidence.spec.ts uses one wildcard, EvidenceNotesTest keeps the 4-argument `decide`) (tests: none)
+- Ranges & invariants: (a) decision table (unit `EvidenceNotesTest`-style, parameterized, thresholds 5 / 3 / 2): realism 1…10 × total ∈ {0, needed − 1 (if ≥ 1), needed, needed + 1} × missing ∈ {[], ["Energy crisis"], ["Energy crisis", "AI takeover"]} → total 0 ⇒ NO_EVIDENCE, `coreItems` 0, no suggestion, `wildcardsWithoutSources` [] and the fixed text whatever `missing`; 0 < total < needed ⇒ INSUFFICIENT_EVIDENCE, `coreItems` total, `suggestedRealism` max(1, realism − 2) iff realism > 1, message = prefix iff missing non-empty + realism sentence; total ≥ needed and missing non-empty ⇒ MISSING_WILDCARD_SOURCES, message = the missing sentence, no suggestion; total ≥ needed and missing empty ⇒ empty Optional; (b) message classes: 1 label → `for: Energy crisis.`; 2 → `for: Energy crisis, AI takeover.` in the given order; a label containing `, ` or `<b>x</b>` appears verbatim; `item` iff coreItems 1; (c) length: 33 labels of 40 characters as INSUFFICIENT_EVIDENCE at realism 10 → message ≤ 2000 characters and ≥ 1; 33 labels → `wildcardsWithoutSources` 33 entries; (d) `missing` input list unchanged after the call, `wildcardsWithoutSources` unmodifiable; (e) the 4-argument overload gives the same kind / numbers / suggestion as before for every row. Invariants for every run of the ITs and E2E above: kind NO_EVIDENCE ⇔ pack has 0 Evidence IDs; `wildcardsWithoutSources` present ⇔ the pack is non-empty and some CATALOGUE / CUSTOM section is empty, and then it equals exactly the labels of the empty sections in section order; `evidence_note_wildcards` NULL ⇔ `wildcardsWithoutSources` absent; `suggestedRealism` present ⇔ kind INSUFFICIENT_EVIDENCE and realism > 1; message starts with `No current sources found for: ` ⇔ `wildcardsWithoutSources` present; the message never contains a URL; status COMPLETED (a lack of sources never fails a run); a FAILED query (search-window cut-off, 503) is never EMPTY.
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |

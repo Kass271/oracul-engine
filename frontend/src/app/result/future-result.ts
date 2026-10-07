@@ -23,7 +23,7 @@ const GENERIC_ERROR = 'Something went wrong — try again';
       <div class="result" data-testid="result-view">
         <app-future-story [story]="r.story" [labels]="r.labels" />
         <app-scenario-metadata [metadata]="r.metadata" [issues]="r.openCriticIssues ?? []" />
-        <app-why-sources [causalChain]="r.causalChain ?? []" [sources]="r.sources ?? []" [futureDate]="r.story.futureDate" [research]="r.research" />
+        <app-why-sources [causalChain]="r.causalChain ?? []" [sources]="r.sources ?? []" [futureDate]="r.story.futureDate" [research]="r.research" [groups]="r.wildcardGroups ?? null" />
         <app-quick-actions />
       </div>
     } @else {

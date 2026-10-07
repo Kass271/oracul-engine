@@ -147,3 +147,18 @@ Flyway file: `V13__source_content.sql` (`content_status`, `excerpts`, `publisher
 `oracul.news.google.decode-url` (default derived from `oracul.news.google.base-url`), `oracul.news.article-fetch-timeout`
 default `PT8S`, `oracul.search.stage-budget` now also bounds retrieval; Docker E2E adds
 `ORACUL_NEWS_ARTICLE_FETCH_TIMEOUT: PT3S`. The stack modes of `.oracul/stack.json` do not change.
+
+## Slice 09_wildcard-results (step 4a)
+Description-only edits of 0.7.0, no shape change and no rename (so still no `Renamed:` line):
+- `GenerationRun.suggestedRealism` — also absent for a MISSING_WILDCARD_SOURCES note.
+- `EvidenceNote.coreItems` — for wildcard-grouped packs the distinct Evidence IDs of the sections.
+- `FutureResult.wildcardGroups` — present iff the run's search plan has pipelines AND its Evidence Pack has
+  `wildcardSections` (a stored legacy pack keeps the phase-01 result layout); absent, never `[]`.
+- `ResultGroupSource.usedInScenario` — follows this run's accepted scenario (an ALTERNATIVE run shows its parent's groups
+  with its own `usedInScenario`).
+Wire rules of the slice: `EvidenceNote.wildcardsWithoutSources` is sent only when non-empty and the kind is not
+NO_EVIDENCE; nothing inside `wildcardGroups` is ever `null` (`ResultWildcardGroup.level` absent for GENERAL,
+`ResultGroupSource.publishedAt` absent when unknown). Flyway file: `V14__run_evidence_note_wildcards.sql`
+(`generation_run.evidence_note_wildcards JSONB NULL`). The enum value MISSING_WILDCARD_SOURCES is handled in
+`EvidenceNotes` (backend); the frontend shows `evidenceNote.message` verbatim and needs no mapping. `.oracul/stack.json`,
+the compose files and the E2E stub do not change.

@@ -24,7 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
  * fully speculatively. The TASK line, the Evidence Guard differences and the invariant "an accepted speculative scenario
  * never cites evidence", all through HTTP and scripted SCENARIO_GENERATION answers.
  */
-// @trace FR-47, FR-57
+// @trace FR-47, FR-57, FR-59
 class SpeculativeScenarioIT extends AbstractStoryIT {
 
     static final String SPECULATIVE_TASK = "The Evidence Pack is empty: no current news could be used. Write a fully speculative "
@@ -175,7 +175,14 @@ class SpeculativeScenarioIT extends AbstractStoryIT {
         assertCompleted(r.run());
         assertThat(requests(GEN)).hasSize(1);
         assertThat(requests(GEN).get(0).inputText()).doesNotContain("The Evidence Pack is empty").doesNotContain(SPECULATIVE_TASK);
-        assertThat(r.run().get("evidenceNote")).as("run: " + r.run()).isNull();
+        // FR-59 (wildcard-evidence.md slice 09 "Changes earlier behaviour"): W01 holds S001-S004 and W02 (Humanoid robot boom) nothing
+        Map<String, Object> expectedNote = new java.util.LinkedHashMap<>();
+        expectedNote.put("kind", "MISSING_WILDCARD_SOURCES");
+        expectedNote.put("message", "No current sources found for: Humanoid robot boom. This part of the future is speculative.");
+        expectedNote.put("coreItems", 4);
+        expectedNote.put("coreNeeded", 0);
+        expectedNote.put("wildcardsWithoutSources", List.of("Humanoid robot boom"));
+        assertThat(r.run().get("evidenceNote")).as("run: " + r.run()).isEqualTo(expectedNote);
         assertThat(r.run().get("suggestedRealism")).isNull();
     }
 

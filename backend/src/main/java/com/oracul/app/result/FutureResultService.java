@@ -104,10 +104,43 @@ public class FutureResultService {
             : new ArrayList<>(run.searchPlan().getIntents());
         var metadata = ScenarioMetadataMapper.map(run.configuration(), run.counts());
         metadata.setModel(run.model());
-        return new FutureResult(run.id(), run.generationId(), new ArrayList<>(LABELS), story,
+        FutureResult result = new FutureResult(run.id(), run.generationId(), new ArrayList<>(LABELS), story,
             metadata,
             new ArrayList<>(scenario.getCausalChain()), sources, new ResearchExplanation(intents, run.counts()),
             openIssues);
+        if (run.searchPlan() != null && run.searchPlan().getPipelines() != null
+            && !run.searchPlan().getPipelines().isEmpty() && pack.getWildcardSections() != null
+            && !pack.getWildcardSections().isEmpty()) {
+            result.setWildcardGroups(groups(run.searchPlan().getPipelines(), pack.getWildcardSections(), used));
+        }
+        return result;
+    }
+
+    private static List<com.oracul.app.api.model.ResultWildcardGroup> groups(
+        List<com.oracul.app.api.model.WildcardPipeline> pipelines,
+        List<com.oracul.app.api.model.PackWildcardSection> sections, Set<String> used) {
+        List<com.oracul.app.api.model.ResultWildcardGroup> groups = new ArrayList<>();
+        for (var p : pipelines) {
+            List<com.oracul.app.api.model.ResultGroupSource> list = new ArrayList<>();
+            for (var section : sections) {
+                if (!p.getId().equals(section.getPipelineId()) || section.getItems() == null) {
+                    continue;
+                }
+                for (var item : section.getItems()) {
+                    var g = new com.oracul.app.api.model.ResultGroupSource(item.getEvidenceId(), item.getSourceId(),
+                        item.getTitle(), item.getPublisher(), item.getUrl(), item.getContentRetrieved(),
+                        item.getFragments() == null ? new ArrayList<>() : new ArrayList<>(item.getFragments()),
+                        used.contains(item.getEvidenceId()));
+                    g.setPublishedAt(item.getPublishedAt());
+                    list.add(g);
+                }
+            }
+            var group = new com.oracul.app.api.model.ResultWildcardGroup(p.getId(), p.getKind(), p.getLabel(),
+                p.getHeading(), new ArrayList<>(p.getQueries()), list);
+            group.setLevel(p.getLevel());
+            groups.add(group);
+        }
+        return groups;
     }
 
     private static int number(String evidenceId) {

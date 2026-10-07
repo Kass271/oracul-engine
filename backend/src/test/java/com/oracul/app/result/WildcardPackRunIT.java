@@ -22,7 +22,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * pipelines with one shared article, an empty pack), plus the Evidence Guard, the ALTERNATIVE run and the getFutureResult sources.
  * Talks HTTP only.
  */
-// @trace FR-55, FR-57
+// @trace FR-55, FR-57, FR-59
 class WildcardPackRunIT extends AbstractStoryIT {
 
     private static final String CRITIC = "SCENARIO_CRITIC";
@@ -154,12 +154,27 @@ class WildcardPackRunIT extends AbstractStoryIT {
         assertThat(jdbc.queryForObject("select count(*) from event where run_id = cast(? as uuid) and (evidence_id is not null or selection_section is not null)",
             Integer.class, r.id())).isZero();
 
-        // note: total 0 <=> NO_EVIDENCE (the E2E thresholds of this suite are 0, so no INSUFFICIENT_EVIDENCE); speculative TASK line <=> no item
+        // note: total 0 <=> NO_EVIDENCE (the E2E thresholds of this suite are 0, so no INSUFFICIENT_EVIDENCE); speculative TASK line <=> no item.
+        // Slice 09 (FR-59, wildcard-evidence.md "Changes earlier behaviour"): a non-empty pack with an empty CATALOGUE / CUSTOM section has the
+        // MISSING_WILDCARD_SOURCES note naming exactly those labels in section order (fixture V4 under body A: Humanoid robot boom)
+        List<String> missing = sections.stream().filter(sec -> !"GENERAL".equals(sec.get("kind")) && items(sec).isEmpty())
+            .map(sec -> (String) sec.get("label")).toList();
         if (ids.isEmpty()) {
             assertThat(noteKind(r.run())).isEqualTo("NO_EVIDENCE");
             assertThat(requests(GEN).get(0).inputText()).contains("The Evidence Pack is empty: no current news could be used.");
         } else {
-            assertThat(r.run().get("evidenceNote")).isNull();
+            if (missing.isEmpty()) {
+                assertThat(r.run().get("evidenceNote")).isNull();
+            } else {
+                Map<String, Object> expectedNote = new java.util.LinkedHashMap<>();
+                expectedNote.put("kind", "MISSING_WILDCARD_SOURCES");
+                expectedNote.put("message", "No current sources found for: " + String.join(", ", missing) + ". This part of the future is speculative.");
+                expectedNote.put("coreItems", ids.size());
+                expectedNote.put("coreNeeded", 0);
+                expectedNote.put("wildcardsWithoutSources", missing);
+                assertThat(r.run().get("evidenceNote")).as("run: " + r.run()).isEqualTo(expectedNote);
+                assertThat(r.run().get("suggestedRealism")).isNull();
+            }
             assertThat(requests(GEN).get(0).inputText()).doesNotContain("The Evidence Pack is empty");
         }
 

@@ -76,9 +76,15 @@ test.describe('FR-26 / FR-27 WHY and SOURCES panels', () => {
     await expect(chip).toBeEnabled();
     await chip.click();
     await expect(page.getByTestId('sources-panel')).toBeVisible();
-    const item = page.getByTestId(`source-item-${e1}`);
-    await expect(item).toBeInViewport();
-    await expect(item).toHaveClass(/highlighted/);
+    // wildcard-result-views.md slice 09: the grouped layout - the chip highlights every `source-item-<pipelineId>-<e1>` (one per group listing e1;
+    // the stub's first pack item E001 is the shared stub article, listed in both groups)
+    const holding: string[] = result.wildcardGroups
+      .filter((g: any) => g.sources.some((s: any) => s.evidenceId === e1))
+      .map((g: any) => g.pipelineId);
+    expect(holding.length).toBeGreaterThanOrEqual(1);
+    for (const p of holding) await expect(page.getByTestId(`source-item-${p}-${e1}`)).toHaveClass(/highlighted/);
+    await expect(page.locator('[data-highlighted="true"]')).toHaveCount(holding.length);
+    await expect(page.getByTestId(`source-item-${holding[0]}-${e1}`)).toBeInViewport();
     await evidence(page, 'FR-26', 'why-chain-highlighted-source');
     await page.waitForTimeout(3500);
     await expect(page.locator('[data-highlighted="true"]')).toHaveCount(0);
@@ -90,9 +96,11 @@ test.describe('FR-26 / FR-27 WHY and SOURCES panels', () => {
     await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 60_000 });
     const result = await (await page.request.get(`/api/runs/${id}/result`)).json();
     const run = await (await page.request.get(`/api/runs/${id}`)).json();
-    const sources: any[] = result.sources;
+    // wildcard-result-views.md slice 09: one group per wildcard, items `source-item-<pipelineId>-<evidenceId>`, no counter-signal badge
+    const groups: any[] = result.wildcardGroups;
     const e1: string = result.causalChain[0].evidenceIds[0];
-    expect(sources.length).toBeGreaterThan(0);
+    expect(groups.length).toBeGreaterThan(0);
+    expect(result.sources.length).toBeGreaterThan(0);
 
     await expect(page.getByTestId('sources-panel')).toHaveCount(0);
     await page.getByTestId('open-sources').click();
@@ -100,24 +108,33 @@ test.describe('FR-26 / FR-27 WHY and SOURCES panels', () => {
     const itemIds = await page.evaluate(() =>
       Array.from(document.querySelectorAll('[data-testid]'))
         .map((n) => n.getAttribute('data-testid')!)
-        .filter((t) => /^source-item-E\d+$/.test(t)),
+        .filter((t) => /^source-item-W\d+-E\d+$/.test(t)),
     );
-    expect(itemIds).toEqual(sources.map((s) => `source-item-${s.evidenceId}`));
+    expect(itemIds).toEqual(groups.flatMap((g: any) => g.sources.map((s: any) => `source-item-${g.pipelineId}-${s.evidenceId}`)));
+    expect(
+      await page.evaluate(
+        () => Array.from(document.querySelectorAll('[data-testid]')).filter((n) => /^source-item-E\d+$/.test(n.getAttribute('data-testid')!)).length,
+      ),
+      'no flat source-item-<E> element',
+    ).toBe(0);
 
-    for (const s of sources) {
-      await expect(page.getByTestId(`source-id-${s.evidenceId}`)).toHaveText(s.evidenceId);
-      await expect(page.getByTestId(`source-title-${s.evidenceId}`)).toHaveText(s.title);
-      await expect(page.getByTestId(`source-publisher-${s.evidenceId}`)).toHaveText(s.publisher);
-      const link = page.getByTestId(`source-link-${s.evidenceId}`);
-      await expect(link).toHaveAttribute('href', s.url);
-      await expect(link).toHaveAttribute('target', '_blank');
-      await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-      await expect(page.getByTestId(`source-used-${s.evidenceId}`)).toHaveCount(s.usedInScenario ? 1 : 0);
-      await expect(page.getByTestId(`source-counter-${s.evidenceId}`)).toHaveCount(s.section === 'COUNTER_SIGNAL' ? 1 : 0);
+    for (const g of groups) {
+      for (const s of g.sources) {
+        const k = `${g.pipelineId}-${s.evidenceId}`;
+        await expect(page.getByTestId(`source-id-${k}`)).toHaveText(s.evidenceId);
+        await expect(page.getByTestId(`source-title-${k}`)).toHaveText(s.title);
+        await expect(page.getByTestId(`source-publisher-${k}`)).toHaveText(s.publisher);
+        const link = page.getByTestId(`source-link-${k}`);
+        await expect(link).toHaveAttribute('href', s.url);
+        await expect(link).toHaveAttribute('target', '_blank');
+        await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+        await expect(page.getByTestId(`source-used-${k}`)).toHaveCount(s.usedInScenario ? 1 : 0);
+      }
     }
-    await expect(page.getByTestId(`source-used-${e1}`)).toHaveCount(1);
-    await expect(page.locator('[data-testid^="source-used-"]')).toHaveCount(run.counts.sourcesUsed);
-    await expect(page.locator('[data-testid^="source-counter-"]')).toHaveCount(run.counts.counterSignals);
+    const usedEverywhere = new Set(groups.flatMap((g: any) => g.sources.filter((s: any) => s.usedInScenario).map((s: any) => s.evidenceId)));
+    expect(usedEverywhere.has(e1)).toBe(true);
+    expect(usedEverywhere.size).toBe(run.counts.sourcesUsed);
+    await expect(page.locator('[data-testid^="source-counter-"]')).toHaveCount(0);
     await evidence(page, 'FR-27', 'sources-panel');
   });
 });

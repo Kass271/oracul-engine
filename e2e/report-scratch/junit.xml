@@ -1,114 +1,46 @@
-<testsuites id="" name="" tests="14" failures="2" skipped="0" errors="0" time="5.008285">
-<testsuite name="readme.spec.ts" timestamp="2026-10-04T20:17:21.676Z" hostname="chromium" tests="14" failures="2" skipped="0" time="0.473" errors="0">
-<testcase name="FR-43 Comprehensive README › README.md exists and starts with &quot;# ORACUL&quot;" classname="readme.spec.ts" time="0.002">
+<testsuites id="" name="" tests="7" failures="0" skipped="0" errors="0" time="143.090925">
+<testsuite name="wildcard-results.spec.ts" timestamp="2026-10-07T13:51:06.870Z" hostname="chromium" tests="7" failures="0" skipped="0" time="138.544" errors="0">
+<testcase name="FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard › FR-60 SOURCES lists one group per wildcard with its sources, excerpts, links and marks" classname="wildcard-results.spec.ts" time="19.942">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
 </testcase>
-<testcase name="FR-43 Comprehensive README › the first six &quot;##&quot; headings are the six sections, in order" classname="readme.spec.ts" time="0">
+<testcase name="FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard › FR-60 WHY THESE NEWS? lists the queries per wildcard and five summary numbers; a chip highlights every item of its id; a reload closes the panels" classname="wildcard-results.spec.ts" time="23.108">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
 </testcase>
-<testcase name="FR-43 Comprehensive README › Prerequisites names the account, Docker Desktop, the ports, the browser and the test tools" classname="readme.spec.ts" time="0.001">
+<testcase name="FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard › FR-60 mode publisher-fail: every source says &quot;content not retrieved&quot; and no excerpt is shown" classname="wildcard-results.spec.ts" time="19.307">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
 </testcase>
-<testcase name="FR-43 Comprehensive README › Run for real starts the stack with the plain build-and-up command, no -f flag and no e2e compose file" classname="readme.spec.ts" time="0">
+<testcase name="FR-59 a wildcard without sources is explicit › FR-59 / FR-60 mode empty-for W02: the note names Energy crisis, no LOWER REALISM, W02 shows &quot;no current sources found&quot;" classname="wildcard-results.spec.ts" time="19.292">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
 </testcase>
-<testcase name="FR-43 Comprehensive README › Sign in step by step walks the whole flow" classname="readme.spec.ts" time="0.001">
+<testcase name="FR-59 a wildcard without sources is explicit › FR-59 mode empty-for W02 at Realism 10: the missing sentence prefixes the insufficiency sentence and LOWER REALISM shows" classname="wildcard-results.spec.ts" time="18.924">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
 </testcase>
-<testcase name="FR-43 Comprehensive README › Run the tests has the backend, frontend and E2E commands and the E2E database note" classname="readme.spec.ts" time="0.001">
+<testcase name="FR-59 a wildcard without sources is explicit › FR-59 mode empty: &quot;No sources&quot;, the NO_EVIDENCE note, and WHY THESE NEWS? still lists both groups with EMPTY queries" classname="wildcard-results.spec.ts" time="19.014">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
 </testcase>
-<testcase name="FR-43 Comprehensive README › Troubleshooting has the seven entries in order, each with a Cause: and a Fix: line" classname="readme.spec.ts" time="0.003">
-</testcase>
-<testcase name="FR-43 Comprehensive README › Stop and reset has the three ways" classname="readme.spec.ts" time="0">
-</testcase>
-<testcase name="FR-43 Comprehensive README › the README names the commands and URLs of the contract and uses only Compose v2" classname="readme.spec.ts" time="0.001">
-</testcase>
-<testcase name="FR-43 Comprehensive README › &quot;API key&quot; appears only in a sentence that says none is needed" classname="readme.spec.ts" time="0">
-</testcase>
-<testcase name="FR-43 Comprehensive README › every command in a code block is copy-paste runnable: no placeholders" classname="readme.spec.ts" time="0.001">
-</testcase>
-<testcase name="FR-43 Comprehensive README › every cd target and every compose -f file exists when the commands of a code block run one after another" classname="readme.spec.ts" time="0.002">
-<system-out>
-<![CDATA[
-[[ATTACHMENT|../test-results-scratch/readme-FR-43-Comprehensive-a6edf-block-run-one-after-another-chromium/error-context.md]]
-
-[[ATTACHMENT|../test-results-scratch/readme-FR-43-Comprehensive-a6edf-block-run-one-after-another-chromium/trace.zip]]
-]]>
-</system-out>
-<failure message="expect(received).toEqual(expected) // deep equality" type="expect.toEqual">
-<![CDATA[  [chromium] › readme.spec.ts:226:3 › FR-43 Comprehensive README › every cd target and every compose -f file exists when the commands of a code block run one after another 
-
-    Error: expect(received).toEqual(expected) // deep equality
-
-    - Expected  - 1
-    + Received  + 5
-
-    - Array []
-    + Array [
-    +   "block 2: line 1: \"((cd backend && ./gradlew test))\" - \"((\" is an arithmetic expression in bash and zsh, not a subshell",
-    +   "block 3: line 1: \"((cd frontend && npm ci && npm run test:ci))\" - \"((\" is an arithmetic expression in bash and zsh, not a subshell",
-    +   "block 4: line 2: \"((cd e2e && npm ci && npx playwright install chromium && npx playwright test))\" - \"((\" is an arithmetic expression in bash and zsh, not a subshell",
-    + ]
-
-      230 |       walkBlock(b, appDir, (p) => fs.existsSync(p)).map((x) => `block ${i + 1}: ${x}`),
-      231 |     );
-    > 232 |     expect(problems).toEqual([]);
-          |                      ^
-      233 |     // the walk is not vacuous: the README does use cd and -f
-      234 |     expect(blocks.join('\n')).toMatch(/\bcd \w+/);
-      235 |     expect(blocks.join('\n')).toMatch(/\s-f\s+docker-compose\.yml/);
-        at /Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:232:22
-
-    Error Context: ../test-results-scratch/readme-FR-43-Comprehensive-a6edf-block-run-one-after-another-chromium/error-context.md
-
-    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
-    ../test-results-scratch/readme-FR-43-Comprehensive-a6edf-block-run-one-after-another-chromium/trace.zip
-    Usage:
-
-        npx playwright show-trace ../test-results-scratch/readme-FR-43-Comprehensive-a6edf-block-run-one-after-another-chromium/trace.zip
-
-    ────────────────────────────────────────────────────────────────────────────────────────────────
-]]>
-</failure>
-</testcase>
-<testcase name="FR-43 Comprehensive README › the block walker follows top-level cd, ignores subshell cd and reports missing targets and files" classname="readme.spec.ts" time="0.003">
-</testcase>
-<testcase name="FR-43 Comprehensive README › every code block runs in zsh and bash (exit 0) and every command runs in the folder it needs" classname="readme.spec.ts" time="0.458">
-<system-out>
-<![CDATA[
-[[ATTACHMENT|../test-results-scratch/readme-FR-43-Comprehensive-667a6-runs-in-the-folder-it-needs-chromium/error-context.md]]
-
-[[ATTACHMENT|../test-results-scratch/readme-FR-43-Comprehensive-667a6-runs-in-the-folder-it-needs-chromium/trace.zip]]
-]]>
-</system-out>
-<failure message="expect(received).toBe(expected) // Object.is equality" type="expect.toBe">
-<![CDATA[  [chromium] › readme.spec.ts:258:3 › FR-43 Comprehensive README › every code block runs in zsh and bash (exit 0) and every command runs in the folder it needs 
-
-    Error: expect(received).toBe(expected) // Object.is equality
-
-    - Expected  - 1
-    + Received  + 2
-
-    - zsh block 2 exit 0: 
-    + zsh block 2 exit 2: zsh:1: bad math expression: operator expected at `backend &&...'
-    +
-
-      298 |           });
-      299 |           const label = `${shell} block ${i + 1}`;
-    > 300 |           expect(`${label} exit ${r.status}: ${r.stderr}`).toBe(`${label} exit 0: `);
-          |                                                            ^
-      301 |           const lines = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean);
-      302 |           // each stub-able command of the block ran: one log line per command word at the start of a segment
-      303 |           const commands = block
-        at forEach (/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:300:60)
-        at /Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:292:16
-
-    Error Context: ../test-results-scratch/readme-FR-43-Comprehensive-667a6-runs-in-the-folder-it-needs-chromium/error-context.md
-
-    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
-    ../test-results-scratch/readme-FR-43-Comprehensive-667a6-runs-in-the-folder-it-needs-chromium/trace.zip
-    Usage:
-
-        npx playwright show-trace ../test-results-scratch/readme-FR-43-Comprehensive-667a6-runs-in-the-folder-it-needs-chromium/trace.zip
-
-    ────────────────────────────────────────────────────────────────────────────────────────────────
-]]>
-</failure>
+<testcase name="FR-59 a wildcard without sources is explicit › FR-59 mode down: every query is FAILED, the note is NO_EVIDENCE and the run completes" classname="wildcard-results.spec.ts" time="18.957">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
 </testcase>
 </testsuite>
 </testsuites>

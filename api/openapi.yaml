@@ -1060,8 +1060,8 @@ components:
           description: |
             max(1, realism − 2) (e.g. 10 → 8, 2 → 1), set iff configuration.realism > 1 and either evidenceNote.kind is
             INSUFFICIENT_EVIDENCE (phase-02 run-control.md FR-47) or status is a stored INSUFFICIENT_EVIDENCE (FR-31).
-            Absent otherwise (realism 1, NO_EVIDENCE note, no note). The UI's LOWER REALISM sets the panel realism to
-            this value and starts a new run.
+            Absent otherwise (realism 1, NO_EVIDENCE or MISSING_WILDCARD_SOURCES note, no note). The UI's LOWER
+            REALISM sets the panel realism to this value and starts a new run.
         evidenceNote:
           $ref: '#/components/schemas/EvidenceNote'
         headline:
@@ -1121,7 +1121,7 @@ components:
           type: integer
           format: int32
           minimum: 0
-          description: CORE items of the run's Evidence Pack (0 for NO_EVIDENCE)
+          description: CORE items of the run's Evidence Pack; for wildcard-grouped packs (since phase 03) the distinct Evidence IDs of the sections (0 for NO_EVIDENCE)
         coreNeeded:
           type: integer
           format: int32
@@ -2412,7 +2412,7 @@ components:
             $ref: '#/components/schemas/CriticIssue'
         wildcardGroups:
           type: array
-          description: Present iff the run (for an ALTERNATIVE run the run that built the pack) has wildcard pipelines (since phase 03) - one group per pipeline in plan order, also for pipelines without sources (phase-03 wildcard-result-views.md FR-60)
+          description: Present iff the run's search plan has wildcard pipelines and its Evidence Pack has wildcardSections (since phase 03; an ALTERNATIVE run shows the copied plan and the reused pack of its parent) - one group per pipeline in plan order, also for pipelines without sources (phase-03 wildcard-result-views.md FR-60). Absent (never []) for results with a legacy pack; the UI then keeps the phase-01 layout
           items:
             $ref: '#/components/schemas/ResultWildcardGroup'
 
@@ -2488,4 +2488,4 @@ components:
             type: string
         usedInScenario:
           type: boolean
-          description: True iff the evidenceId is cited by a fact of the accepted scenario's factsUsed
+          description: True iff the evidenceId is cited by a fact of the accepted scenario's factsUsed of this run (an ALTERNATIVE run - its own accepted scenario) (UI badge "used in scenario")

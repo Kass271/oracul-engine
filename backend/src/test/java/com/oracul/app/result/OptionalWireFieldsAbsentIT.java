@@ -19,16 +19,16 @@ import org.springframework.test.web.servlet.MvcResult;
  * {@code WildcardPipeline.candidatesConsidered} and {@code WildcardPipeline.sourceIds}; slice 06 (FR-57) does the same for
  * {@code EvidencePack.wildcardSections} and checks that no {@code null} value appears inside it; slice 08 (FR-54 / FR-55,
  * article-retrieval.md "Changes earlier behaviour") does the same for {@code ResearchCounts.sourcesWithContent},
- * {@code Source.contentStatus}, {@code Source.excerpts} and {@code Source.publisherHost}; only {@code wildcardsWithoutSources}
- * and {@code wildcardGroups} (slice 09) stay absent.
+ * {@code Source.contentStatus}, {@code Source.excerpts} and {@code Source.publisherHost}; slice 09 (FR-59 / FR-60, wildcard-evidence.md
+ * and wildcard-result-views.md "Changes earlier behaviour") does the same for {@code EvidenceNote.wildcardsWithoutSources} (V4 under body
+ * A has the note naming {@code Humanoid robot boom}) and {@code FutureResult.wildcardGroups} (2 groups, no {@code null} inside), so the
+ * walked OPTIONAL set is empty now and both fields are asserted present.
  */
-// @trace FR-49, FR-50, FR-53, FR-54, FR-55, FR-57
+// @trace FR-49, FR-50, FR-53, FR-54, FR-55, FR-57, FR-59, FR-60
 class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
 
-    /** Optional 0.7.0 field name -> the schema property it belongs to. */
-    private static final Map<String, String> OPTIONAL = Map.ofEntries(
-        Map.entry("wildcardsWithoutSources", "EvidenceNote.wildcardsWithoutSources"),
-        Map.entry("wildcardGroups", "FutureResult.wildcardGroups"));
+    /** Optional 0.7.0 field name -> the schema property it belongs to. Empty since slice 09: every phase-03 optional field is present on a new run. */
+    private static final Map<String, String> OPTIONAL = Map.of();
 
     private String get(String sid, String path) throws Exception {
         var b = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path)
@@ -113,6 +113,20 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         assertNoOptionalKeys("GET /api/runs/{id}/evidence-pack", pack);
         assertNoOptionalKeys("GET /api/runs/{id}/result", result);
 
+        // FR-59: V4 under body A (W01 S001-S004, W02 empty) has the MISSING_WILDCARD_SOURCES note naming exactly the empty wildcard
+        assertThat(JsonPath.<Map<String, Object>>read(run, "$.evidenceNote")).as("evidenceNote of V4 under body A")
+            .containsEntry("kind", "MISSING_WILDCARD_SOURCES")
+            .containsEntry("wildcardsWithoutSources", List.of("Humanoid robot boom"));
+        assertThat(JsonPath.<List<Object>>read(run, "$.evidenceNote.wildcardsWithoutSources")).containsExactly("Humanoid robot boom");
+
+        // FR-60: the result carries the groups (one per pipeline, no null anywhere inside, no level only for GENERAL)
+        assertThat(JsonPath.<List<Object>>read(result, "$.wildcardGroups")).as("wildcardGroups of a new run").hasSize(2);
+        assertThat(JsonPath.<List<Object>>read(result, "$.wildcardGroups[*].sources[*]")).as("group sources").hasSize(4);
+        assertThat(JsonPath.<List<Object>>read(result, "$.wildcardGroups[*].level")).as("level of both catalogue groups").containsExactly(8, 6);
+        List<String> groupNulls = new ArrayList<>();
+        collectNulls(JsonPath.read(result, "$.wildcardGroups"), "$.wildcardGroups", groupNulls);
+        assertThat(groupNulls).as("null values inside wildcardGroups").isEmpty();
+
         // FR-57: a new pack carries wildcardSections (one per pipeline) and no null value anywhere inside them
         assertThat(JsonPath.<List<Object>>read(pack, "$.wildcardSections")).as("wildcardSections of a new pack").hasSize(2);
         assertThat(JsonPath.<List<Object>>read(pack, "$.wildcardSections[*].items[*]")).as("section items").hasSize(4);
@@ -168,6 +182,19 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         assertThat(nulls).as("null values inside wildcardSections").isEmpty();
         assertThat(lines(JsonPath.read(pack, "$.promptText"))).anyMatch(l -> l.startsWith("[E001] Undated report on harbour automation · ")
             && l.contains(" · unknown · "));
+        // FR-60: the same shape in the result groups - no level for GENERAL, no publishedAt for the undated item, no null anywhere
+        String result = resultRaw(r);
+        Map<String, Object> group = JsonPath.read(result, "$.wildcardGroups[0]");
+        assertThat(JsonPath.<List<Object>>read(result, "$.wildcardGroups")).hasSize(1);
+        assertThat(group).doesNotContainKey("level").containsEntry("kind", "GENERAL").containsEntry("pipelineId", "W01")
+            .containsEntry("heading", "General");
+        Map<String, Object> groupItem = JsonPath.read(result, "$.wildcardGroups[0].sources[0]");
+        assertThat(groupItem).doesNotContainKey("publishedAt").doesNotContainKey("snippet").containsEntry("evidenceId", "E001")
+            .containsEntry("contentRetrieved", false);
+        assertThat((List<?>) groupItem.get("fragments")).isEmpty();
+        List<String> groupNulls = new ArrayList<>();
+        collectNulls(JsonPath.read(result, "$.wildcardGroups"), "$.wildcardGroups", groupNulls);
+        assertThat(groupNulls).as("null values inside wildcardGroups").isEmpty();
     }
 
     /** FR-55: the same undated GENERAL item on the stub's default publisher page is RETRIEVED: fragment P1 and no snippet. */

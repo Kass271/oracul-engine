@@ -4,7 +4,7 @@
       "/opt/homebrew/Cellar/node@24/24.21.0/bin/node",
       "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/node_modules/.bin/playwright",
       "test",
-      "e2e/tests/readme.spec.ts"
+      "e2e/tests/wildcard-results.spec.ts"
     ],
     "configFile": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/playwright.config.ts",
     "rootDir": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests",
@@ -90,562 +90,388 @@
   },
   "suites": [
     {
-      "title": "readme.spec.ts",
-      "file": "readme.spec.ts",
+      "title": "wildcard-results.spec.ts",
+      "file": "wildcard-results.spec.ts",
       "column": 0,
       "line": 0,
       "specs": [],
       "suites": [
         {
-          "title": "FR-43 Comprehensive README",
-          "file": "readme.spec.ts",
-          "line": 96,
+          "title": "FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard",
+          "file": "wildcard-results.spec.ts",
+          "line": 117,
           "column": 6,
           "specs": [
             {
-              "title": "README.md exists and starts with \"# ORACUL\"",
+              "title": "FR-60 SOURCES lists one group per wildcard with its sources, excerpts, links and marks",
               "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
+                  "timeout": 150000,
+                  "annotations": [
                     {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 2,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.870Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-19ae774ba601791a4e95",
-              "file": "readme.spec.ts",
-              "line": 97,
-              "column": 3
-            },
-            {
-              "title": "the first six \"##\" headings are the six sections, in order",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 0,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.886Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-18ca0d76f30a31a1e37e",
-              "file": "readme.spec.ts",
-              "line": 102,
-              "column": 3
-            },
-            {
-              "title": "Prerequisites names the account, Docker Desktop, the ports, the browser and the test tools",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 1,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.890Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-b8a868ce63042e4a2776",
-              "file": "readme.spec.ts",
-              "line": 107,
-              "column": 3
-            },
-            {
-              "title": "Run for real starts the stack with the plain build-and-up command, no -f flag and no e2e compose file",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 0,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.897Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-31ff0c01c5b694893513",
-              "file": "readme.spec.ts",
-              "line": 119,
-              "column": 3
-            },
-            {
-              "title": "Sign in step by step walks the whole flow",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 1,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.901Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-16c88f41cba5c2bccbae",
-              "file": "readme.spec.ts",
-              "line": 127,
-              "column": 3
-            },
-            {
-              "title": "Run the tests has the backend, frontend and E2E commands and the E2E database note",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 1,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.905Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-8349d8322b7860058148",
-              "file": "readme.spec.ts",
-              "line": 137,
-              "column": 3
-            },
-            {
-              "title": "Troubleshooting has the seven entries in order, each with a Cause: and a Fix: line",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 3,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.912Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-dc1281699d2916dbbca3",
-              "file": "readme.spec.ts",
-              "line": 155,
-              "column": 3
-            },
-            {
-              "title": "Stop and reset has the three ways",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 0,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.918Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-771a7e36bac57c892935",
-              "file": "readme.spec.ts",
-              "line": 181,
-              "column": 3
-            },
-            {
-              "title": "the README names the commands and URLs of the contract and uses only Compose v2",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 1,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.921Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-c4be1bc13668c92902b3",
-              "file": "readme.spec.ts",
-              "line": 188,
-              "column": 3
-            },
-            {
-              "title": "\"API key\" appears only in a sentence that says none is needed",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 0,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.932Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-e4a95114b346691b760d",
-              "file": "readme.spec.ts",
-              "line": 209,
-              "column": 3
-            },
-            {
-              "title": "every command in a code block is copy-paste runnable: no placeholders",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 1,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.935Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-8e24d2ddfc221132823e",
-              "file": "readme.spec.ts",
-              "line": 216,
-              "column": 3
-            },
-            {
-              "title": "every cd target and every compose -f file exists when the commands of a code block run one after another",
-              "ok": false,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "failed",
-                      "duration": 2,
-                      "error": {
-                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 5\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"block 2: line 1: \\\"((cd backend && ./gradlew test))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+   \"block 3: line 1: \\\"((cd frontend && npm ci && npm run test:ci))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+   \"block 4: line 2: \\\"((cd e2e && npm ci && npx playwright install chromium && npx playwright test))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+ ]\u001b[39m",
-                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 5\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"block 2: line 1: \\\"((cd backend && ./gradlew test))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+   \"block 3: line 1: \\\"((cd frontend && npm ci && npm run test:ci))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+   \"block 4: line 2: \\\"((cd e2e && npm ci && npx playwright install chromium && npx playwright test))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+ ]\u001b[39m\n    at /Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:232:22",
-                        "location": {
-                          "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts",
-                          "column": 22,
-                          "line": 232
-                        },
-                        "snippet": "\u001b[0m \u001b[90m 230 |\u001b[39m       walkBlock(b\u001b[33m,\u001b[39m appDir\u001b[33m,\u001b[39m (p) \u001b[33m=>\u001b[39m fs\u001b[33m.\u001b[39mexistsSync(p))\u001b[33m.\u001b[39mmap((x) \u001b[33m=>\u001b[39m \u001b[32m`block ${i + 1}: ${x}`\u001b[39m)\u001b[33m,\u001b[39m\n \u001b[90m 231 |\u001b[39m     )\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 232 |\u001b[39m     expect(problems)\u001b[33m.\u001b[39mtoEqual([])\u001b[33m;\u001b[39m\n \u001b[90m     |\u001b[39m                      \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 233 |\u001b[39m     \u001b[90m// the walk is not vacuous: the README does use cd and -f\u001b[39m\n \u001b[90m 234 |\u001b[39m     expect(blocks\u001b[33m.\u001b[39mjoin(\u001b[32m'\\n'\u001b[39m))\u001b[33m.\u001b[39mtoMatch(\u001b[35m/\\bcd \\w+/\u001b[39m)\u001b[33m;\u001b[39m\n \u001b[90m 235 |\u001b[39m     expect(blocks\u001b[33m.\u001b[39mjoin(\u001b[32m'\\n'\u001b[39m))\u001b[33m.\u001b[39mtoMatch(\u001b[35m/\\s-f\\s+docker-compose\\.yml/\u001b[39m)\u001b[33m;\u001b[39m\u001b[0m"
-                      },
-                      "errors": [
-                        {
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts",
-                            "column": 22,
-                            "line": 232
-                          },
-                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 5\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"block 2: line 1: \\\"((cd backend && ./gradlew test))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+   \"block 3: line 1: \\\"((cd frontend && npm ci && npm run test:ci))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+   \"block 4: line 2: \\\"((cd e2e && npm ci && npx playwright install chromium && npx playwright test))\\\" - \\\"((\\\" is an arithmetic expression in bash and zsh, not a subshell\",\u001b[39m\n\u001b[31m+ ]\u001b[39m\n\n\u001b[0m \u001b[90m 230 |\u001b[39m       walkBlock(b\u001b[33m,\u001b[39m appDir\u001b[33m,\u001b[39m (p) \u001b[33m=>\u001b[39m fs\u001b[33m.\u001b[39mexistsSync(p))\u001b[33m.\u001b[39mmap((x) \u001b[33m=>\u001b[39m \u001b[32m`block ${i + 1}: ${x}`\u001b[39m)\u001b[33m,\u001b[39m\n \u001b[90m 231 |\u001b[39m     )\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 232 |\u001b[39m     expect(problems)\u001b[33m.\u001b[39mtoEqual([])\u001b[33m;\u001b[39m\n \u001b[90m     |\u001b[39m                      \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 233 |\u001b[39m     \u001b[90m// the walk is not vacuous: the README does use cd and -f\u001b[39m\n \u001b[90m 234 |\u001b[39m     expect(blocks\u001b[33m.\u001b[39mjoin(\u001b[32m'\\n'\u001b[39m))\u001b[33m.\u001b[39mtoMatch(\u001b[35m/\\bcd \\w+/\u001b[39m)\u001b[33m;\u001b[39m\n \u001b[90m 235 |\u001b[39m     expect(blocks\u001b[33m.\u001b[39mjoin(\u001b[32m'\\n'\u001b[39m))\u001b[33m.\u001b[39mtoMatch(\u001b[35m/\\s-f\\s+docker-compose\\.yml/\u001b[39m)\u001b[33m;\u001b[39m\u001b[0m\n\u001b[2m    at /Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:232:22\u001b[22m"
-                        }
-                      ],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-04T20:17:21.938Z",
-                      "annotations": [],
-                      "attachments": [
-                        {
-                          "name": "error-context",
-                          "contentType": "text/markdown",
-                          "path": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/test-results-scratch/readme-FR-43-Comprehensive-a6edf-block-run-one-after-another-chromium/error-context.md"
-                        },
-                        {
-                          "name": "trace",
-                          "contentType": "application/zip",
-                          "path": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/test-results-scratch/readme-FR-43-Comprehensive-a6edf-block-run-one-after-another-chromium/trace.zip"
-                        }
-                      ],
-                      "errorLocation": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts",
-                        "column": 22,
-                        "line": 232
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "line": 0,
+                        "column": 0
                       }
                     }
                   ],
-                  "status": "unexpected"
-                }
-              ],
-              "id": "1cc685f15895ec255c65-4367322701bbda940f13",
-              "file": "readme.spec.ts",
-              "line": 226,
-              "column": 3
-            },
-            {
-              "title": "the block walker follows top-level cd, ignores subshell cd and reports missing targets and files",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
                   "expectedStatus": "passed",
                   "projectId": "chromium",
                   "projectName": "chromium",
                   "results": [
                     {
-                      "workerIndex": 1,
+                      "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 3,
+                      "duration": 19942,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-04T20:17:22.140Z",
-                      "annotations": [],
+                      "startTime": "2026-10-07T13:51:07.076Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
+                        }
+                      ],
                       "attachments": []
                     }
                   ],
                   "status": "expected"
                 }
               ],
-              "id": "1cc685f15895ec255c65-5b0a7425873aad5a3c58",
-              "file": "readme.spec.ts",
-              "line": 238,
+              "id": "430e60db390b08f20624-7f2cce01dda93346fa32",
+              "file": "wildcard-results.spec.ts",
+              "line": 118,
               "column": 3
             },
             {
-              "title": "every code block runs in zsh and bash (exit 0) and every command runs in the folder it needs",
-              "ok": false,
+              "title": "FR-60 WHY THESE NEWS? lists the queries per wildcard and five summary numbers; a chip highlights every item of its id; a reload closes the panels",
+              "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 30000,
-                  "annotations": [],
+                  "timeout": 150000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
                   "expectedStatus": "passed",
                   "projectId": "chromium",
                   "projectName": "chromium",
                   "results": [
                     {
-                      "workerIndex": 1,
+                      "workerIndex": 0,
                       "parallelIndex": 0,
-                      "status": "failed",
-                      "duration": 458,
-                      "error": {
-                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 2\u001b[39m\n\n\u001b[32m- zsh block 2 exit \u001b[7m0: \u001b[27m\u001b[39m\n\u001b[31m+ zsh block 2 exit \u001b[7m2: zsh:1: bad math expression: operator expected at `backend &&...'\u001b[27m\u001b[39m\n\u001b[31m+\u001b[39m",
-                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 2\u001b[39m\n\n\u001b[32m- zsh block 2 exit \u001b[7m0: \u001b[27m\u001b[39m\n\u001b[31m+ zsh block 2 exit \u001b[7m2: zsh:1: bad math expression: operator expected at `backend &&...'\u001b[27m\u001b[39m\n\u001b[31m+\u001b[39m\n    at forEach (/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:300:60)\n    at /Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:292:16",
-                        "location": {
-                          "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts",
-                          "column": 60,
-                          "line": 300
-                        },
-                        "snippet": "\u001b[0m \u001b[90m 298 |\u001b[39m           })\u001b[33m;\u001b[39m\n \u001b[90m 299 |\u001b[39m           \u001b[36mconst\u001b[39m label \u001b[33m=\u001b[39m \u001b[32m`${shell} block ${i + 1}`\u001b[39m\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 300 |\u001b[39m           expect(\u001b[32m`${label} exit ${r.status}: ${r.stderr}`\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[32m`${label} exit 0: `\u001b[39m)\u001b[33m;\u001b[39m\n \u001b[90m     |\u001b[39m                                                            \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 301 |\u001b[39m           \u001b[36mconst\u001b[39m lines \u001b[33m=\u001b[39m fs\u001b[33m.\u001b[39mreadFileSync(log\u001b[33m,\u001b[39m \u001b[32m'utf8'\u001b[39m)\u001b[33m.\u001b[39msplit(\u001b[32m'\\n'\u001b[39m)\u001b[33m.\u001b[39mfilter(\u001b[33mBoolean\u001b[39m)\u001b[33m;\u001b[39m\n \u001b[90m 302 |\u001b[39m           \u001b[90m// each stub-able command of the block ran: one log line per command word at the start of a segment\u001b[39m\n \u001b[90m 303 |\u001b[39m           \u001b[36mconst\u001b[39m commands \u001b[33m=\u001b[39m block\u001b[0m"
-                      },
-                      "errors": [
-                        {
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts",
-                            "column": 60,
-                            "line": 300
-                          },
-                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 2\u001b[39m\n\n\u001b[32m- zsh block 2 exit \u001b[7m0: \u001b[27m\u001b[39m\n\u001b[31m+ zsh block 2 exit \u001b[7m2: zsh:1: bad math expression: operator expected at `backend &&...'\u001b[27m\u001b[39m\n\u001b[31m+\u001b[39m\n\n\u001b[0m \u001b[90m 298 |\u001b[39m           })\u001b[33m;\u001b[39m\n \u001b[90m 299 |\u001b[39m           \u001b[36mconst\u001b[39m label \u001b[33m=\u001b[39m \u001b[32m`${shell} block ${i + 1}`\u001b[39m\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 300 |\u001b[39m           expect(\u001b[32m`${label} exit ${r.status}: ${r.stderr}`\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[32m`${label} exit 0: `\u001b[39m)\u001b[33m;\u001b[39m\n \u001b[90m     |\u001b[39m                                                            \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 301 |\u001b[39m           \u001b[36mconst\u001b[39m lines \u001b[33m=\u001b[39m fs\u001b[33m.\u001b[39mreadFileSync(log\u001b[33m,\u001b[39m \u001b[32m'utf8'\u001b[39m)\u001b[33m.\u001b[39msplit(\u001b[32m'\\n'\u001b[39m)\u001b[33m.\u001b[39mfilter(\u001b[33mBoolean\u001b[39m)\u001b[33m;\u001b[39m\n \u001b[90m 302 |\u001b[39m           \u001b[90m// each stub-able command of the block ran: one log line per command word at the start of a segment\u001b[39m\n \u001b[90m 303 |\u001b[39m           \u001b[36mconst\u001b[39m commands \u001b[33m=\u001b[39m block\u001b[0m\n\u001b[2m    at forEach (/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:300:60)\u001b[22m\n\u001b[2m    at /Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts:292:16\u001b[22m"
-                        }
-                      ],
+                      "status": "passed",
+                      "duration": 23108,
+                      "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-04T20:17:22.156Z",
-                      "annotations": [],
-                      "attachments": [
+                      "startTime": "2026-10-07T13:51:27.215Z",
+                      "annotations": [
                         {
-                          "name": "error-context",
-                          "contentType": "text/markdown",
-                          "path": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/test-results-scratch/readme-FR-43-Comprehensive-667a6-runs-in-the-folder-it-needs-chromium/error-context.md"
-                        },
-                        {
-                          "name": "trace",
-                          "contentType": "application/zip",
-                          "path": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/test-results-scratch/readme-FR-43-Comprehensive-667a6-runs-in-the-folder-it-needs-chromium/trace.zip"
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
                         }
                       ],
-                      "errorLocation": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/readme.spec.ts",
-                        "column": 60,
-                        "line": 300
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "430e60db390b08f20624-595210e491f790c1c868",
+              "file": "wildcard-results.spec.ts",
+              "line": 170,
+              "column": 3
+            },
+            {
+              "title": "FR-60 mode publisher-fail: every source says \"content not retrieved\" and no excerpt is shown",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 150000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "line": 0,
+                        "column": 0
                       }
                     }
                   ],
-                  "status": "unexpected"
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 19307,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-07T13:51:50.327Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
                 }
               ],
-              "id": "1cc685f15895ec255c65-4958d7887b9def495662",
-              "file": "readme.spec.ts",
-              "line": 258,
+              "id": "430e60db390b08f20624-a71f22065aed5dd77aa9",
+              "file": "wildcard-results.spec.ts",
+              "line": 242,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "FR-59 a wildcard without sources is explicit",
+          "file": "wildcard-results.spec.ts",
+          "line": 268,
+          "column": 6,
+          "specs": [
+            {
+              "title": "FR-59 / FR-60 mode empty-for W02: the note names Energy crisis, no LOWER REALISM, W02 shows \"no current sources found\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 150000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 19292,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-07T13:52:09.638Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "430e60db390b08f20624-4aae9e9ca9e43117725f",
+              "file": "wildcard-results.spec.ts",
+              "line": 270,
+              "column": 3
+            },
+            {
+              "title": "FR-59 mode empty-for W02 at Realism 10: the missing sentence prefixes the insufficiency sentence and LOWER REALISM shows",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 150000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 18924,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-07T13:52:28.935Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "430e60db390b08f20624-835761259de7df67d672",
+              "file": "wildcard-results.spec.ts",
+              "line": 313,
+              "column": 3
+            },
+            {
+              "title": "FR-59 mode empty: \"No sources\", the NO_EVIDENCE note, and WHY THESE NEWS? still lists both groups with EMPTY queries",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 150000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 19014,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-07T13:52:47.863Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "430e60db390b08f20624-8f55b3036825daf3ce65",
+              "file": "wildcard-results.spec.ts",
+              "line": 334,
+              "column": 3
+            },
+            {
+              "title": "FR-59 mode down: every query is FAILED, the note is NO_EVIDENCE and the run completes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 150000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 18957,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-07T13:53:06.882Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "430e60db390b08f20624-95e7a421ea7575c6df16",
+              "file": "wildcard-results.spec.ts",
+              "line": 365,
               "column": 3
             }
           ]
@@ -655,11 +481,11 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-04T20:17:17.634Z",
-    "duration": 5008.285,
-    "expected": 12,
+    "startTime": "2026-10-07T13:51:02.813Z",
+    "duration": 143090.925,
+    "expected": 7,
     "skipped": 0,
-    "unexpected": 2,
+    "unexpected": 0,
     "flaky": 0
   }
 }

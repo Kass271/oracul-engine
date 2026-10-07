@@ -26,7 +26,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * counts as core evidence; fixture N(n) = n distinct articles with the default classification (n <= 4 in one wildcard, 5 <= n <= 8
  * in two wildcards, sizes [4, n - 4]).
  */
-// @trace FR-31, FR-47, FR-53, FR-57
+// @trace FR-31, FR-47, FR-53, FR-57, FR-59
 @TestPropertySource(properties = {
     "oracul.evidence.min-core.high=5",
     "oracul.evidence.min-core.medium=3",
@@ -242,6 +242,32 @@ class InsufficientEvidenceIT extends AbstractStoryIT {
         assertThat(requests(GEN).get(0).inputText()).contains("\n" + SPECULATIVE_TASK + "\n");
         assertThat(requests(STORY)).hasSize(1);
         assertThat(list(result(r).get("sources"))).as("the SOURCES panel is empty").isEmpty();
+    }
+
+    // FR-59 (wildcard-evidence.md slice 09 test plan 5): INSUFFICIENT_EVIDENCE with an empty wildcard group is prefixed by the missing sentence
+    // @trace FR-59
+    @Test
+    void anInsufficientRunWithAnEmptyWildcardGroupNamesItInThePrefixOfTheMessage() throws Exception {
+        news.reset();
+        List<Art> arts = new ArrayList<>();
+        for (int i = 1; i <= 2; i++) {
+            arts.add(new Art("pe-" + i, "reuters.com", "PE article " + i));
+            news.site("pe-" + i, "Publisher " + i);
+        }
+        newsArticlesPerPipeline(arts, 2); // W01 New pandemic 2 sources, W02 Energy crisis none
+        Ran r = run(MissingWildcardSourcesIT.PE);
+        Map<String, Object> run = r.run();
+        assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
+        Map<String, Object> expected = new LinkedHashMap<>();
+        expected.put("kind", "INSUFFICIENT_EVIDENCE");
+        expected.put("message", "No current sources found for: Energy crisis. This part of the future is speculative. "
+            + insufficientMessage(8, 2, 3));
+        expected.put("coreItems", 2);
+        expected.put("coreNeeded", 3);
+        expected.put("wildcardsWithoutSources", List.of("Energy crisis"));
+        assertThat(note(run)).isEqualTo(expected);
+        assertThat(run.get("suggestedRealism")).isEqualTo(6);
+        assertThat(requests(GEN).get(0).inputText()).as("normal mode").doesNotContain("The Evidence Pack is empty");
     }
 
     // alternative runs reuse the parent's pack and copy its note and suggestedRealism

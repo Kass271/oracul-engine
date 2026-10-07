@@ -211,6 +211,51 @@ describe('run-control FR-47: the evidence note below the result', () => {
     expect(byId('sources-empty')).not.toBeNull();
   });
 
+  // @trace FR-59
+  it('a MISSING_WILDCARD_SOURCES note shows exactly its message and no LOWER REALISM button', async () => {
+    const message =
+      'No current sources found for: Energy crisis. This part of the future is speculative.';
+    await open(
+      completed({
+        evidenceNote: {
+          kind: 'MISSING_WILDCARD_SOURCES',
+          message,
+          coreItems: 4,
+          coreNeeded: 0,
+          wildcardsWithoutSources: ['Energy crisis'],
+        },
+      }),
+    );
+    expect(byId('result-view')).not.toBeNull();
+    expect(byId('evidence-note')).not.toBeNull();
+    expect(text('evidence-note-message')).toBe(message);
+    expect(byId('lower-realism')).toBeNull();
+    expect(byId('insufficient-view')).toBeNull();
+  });
+
+  // @trace FR-59
+  it('an INSUFFICIENT_EVIDENCE note with the missing-wildcards prefix is shown verbatim with LOWER REALISM', async () => {
+    const message =
+      "No current sources found for: Energy crisis. This part of the future is speculative. Realism 8 couldn't be fully met: only 2 core evidence items (needs 3). This future is less grounded.";
+    await open(
+      completed(
+        {
+          evidenceNote: {
+            kind: 'INSUFFICIENT_EVIDENCE',
+            message,
+            coreItems: 2,
+            coreNeeded: 3,
+            wildcardsWithoutSources: ['Energy crisis'],
+          },
+          suggestedRealism: 6,
+        },
+        8,
+      ),
+    );
+    expect(text('evidence-note-message')).toBe(message);
+    expect(text('lower-realism')).toBe('LOWER REALISM');
+  });
+
   it.each([
     ['NO_EVIDENCE, no suggestion', NO_EVIDENCE_NOTE, undefined, false],
     ['INSUFFICIENT with a suggestion', insufficientNote(8, 2, 3), 6, true],

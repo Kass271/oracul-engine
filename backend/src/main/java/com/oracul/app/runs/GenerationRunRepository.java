@@ -26,13 +26,13 @@ public class GenerationRunRepository {
                       String headline, OffsetDateTime createdAt, OffsetDateTime updatedAt,
                       OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId, boolean hasOpenCriticIssues,
                       String model, String failureProviderCode, String evidenceNoteKind, Integer evidenceCoreItems,
-                      Integer evidenceCoreNeeded) {
+                      Integer evidenceCoreNeeded, List<String> evidenceNoteWildcards) {
     }
 
     private static final String COLUMNS = "id, generation_id, session_id, kind, parent_run_id, status, stage, "
         + "configuration, research_profile, counts, failure_code, failure_message, suggested_realism, headline, "
         + "created_at, updated_at, completed_at, search_plan, evidence_pack_id, model, failure_provider_code, "
-        + "evidence_note_kind, evidence_core_items, evidence_core_needed";
+        + "evidence_note_kind, evidence_core_items, evidence_core_needed, evidence_note_wildcards";
 
     private final JdbcTemplate jdbc;
     private final JsonMapper json;
@@ -73,10 +73,10 @@ public class GenerationRunRepository {
                                  OffsetDateTime now, OffsetDateTime deadline) {
         jdbc.update("insert into generation_run (id, generation_id, session_id, kind, parent_run_id, status, "
                 + "configuration, research_profile, search_plan, counts, evidence_pack_id, suggested_realism, "
-                + "evidence_note_kind, evidence_core_items, evidence_core_needed, deadline_at, created_at, "
+                + "evidence_note_kind, evidence_core_items, evidence_core_needed, evidence_note_wildcards, deadline_at, created_at, "
                 + "updated_at) select ?, ?, ?, 'ALTERNATIVE', p.id, 'QUEUED', p.configuration, p.research_profile, "
                 + "p.search_plan, p.counts, p.evidence_pack_id, p.suggested_realism, p.evidence_note_kind, "
-                + "p.evidence_core_items, p.evidence_core_needed, ?, ?, ? from generation_run p where p.id = ?",
+                + "p.evidence_core_items, p.evidence_core_needed, p.evidence_note_wildcards, ?, ?, ? from generation_run p where p.id = ?",
             id, generationId, sessionId, deadline, now, now, parentId);
     }
 
@@ -132,11 +132,14 @@ public class GenerationRunRepository {
 
     /** Stores the pack, the counts and the evidence note (FR-47) in the caller's transaction (run row locked). */
     public void storePack(UUID id, UUID packId, ResearchCounts counts, String noteKind, Integer coreItems,
-                          Integer coreNeeded, Integer suggestedRealism, OffsetDateTime now) {
+                          Integer coreNeeded, Integer suggestedRealism, List<String> wildcards,
+                          OffsetDateTime now) {
         jdbc.update("update generation_run set evidence_pack_id = ?, counts = cast(? as jsonb), "
                 + "evidence_note_kind = ?, evidence_core_items = ?, evidence_core_needed = ?, "
-                + "suggested_realism = ?, updated_at = ? where id = ? and status = 'RUNNING'",
-            packId, write(counts), noteKind, coreItems, coreNeeded, suggestedRealism, now, id);
+                + "suggested_realism = ?, evidence_note_wildcards = cast(? as jsonb), updated_at = ? "
+                + "where id = ? and status = 'RUNNING'",
+            packId, write(counts), noteKind, coreItems, coreNeeded, suggestedRealism,
+            wildcards == null || wildcards.isEmpty() ? null : write(wildcards), now, id);
     }
 
     /** FR-45: STOPPED when the run is QUEUED or RUNNING; false when it was already terminal. */
@@ -234,7 +237,7 @@ public class GenerationRunRepository {
             rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
             rs.getObject("evidence_pack_id", UUID.class), openCritic,
             rs.getString("model"), rs.getString("failure_provider_code"), rs.getString("evidence_note_kind"),
-            (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"));
+            (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"), wildcards(rs.getString("evidence_note_wildcards")));
     }
 
     public Optional<Row> find(UUID id, UUID sessionId) {
@@ -258,9 +261,14 @@ public class GenerationRunRepository {
                 rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
                 rs.getObject("evidence_pack_id", UUID.class), rs.getBoolean("open_critic"),
                 rs.getString("model"), rs.getString("failure_provider_code"), rs.getString("evidence_note_kind"),
-                (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed")),
+                (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"), wildcards(rs.getString("evidence_note_wildcards"))),
             id, sessionId);
         return rows.stream().findFirst();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> wildcards(String value) {
+        return value == null ? List.of() : (List<String>) read(value, List.class);
     }
 
     private static OffsetDateTime utc(OffsetDateTime t) {

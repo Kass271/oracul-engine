@@ -157,7 +157,8 @@ public class RunService {
         run.setSuggestedRealism(r.suggestedRealism());
         if (r.evidenceNoteKind() != null) {
             run.setEvidenceNote(EvidenceNotes.note(com.oracul.app.api.model.EvidenceNoteKind.fromValue(r.evidenceNoteKind()),
-                r.configuration().getRealism(), r.evidenceCoreItems(), r.evidenceCoreNeeded()));
+                r.configuration().getRealism(), r.evidenceCoreItems(), r.evidenceCoreNeeded(),
+                r.evidenceNoteWildcards()));
         }
         run.setHeadline(r.headline());
         run.setHasOpenCriticIssues(r.hasOpenCriticIssues());

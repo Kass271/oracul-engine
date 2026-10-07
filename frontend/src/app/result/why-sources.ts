@@ -11,6 +11,9 @@ import {
 import { MatButtonModule } from '@angular/material/button';
 
 import { WhyNewsPanelComponent } from './why-news-panel';
+import { WildcardSourcesComponent } from './wildcard-sources';
+import { WildcardWhyNewsComponent } from './wildcard-why-news';
+import type { ResultWildcardGroup } from '../api/models/result-wildcard-group';
 import type { CausalStep } from '../api/models/causal-step';
 import type { ResearchExplanation } from '../api/models/research-explanation';
 import type { ResultSource } from '../api/models/result-source';
@@ -20,7 +23,7 @@ const HIGHLIGHT_MS = 3000;
 
 @Component({
   selector: 'app-why-sources',
-  imports: [MatButtonModule, WhyNewsPanelComponent],
+  imports: [MatButtonModule, WhyNewsPanelComponent, WildcardSourcesComponent, WildcardWhyNewsComponent],
   template: `
     <div class="actions" data-testid="result-actions">
       <button mat-stroked-button type="button" data-testid="open-why" [attr.aria-expanded]="whyOpen()" (click)="whyOpen.set(!whyOpen())">WHY COULD THIS HAPPEN?</button>
@@ -49,35 +52,43 @@ const HIGHLIGHT_MS = 3000;
       </section>
     }
     @if (sourcesOpen()) {
-      <section class="panel" data-testid="sources-panel">
-        <h2 data-testid="sources-title">SOURCES</h2>
-        @if (sources().length === 0) {
-          <p data-testid="sources-empty">No sources</p>
-        }
-        @for (s of sources(); track s.evidenceId) {
-          <div class="source" [class.highlighted]="highlighted() === s.evidenceId" [attr.data-highlighted]="highlighted() === s.evidenceId ? 'true' : null" [attr.data-testid]="'source-item-' + s.evidenceId">
-            <span class="id" [attr.data-testid]="'source-id-' + s.evidenceId">{{ s.evidenceId }}</span>
-            <span class="title" [attr.data-testid]="'source-title-' + s.evidenceId">{{ s.title || 'Untitled source' }}</span>
-            <span [attr.data-testid]="'source-publisher-' + s.evidenceId">{{ s.publisher || 'Unknown publisher' }}</span>
-            <span [attr.data-testid]="'source-date-' + s.evidenceId">{{ date(s.publishedAt) }}</span>
-            @if (s.usedInScenario) {
-              <span class="badge" [attr.data-testid]="'source-used-' + s.evidenceId">used in scenario</span>
-            }
-            @if (s.counterSignal) {
-              <span class="badge" [attr.data-testid]="'source-counter-' + s.evidenceId">counter-signal</span>
-            }
-            @if (safe(s.url)) {
-              <a [attr.data-testid]="'source-link-' + s.evidenceId" [href]="s.url" target="_blank" rel="noopener noreferrer">Open source</a>
-            } @else {
-              <span [attr.data-testid]="'source-no-link-' + s.evidenceId">Link unavailable</span>
-            }
-          </div>
-        }
-      </section>
+      @if (groups(); as g) {
+        <app-wildcard-sources [groups]="g" [highlighted]="highlighted()" />
+      } @else {
+        <section class="panel" data-testid="sources-panel">
+          <h2 data-testid="sources-title">SOURCES</h2>
+          @if (sources().length === 0) {
+            <p data-testid="sources-empty">No sources</p>
+          }
+          @for (s of sources(); track s.evidenceId) {
+            <div class="source" [class.highlighted]="highlighted() === s.evidenceId" [attr.data-highlighted]="highlighted() === s.evidenceId ? 'true' : null" [attr.data-testid]="'source-item-' + s.evidenceId">
+              <span class="id" [attr.data-testid]="'source-id-' + s.evidenceId">{{ s.evidenceId }}</span>
+              <span class="title" [attr.data-testid]="'source-title-' + s.evidenceId">{{ s.title || 'Untitled source' }}</span>
+              <span [attr.data-testid]="'source-publisher-' + s.evidenceId">{{ s.publisher || 'Unknown publisher' }}</span>
+              <span [attr.data-testid]="'source-date-' + s.evidenceId">{{ date(s.publishedAt) }}</span>
+              @if (s.usedInScenario) {
+                <span class="badge" [attr.data-testid]="'source-used-' + s.evidenceId">used in scenario</span>
+              }
+              @if (s.counterSignal) {
+                <span class="badge" [attr.data-testid]="'source-counter-' + s.evidenceId">counter-signal</span>
+              }
+              @if (safe(s.url)) {
+                <a [attr.data-testid]="'source-link-' + s.evidenceId" [href]="s.url" target="_blank" rel="noopener noreferrer">Open source</a>
+              } @else {
+                <span [attr.data-testid]="'source-no-link-' + s.evidenceId">Link unavailable</span>
+              }
+            </div>
+          }
+        </section>
+      }
     }
     @if (whyNewsOpen()) {
       @if (research(); as r) {
-        <app-why-news-panel [research]="r" />
+        @if (groups(); as g) {
+          <app-wildcard-why-news [groups]="g" [counts]="r.counts" />
+        } @else {
+          <app-why-news-panel [research]="r" />
+        }
       }
     }
   `,
@@ -149,6 +160,7 @@ export class WhySourcesComponent implements OnDestroy {
   readonly sources = input.required<ResultSource[]>();
   readonly futureDate = input.required<string>();
   readonly research = input<ResearchExplanation | null>(null);
+  readonly groups = input<ResultWildcardGroup[] | null>(null);
   protected readonly whyNewsOpen = signal(false);
 
   protected readonly whyOpen = signal(false);
@@ -178,7 +190,9 @@ export class WhySourcesComponent implements OnDestroy {
     }, HIGHLIGHT_MS);
     afterNextRender(
       () => {
-        const el = document.querySelector<HTMLElement>(`[data-testid="source-item-${id}"]`);
+        const el = document.querySelector<HTMLElement>(
+          this.groups() ? `[data-evidence-id="${id}"]` : `[data-testid="source-item-${id}"]`,
+        );
         if (el && typeof el.scrollIntoView === 'function') {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }

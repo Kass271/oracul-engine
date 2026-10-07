@@ -1,0 +1,67 @@
+{
+  "slice": "09_wildcard-results",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/result/MissingWildcardSourcesWindowIT.java",
+      "line": 21,
+      "fr": "FR-59",
+      "problem": "This class adds a new Spring context to the backend suite. Its @TestPropertySource (placeholder-stage-delay PT0S, executor-threads 8, rate-limit-wait PT0.05S, query-generation-window PT1S, search-window PT2S, stage-budget PT3S) is the property set of ArticleRetrievalRunIT and ArticleRetrievalBudgetIT minus `oracul.news.article-fetch-timeout`. Because the set differs, Spring's context cache cannot reuse either context and starts a fresh one for a single test (testing-rules 'Fast, deterministic suites': one shared Spring context). Nothing in this test depends on the article fetch timeout: it only asserts query statuses and the note.",
+      "fix": "Use exactly the property set of ArticleRetrievalRunIT (add `oracul.news.article-fetch-timeout=PT1S`) so the cached context is reused, or move the test method into ArticleRetrievalRunIT.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/result/WildcardResultIT.java",
+      "line": 270,
+      "fr": "FR-60",
+      "problem": "anAlternativeRunShowsTheParentsGroupsWithItsOwnUsedInScenario computes the expected usedInScenario from the alternative's own factsUsed. The stub answers the alternative with the same scenario as the parent, though, so altCited equals the parent's cited set. An implementation that used the parent's scenario for usedInScenario would still pass. The spec rule 'usedInScenario follows this run's accepted scenario' is therefore not discriminated.",
+      "fix": "Script the alternative's SCENARIO_GENERATION answer so that it cites a different evidence id than the parent (for example E002 instead of E001). Then assert that the parent and the alternative differ in usedInScenario for those ids.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "e2e/tests/wildcard-results.spec.ts",
+      "line": 230,
+      "fr": "FR-60",
+      "problem": "A new fixed real-time sleep, `page.waitForTimeout(3500)`, before the check that the highlight is gone. It follows the spec wording ('after 3.5 s') and the existing why-and-sources.spec.ts pattern, but it adds a fixed wait to the serial E2E suite.",
+      "fix": "Assert that the highlight is still present shortly after the click. Then use `await expect(page.locator('[data-highlighted=\"true\"]')).toHaveCount(0, { timeout: 5000 })` instead of the fixed sleep.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "ui",
+      "file": "frontend/src/app/result/wildcard-sources.ts",
+      "line": 10,
+      "fr": "FR-60",
+      "problem": "The spec's UI section lists Material `mat-card`, `mat-list`, `mat-chip` (status) and `mat-divider` for the grouped panels. wildcard-sources.ts and wildcard-why-news.ts use only mat-card and mat-chip. Groups and items are plain divs, and there is no divider between groups. This does not change behaviour and all testids and texts are correct.",
+      "fix": "Render each group's items as a `mat-list` (one `mat-list-item` per source and per query) and separate the groups with `mat-divider`.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/result/StoryWritingStageIT.java",
+      "line": 14,
+      "fr": "FR-23",
+      "problem": "The round-4 rewrite is sound: it holds the STORY_WRITING answer with responses.gate(STORY) and observes WRITING_STORY / RUNNING / stageIndex 10 with no headline and a 409 RESULT_NOT_READY result. It releases the gate in finally, and StubResponses.reset() in @BeforeEach together with the 60 s latch bound make sure no handler thread is parked. The FR-23 expectations are kept or made stronger: the test now requires a deterministic observation and asserts stageIndex while running. However, the Setup column of future-result.md 'Slice 09_future-story' IT #11 (phase-01 spec) still says 'min-stage-duration PT2S, getRun polled every 200 ms'. The test no longer uses that mechanism, so the spec text and the test differ in setup only, not in expected behaviour.",
+      "fix": "Update the IT #11 setup text at the next spec touch to 'STORY_WRITING answer held at the stub (gate) until stage 10 is observed', or note the substitution in the slice retro.",
+      "status": "open"
+    }
+  ]
+}

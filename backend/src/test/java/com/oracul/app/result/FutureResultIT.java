@@ -17,8 +17,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** future-result.md "Slice 09_future-story" ITs #3, #12 (empty pack, rejected), #13, #14: getFutureResult. */
-// @trace FR-23, FR-25
+/**
+ * future-result.md "Slice 09_future-story" ITs #3, #12 (empty pack, rejected), #13, #14: getFutureResult. Slice 09_wildcard-results
+ * (wildcard-result-views.md "Changes earlier behaviour"): a new run's result has ten keys, the tenth being {@code wildcardGroups}; a
+ * stored legacy pack still has none.
+ */
+// @trace FR-23, FR-25, FR-60
 class FutureResultIT extends AbstractStoryIT {
 
     @Autowired
@@ -59,6 +63,9 @@ class FutureResultIT extends AbstractStoryIT {
         jdbc.update("update generation_run set evidence_pack_id = ? where id = cast(? as uuid)", legacy.getId(), r.id());
 
         Map<String, Object> res = result(r);
+        // wildcard-result-views.md slice 09: no wildcardSections on the stored pack -> the key is absent (never [] and never null)
+        assertThat(res).as("a legacy pack has no wildcardGroups").doesNotContainKey("wildcardGroups");
+        assertThat(resultRaw(r)).doesNotContain("wildcardGroups");
         List<Map<String, Object>> sources = list(res.get("sources"));
         assertThat(sources.stream().map(x -> x.get("evidenceId")).toList()).as("one entry per item, in Evidence ID order")
             .containsExactly("E001", "E002", "E003", "E004");
@@ -104,7 +111,7 @@ class FutureResultIT extends AbstractStoryIT {
         Map<String, Object> res = result(r);
         assertThat(res.keySet())
             .containsExactlyInAnyOrder("runId", "generationId", "labels", "story", "metadata", "causalChain",
-            "sources", "research", "openCriticIssues");
+            "sources", "research", "openCriticIssues", "wildcardGroups");
         assertThat(res.get("runId")).isEqualTo(r.id());
         assertThat(res.get("generationId")).isEqualTo(r.run().get("generationId"));
         assertThat(res.get("labels")).isEqualTo(List.of("AI-GENERATED FUTURE SCENARIO", "POSSIBLE FUTURE — NOT CURRENT NEWS"));
