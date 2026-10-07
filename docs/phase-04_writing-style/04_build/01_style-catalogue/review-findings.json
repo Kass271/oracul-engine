@@ -1,0 +1,31 @@
+{
+  "slice": "01_style-catalogue",
+  "round": 1,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/style/WritingStylesApiIT.java",
+      "line": 160,
+      "fr": "FR-62",
+      "problem": "The slice delta says the answer is the same 'before and after runs' and 'stores nothing'. theAnswerDoesNotDependOnTheSession never starts a run between calls, and theCatalogueIsNotStoredAnywhere only counts generation_run rows. The implementation is clearly stateless, so this is a coverage gap, not a defect.",
+      "fix": "Optionally start one run (or insert a generation_run row) between two calls and assert the body is equal.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/style/StyleSeam.java",
+      "line": 22,
+      "fr": "FR-62",
+      "problem": "The tests reach WritingStyles, WritingStylesController and WritingStyleProfile only through Class.forName and reflection, so they compiled while red. Now that the classes exist, a renamed or retyped method (profiles(), find(), the record accessors) shows up only as a runtime failure, not a compile error. The fixed spec shape limits the risk.",
+      "fix": "Optionally replace the reflection seam with direct typed calls now that the production classes exist.",
+      "status": "open"
+    }
+  ]
+}

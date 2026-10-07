@@ -1,0 +1,67 @@
+{
+  "profiles": [
+    {
+      "id": "official-briefing",
+      "mode": "OFFICIAL",
+      "label": "Official / Briefing",
+      "characteristics": "factual, concise, structured, neutral; events, consequences, actors, dates and causal relationships; no literary description",
+      "instructions": "Report the future like an analytical briefing, situation report or intelligence summary written shortly after the events: clear, information-dense sentences about events, consequences, actors, dates and causal relationships."
+    },
+    {
+      "id": "neutral-narrative",
+      "mode": "NARRATIVE",
+      "label": "Neutral Narrative",
+      "characteristics": "literary and immersive prose; atmosphere, scene setting, imagery, tension, narrative flow and pacing; no particular author's voice",
+      "instructions": "Tell the future as immersive literary prose with atmosphere, scene setting, imagery, tension and narrative flow, in a neutral contemporary voice that imitates no particular author."
+    },
+    {
+      "id": "poe",
+      "mode": "NARRATIVE",
+      "label": "Narrative — inspired by Edgar Allan Poe",
+      "characteristics": "dark, gothic, psychologically intense, atmospheric, ominous; dread and decay",
+      "instructions": "Evoke a dark, gothic, psychologically intense atmosphere of dread and decay, with ominous foreshadowing and a brooding inner perspective."
+    },
+    {
+      "id": "kafka",
+      "mode": "NARRATIVE",
+      "label": "Narrative — inspired by Franz Kafka",
+      "characteristics": "bureaucratic absurdity, alienation, impersonal systems, helplessness, surreal institutional logic, understated anxiety",
+      "instructions": "Evoke bureaucratic absurdity and alienation: impersonal institutions, procedures without visible purpose, helpless individuals and understated anxiety, told in a calm, matter-of-fact voice."
+    },
+    {
+      "id": "wells",
+      "mode": "NARRATIVE",
+      "label": "Narrative — inspired by H. G. Wells",
+      "characteristics": "speculative and observational; technological and societal transformation and its consequences",
+      "instructions": "Evoke a speculative, observational narrator who watches technological and societal transformation unfold and reflects on its consequences for ordinary people."
+    },
+    {
+      "id": "verne",
+      "mode": "NARRATIVE",
+      "label": "Narrative — inspired by Jules Verne",
+      "characteristics": "exploratory, technological, adventurous, detailed; curiosity about future inventions and environments",
+      "instructions": "Evoke exploratory, adventurous storytelling rich in technical detail, curiosity about new inventions and vivid descriptions of new environments."
+    },
+    {
+      "id": "orwell",
+      "mode": "NARRATIVE",
+      "label": "Narrative — inspired by George Orwell",
+      "characteristics": "clear, restrained prose; institutions, political power, social control, language, surveillance, systemic consequences",
+      "instructions": "Evoke clear, restrained prose focused on institutions, political power, social control, the language of officials, surveillance and their systemic consequences."
+    },
+    {
+      "id": "clarke",
+      "mode": "NARRATIVE",
+      "label": "Narrative — inspired by Arthur C. Clarke",
+      "characteristics": "large-scale scientific and technological perspective, rational tone, sense of discovery, humanity's relationship with transformative technologies",
+      "instructions": "Evoke a large-scale scientific and technological perspective with a rational tone, a sense of discovery and attention to humanity's relationship with transformative technology."
+    },
+    {
+      "id": "harrison",
+      "mode": "NARRATIVE",
+      "label": "Narrative — inspired by Harry Harrison",
+      "characteristics": "fast-moving science fiction with irony, social satire, technological absurdity and energetic descriptions of future societies",
+      "instructions": "Evoke fast-moving science fiction with irony, social satire, technological absurdity and energetic descriptions of future society."
+    }
+  ]
+}

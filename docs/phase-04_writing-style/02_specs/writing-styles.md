@@ -88,13 +88,89 @@ Languages are fixed in code: `en` "English", `uk` "Ukrainian".
     Entries are checked in file order and the fields of one entry in the order of the table. Unknown keys of an entry
     are ignored. Strings are used as written (no trimming).
 - Errors:
-  - unexpected failure while answering → 500 `INTERNAL_ERROR` → "Something went wrong — try again"
+  - unexpected failure while answering (e.g. the `WritingStyles` bean throws a `RuntimeException`) → 500
+    `INTERNAL_ERROR` → "Something went wrong — try again" (body exactly `{"code":"INTERNAL_ERROR","message":"Something
+    went wrong — try again"}`, the existing `ApiExceptionHandler` fallback; no stack trace, no exception text)
   - invalid style file → no HTTP answer at all: the backend does not start (message above in the log)
-- Ranges & invariants: profiles count 2..50 (1 and 51 → startup fails); id `^[a-z0-9-]{1,40}$` (40 chars ok, 41 / `Kafka` /
-  `k_a` / `""` → fails); label 1..80, characteristics 1..300, instructions 1..2000 (boundary and boundary + 1 per field);
-  invariants: `profiles[0].id` = `official-briefing`; exactly one profile with `isDefault`; exactly one `isModeDefault`
-  per mode; every profile's `mode` ∈ modes; ids unique; every `defaultProfileId` names a listed profile of that mode;
-  the response never contains a key `instructions`; listed NARRATIVE order = file order.
+
+#### Slice 01_style-catalogue — precise delta (step 4a)
+- Operation: `GET /api/writing-styles` (`getWritingStyles`, tag `writing-styles`, generated `WritingStylesApi`), no
+  parameters, no request body. 200 with `Content-Type: application/json`. The answer is independent of the session
+  (same body with and without a session cookie, before and after runs) and stores nothing.
+- Exact 200 body with the shipped file (key sets are exact: top level `modes`, `profiles`, `languages`; each mode
+  `id`, `label`, `isDefault`, `defaultProfileId`; each profile `id`, `mode`, `label`, `characteristics`, `isDefault`,
+  `isModeDefault`; each language `code`, `label`, `isDefault`):
+  - `modes` and `languages` exactly as in the happy path above.
+  - `profiles` = 9 items in the order `official-briefing`, `neutral-narrative`, `poe`, `kafka`, `wells`, `verne`,
+    `orwell`, `clarke`, `harrison`; `mode`, `label`, `characteristics` byte-identical to the "Shipped style file" table
+    (the `—` in labels is U+2014 with one space on each side); `isDefault` true only for `official-briefing`;
+    `isModeDefault` true only for `official-briefing` and `neutral-narrative`.
+  - Example item: `{"id":"kafka","mode":"NARRATIVE","label":"Narrative — inspired by Franz Kafka","characteristics":
+    "bureaucratic absurdity, alienation, impersonal systems, helplessness, surreal institutional logic, understated
+    anxiety","isDefault":false,"isModeDefault":false}`.
+  - Every author profile (all NARRATIVE profiles except `neutral-narrative`) has a label matching
+    `^Narrative — inspired by .+$`. `official-briefing` and `neutral-narrative` do not.
+- Catalogue order rule: the OFFICIAL profile is listed first wherever it stands in the file, and the NARRATIVE
+  profiles keep their relative file order. Example: a file `[neutral-narrative, kafka, official-briefing, poe]` lists
+  `official-briefing, neutral-narrative, kafka, poe`.
+- Read once: the file is read only at startup. Changing or deleting the file while the backend runs does not change
+  the answer, and a restart (new context) shows the new content.
+- Backend shape (so tests can address it without guessing):
+  - `com.oracul.app.style.WritingStyles` (Spring `@Component`): its constructor gets the property
+    `oracul.writing-styles.location` (default `classpath:writing-styles.json`) and a Spring `ResourceLoader`, and
+    nothing else. It parses with its own Jackson mapper, so `new ApplicationContextRunner().withUserConfiguration(
+    WritingStyles.class).withPropertyValues("oracul.writing-styles.location=…")` is enough to start or fail it.
+    Validation runs in the constructor (or `@PostConstruct`) and throws `IllegalStateException` with the exact message
+    of the table. `<location>` in a message is the property value verbatim (e.g. `classpath:writing-styles/too-few.json`,
+    `file:/tmp/x/styles.json`).
+  - Public API: `List<WritingStyleProfile> profiles()` in catalogue order (OFFICIAL first, then NARRATIVE in file
+    order) and `Optional<WritingStyleProfile> find(String id)` (exact, case-sensitive id; unknown / `null` → empty).
+    `com.oracul.app.style.WritingStyleProfile` is a record `(String id, WritingMode mode, String label, String
+    characteristics, String instructions)`, and `com.oracul.app.style.WritingMode` is the domain enum `OFFICIAL`,
+    `NARRATIVE`. These are domain types. The generated `com.oracul.app.api.model.WritingMode` / `StoryLanguage` are
+    mapped only in the controller.
+  - `com.oracul.app.style.WritingStylesController implements WritingStylesApi` takes `ObjectProvider<WritingStyles>`
+    (the convention of every controller), so the seven existing `@WebMvcTest` classes, which declare no mock beans,
+    keep starting unchanged. A `@WebMvcTest` of the controller uses `@MockitoBean WritingStyles`.
+- Validation details (refine the startup table; the order of the table is unchanged):
+  - "cannot be read": location not found, empty file, invalid JSON, top level an array / string / number, no
+    `profiles` key, `profiles` not an array (`null`, object, string). Extra top-level keys are ignored.
+  - "must have 2 to 50 profiles" is checked before any entry (so `[]` and a single valid entry both give it).
+  - "missing id": entry `null` / number / string / array, or `id` absent, `null`, not a JSON string (`5`, `true`),
+    `""` or whitespace only (`String.isBlank()`). A non-blank id that does not match the pattern (`Kafka`, `k_a`,
+    `" kafka"`, 41 × `a`) gives "invalid id" with the id verbatim.
+  - "unknown mode": `mode` absent, `null`, not a string, or not exactly `OFFICIAL` / `NARRATIVE` (`official`,
+    `Narrative`, `POETIC`, `""`).
+  - missing label / characteristics / prompt text: absent, `null`, not a string, `""` or whitespace only.
+  - Lengths count Unicode code points (`label` 80 ok / 81 too long, `characteristics` 300 / 301, `instructions`
+    2000 / 2001). `<field>` in the message is the JSON key: `label`, `characteristics`, `instructions`. Within one
+    entry: all presence checks first, then the length checks in the order label → characteristics → instructions,
+    then the forbidden-character checks in the same order.
+  - Forbidden characters: any `Character.isISOControl` code point (U+0000–U+001F, U+007F–U+009F, so `\n`, `\r`, `\t`
+    too), U+2028, U+2029, the substring `<<<` or `>>>`. (`<<` or `>>` alone are allowed.)
+  - OFFICIAL rule: fails when no entry is `official-briefing` with mode OFFICIAL (missing, or `official-briefing`
+    with mode NARRATIVE), or when there is any second OFFICIAL entry (e.g. `neutral-narrative` or `dickens` with mode
+    OFFICIAL). It is checked before the NARRATIVE rule. The NARRATIVE rule fails when `neutral-narrative` is missing.
+- Shipped file: `backend/src/main/resources/writing-styles.json` = `{"profiles":[…]}` with the 9 entries of the
+  "Shipped style file" table in table order, all five fields verbatim (it passes every rule above).
+- Test resources: the startup-failure files live under `backend/src/test/resources/writing-styles/` (one file per
+  problem class / boundary) or are written to a `@TempDir` and passed as `file:…`. Tests never edit the shipped file.
+  The restart case uses a copy of the shipped entries plus the `dickens` entry appended last (`{"id":"dickens","mode":
+  "NARRATIVE","label":"Narrative — inspired by Charles Dickens","characteristics":"Victorian social observation,
+  vivid characters, moral contrast","instructions":"Evoke Victorian social observation with vivid characters and
+  moral contrast."}`). With it, a fresh context lists 10 profiles, `dickens` last with `isDefault` false and
+  `isModeDefault` false, and `WritingStyles.find("dickens")` returns its instructions. "Usable in a run" is proven by
+  02_style-selection / 03_styled-story, not here.
+- UI: none (FR-62 has no UI, no `data-testid`). No frontend change in this slice. The generated
+  `writing-styles.service.ts` exists already and is not called yet.
+- Stack: unchanged. No compose file, profile, stub or nginx route changes, and `.oracul/stack.json` stays as is
+  (`e2e` = `docker-compose.yml` + `docker-compose.e2e.yml`, `run` = `docker-compose.yml`). No migration.
+- Changes earlier behaviour: none. `GET /api/writing-styles` moves from the generated 501 to 200, but no existing test
+  calls it (grep of `backend/src/test`, `frontend/src/**/*.spec.ts`, `e2e/tests` and `e2e/stubs` for `writing-styles`,
+  `writingStyle`, `WritingStyle`, `getWritingStyles` and `styleLabel` has 0 hits). The new startup dependency uses the
+  shipped default file, which every existing `@SpringBootTest` / IT keeps. The controller uses `ObjectProvider`, so the
+  existing `@WebMvcTest` classes are unaffected. No existing response, error code, ordering or outbound call changes (tests: none)
+- Ranges & invariants: profile count 2..50 (0, 1, 51 → "must have 2 to 50 profiles"; 2 and 50 → starts); id pattern `^[a-z0-9-]{1,40}$` (1 char `a` and 40 chars ok; 41 chars, `Kafka`, `k_a`, `" kafka"` → invalid id; `""`, `"  "`, `5`, `null`, absent → missing id); label 1..80, characteristics 1..300, instructions 1..2000 code points (each boundary ok and boundary + 1 → `<field> is too long`; `""` / whitespace / absent / `null` / non-string → missing); forbidden characters per field (`\n`, `\r`, `\t`, U+0000, U+007F, U+2028, `<<<`, `>>>` → forbidden; `<<` ok); mode (`OFFICIAL`, `NARRATIVE` ok; `official`, `POETIC`, `""`, `null`, absent, `1` → unknown mode); duplicate id at positions 2 and 9 → message names entry #9; file-level classes (no `official-briefing`, `official-briefing` as NARRATIVE, second OFFICIAL entry → OFFICIAL message; no `neutral-narrative` → NARRATIVE message; missing location, not JSON, top-level array, `profiles` not an array → cannot be read); precedence (an entry with several problems reports only the first in table order; a bad entry #2 and a bad entry #5 report #2); invariants over every successfully loaded file (shipped, `dickens`, reordered): top-level and item key sets exactly as listed; no key `instructions` anywhere in the JSON; `profiles[0].id` = `official-briefing`; exactly one profile with `isDefault` true; exactly one `isModeDefault` true per mode; every profile `mode` ∈ {OFFICIAL, NARRATIVE}; ids unique; each mode's `defaultProfileId` names a listed profile of that mode; NARRATIVE order = file order; listed count = number of file entries; `modes` = OFFICIAL, NARRATIVE and `languages` = en, uk in that order.
 
 ### FR-63 — Writing Style selector
 - Happy path (panel, below the Story / Illustration rows of `output-section`): sub-heading "Writing Style" and a
