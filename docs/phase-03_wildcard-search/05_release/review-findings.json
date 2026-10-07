@@ -1,0 +1,55 @@
+{
+  "slice": "release",
+  "round": 1,
+  "reviewer": "reviewer",
+  "summary": "Release review of the whole app after phase-03 (FR-49..FR-61, NFR-10/11). Cross-slice flow checked end to end in code: plan -> QUERY_GENERATION -> parallel Google search -> per-wildcard selection -> decode + SafeFetcher retrieval -> fragment extraction -> wildcard pack -> starting-conditions prompts -> FR-59 note -> FR-60 grouped result, plus ALTERNATIVE runs, legacy (phase-01/02) results, Flyway V11-V14 (additive, nullable), contract (no property removed since 0.6.0; IGNORED_COUNTER_SIGNALS kept for stored reports), ApiExceptionHandler, SSRF guard (checked address is the connected address, every hop, private/loopback/link-local/ULA/mapped). Last full runs: backend verify OK, E2E 212/212 passed, no skipped/only tests. Real-service probe (2026-10-07, reviewer, read-only): Google News RSS 200 with 19 items for a generated-style query; the article link 302s same-host to a page with data-n-a-id/ts/sg; the exact f.req shape of ArticleUrlDecoder returns garturlres with the publisher URL; the compiled ArticleRetriever + SafeFetcher + ArticleUrlDecoder retrieved 12 of 16 real links as PAGE_READ in 3.6 s (Reuters 401, Politico/Britannica blocked -> PAGE_FAILED, as specified). Hardening backlog (state.mjs hardening): empty. The slices' open low items stay listed in their own review-findings.json; none is fix-worthy for the release (several are obsolete after slice 08, e.g. 01_gdelt-removal R7 targets the removed prepare()/runBounded path). No high or medium finding.",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/runs/EvidenceNotes.java",
+      "line": 39,
+      "fr": "FR-59",
+      "problem": "With realism 9 or 10 and zero or one wildcard, every run ends with the INSUFFICIENT_EVIDENCE note 'Realism 10 couldn't be fully met: only 4 core evidence items (needs 5)' and a LOWER REALISM suggestion, whatever the news quality. A single pipeline (catalogue, custom or GENERAL) can keep at most 4 sources (WildcardSelector.PER_PIPELINE), and min-core.high defaults to 5. wildcard-evidence.md accepts this on purpose (the E2E A10 case is built on it), so this is not a deviation. It is still a product consequence the user should know before the NFR-11 real check: realism 9-10 is reachable only with 2 or more wildcards.",
+      "fix": "No code change needed for the release. Record it in 05_release (or as a scope note for the next phase): either cap coreNeeded at 4 x pipelines or explain it in the note text.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleMetadataFetcher.java",
+      "line": 21,
+      "fr": "FR-54",
+      "problem": "ArticleMetadataFetcher is still a @Component with its own virtual-thread executor and the fetch/fetchDetailed network path, but no production class injects it any more. Since slice 08, ArticleRetriever only calls the static ArticleMetadataFetcher.parse. The fetch path, the fixed WAIT_LIMIT_SECONDS = 10 (slice-02 R9) and the after-the-fact redirect limit (slice-02 R3) are dead production code that only tests reach (ArticleMetadataFetcherTest, SourceMetadataIT, SourceRetrievalUnitTest).",
+      "fix": "Move parse() (and the Metadata record) to a small pure helper, delete the bean's fetch path, and move or delete the tests that exercise only that path.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "ui",
+      "file": "frontend/src/app/result/wildcard-why-news.ts",
+      "line": 21,
+      "fr": "FR-60",
+      "problem": "The query status is a bare <mat-chip> outside any mat-chip-set or mat-chip-listbox. Material expects chips inside a set so that assistive technology gets the list or listitem roles. A standalone chip is announced as a generic element. This adds to slice-09 R4, where the spec'd mat-list and mat-divider are not used.",
+      "fix": "Wrap each query's status chip in <mat-chip-set> (or render the status as plain text with a badge style), and keep the testid on the chip.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/AbstractRunIT.java",
+      "fr": "NFR-10",
+      "problem": "Suite health after the phase: suite-health.json reports 119 Spring contexts for the backend suite, and the E2E suite runs 212 tests serially (1 worker, about 25 min). The slowest backend classes are ErrorClassificationIT and StopRunIT at about 27.5 s, and AlternativeRunStagesIT at 26.8 s. The phase-03 slices added more context keys (per-class @TestPropertySource windows, @MockitoSpyBean in RankingCommitRaceIT, see 06 R8 and 09 R1). testing-rules asks for one shared context.",
+      "fix": "For the next phase: group the window/timing ITs under a few shared property sets, replace per-class @MockitoSpyBean with a shared test seam, and check whether the E2E specs that do not share run state can use more than one worker.",
+      "status": "open"
+    }
+  ]
+}
