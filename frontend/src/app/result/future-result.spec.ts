@@ -180,6 +180,28 @@ describe('slice 09_future-story: future result view', () => {
     expect(el().querySelectorAll('[data-testid="story-paragraph"]')).toHaveLength(1);
   });
 
+  // Phase 04 styled-story.md FR-66 (frontend unit test). Deliberately not carrying the trace marker: the result view
+  // already renders any text verbatim, so this test passes before the slice is built and must not make the frontend
+  // layer part of the RED check; the FR-66 trace tags are on the backend and E2E tests.
+  it('renders a Ukrainian story verbatim as text with the English labels above the headline', async () => {
+    const headline = 'Заголовок із майбутнього — Narrative — inspired by Franz Kafka';
+    const dateline = 'ORACUL FUTURE — 12 вересня 2032';
+    const paragraphs = ['Абзац 1 слово слово слово', 'Абзац 2 слово слово слово'];
+    await openCompleted();
+    const result = futureResult();
+    result.story = { headline, dateline, futureDate: '2032-09-12', body: paragraphs.join('\n\n') };
+    await flushResult(result);
+    expect(text('story-headline')).toBe(headline);
+    expect(text('story-dateline')).toBe(dateline);
+    const shown = Array.from(el().querySelectorAll('[data-testid="story-paragraph"]')).map((p) => (p.textContent ?? '').trim());
+    expect(shown).toEqual(paragraphs);
+    expect(text('label-ai-generated')).toBe('AI-GENERATED FUTURE SCENARIO');
+    expect(text('label-not-current-news')).toBe('POSSIBLE FUTURE — NOT CURRENT NEWS');
+    for (const id of ['label-ai-generated', 'label-not-current-news']) {
+      expect(byId(id)!.compareDocumentPosition(byId('story-headline')!) & Node.DOCUMENT_POSITION_FOLLOWING, id).toBeTruthy();
+    }
+  });
+
   // @trace FR-23
   it('a 404 shows the failure view "Future not found" and Try again returns to the start', async () => {
     await openCompleted();

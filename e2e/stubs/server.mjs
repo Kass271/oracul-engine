@@ -99,6 +99,20 @@ const storyDefault = (d) =>
     body: [1, 2, 3].map((k) => `Stub paragraph ${k}` + ' lorem'.repeat(57)).join('\n\n'),
   });
 
+// Styled answer (styled-story.md "Stubs"): chosen from the request's Style profile / Story language lines.
+function storyStyled(text, d) {
+  const label = /^Style profile: (.+)$/m.exec(text)?.[1];
+  const uk = /^Story language: (.+)$/m.exec(text)?.[1] === 'Ukrainian';
+  if (!label || (!uk && label === 'Official / Briefing')) return storyDefault(d);
+  if (!uk) return JSON.stringify({ ...JSON.parse(storyDefault(d)), headline: `Stub headline from the future — ${label}` });
+  return JSON.stringify({
+    headline: `Заголовок із майбутнього — ${label}`,
+    dateline: 'STUB DATELINE',
+    futureDate: d,
+    body: [1, 2, 3].map((k) => `Абзац ${k}` + ' слово'.repeat(58)).join('\n\n'),
+  });
+}
+
 const SCENARIO_MODES = ['ok', 'invalid-once', 'invalid', 'e099', 'guard-fail-once', 'guard-fail', 'bad-after-first', 'alt-repeat-once', 'alt-repeat'];
 const CRITIC_MODES = ['ok', 'fail-once', 'fail', 'malformed', 'rate-limited'];
 // critic-validation fixtures (scenario-reasoning.md FR-22; FR-58: CR_JUMP replaces the legacy ignored-counter-signals fixture)
@@ -420,7 +434,7 @@ export const routes = {
       const line = (name) => new RegExp(`^${name}: (\\d{4}-\\d{2}-\\d{2})$`, 'm').exec(text)?.[1];
       if (m === 'invalid' || (m === 'invalid-once' && call === 1)) output = 'not json';
       else if (m === 'bad-date' || (m === 'bad-date-once' && call === 1)) output = storyDefault(line('Cutoff date'));
-      else output = storyDefault(line('Future event date'));
+      else output = storyStyled(text, line('Future event date'));
     } else {
       return json(res, 400, { error: 'unsupported_purpose', purpose: purpose ?? null });
     }

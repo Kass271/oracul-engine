@@ -13,6 +13,7 @@ import com.oracul.app.reasoning.ScenarioWindow;
 import com.oracul.app.research.EvidencePackRepository;
 import com.oracul.app.runs.GenerationRunRepository;
 import com.oracul.app.runs.RunGuard;
+import com.oracul.app.style.WritingStyles;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -42,11 +43,13 @@ public class StoryWriter {
     private final TransactionTemplate tx;
     private final Clock clock;
     private final Duration minStageDuration;
+    private final WritingStyles writingStyles;
 
     StoryWriter(GenerationRunRepository runs, EvidencePackRepository packs, ScenarioAttemptRepository attempts,
                 ModelCallRepository modelCalls, FutureStoryRepository stories, HttpResponsesClient responses,
                 RunGuard guard, TransactionTemplate tx, Clock clock,
-                @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration) {
+                @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration,
+                WritingStyles writingStyles) {
         this.runs = runs;
         this.packs = packs;
         this.attempts = attempts;
@@ -57,6 +60,7 @@ public class StoryWriter {
         this.tx = tx;
         this.clock = clock;
         this.minStageDuration = minStageDuration;
+        this.writingStyles = writingStyles;
     }
 
     private static final class Stop extends RuntimeException {
@@ -86,13 +90,14 @@ public class StoryWriter {
         StructuredScenario scenario = attempts.list(runId).stream()
             .filter(a -> a.attempt() == finalAttempt).findFirst().orElseThrow().cleaned().orElseThrow();
         ScenarioWindow window = ScenarioWindow.of(pack);
+        StoryStyle style = StoryStyle.of(row.configuration(), writingStyles);
 
         long started = begin(runId);
-        Called first = call(runId, sessionId, pack, scenario, window, new StoryRequest(1, List.of()));
+        Called first = call(runId, sessionId, pack, scenario, window, new StoryRequest(1, List.of()), style);
         FutureStory story = first.parse().story().orElse(null);
         if (story == null) {
             Called second = call(runId, sessionId, pack, scenario, window,
-                new StoryRequest(2, first.parse().errors()));
+                new StoryRequest(2, first.parse().errors()), style);
             story = second.parse().story().orElse(null);
             if (story == null) {
                 if (!second.parse().onlyDateErrors()) {
@@ -101,11 +106,12 @@ public class StoryWriter {
                 }
                 var core = StoryParser.core(second.text(), window.cutoff(), window.end());
                 var date = scenario.getFutureEvent().getDate();
-                story = new FutureStory(core.headline(), Datelines.format(date), date, core.body());
+                story = new FutureStory(core.headline(), Datelines.format(date, style.language()), date, core.body());
             }
         }
         remainder(started);
-        FutureStory done = story;
+        FutureStory done = new FutureStory(story.getHeadline(),
+            Datelines.format(story.getFutureDate(), style.language()), story.getFutureDate(), story.getBody());
         Boolean stored = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
                 s.setRollbackOnly();
@@ -121,8 +127,8 @@ public class StoryWriter {
     }
 
     private Called call(UUID runId, UUID sessionId, EvidencePack pack, StructuredScenario scenario,
-                        ScenarioWindow window, StoryRequest req) {
-        var body = responses.prepare(sessionId, StoryWritingPrompt.body(responses.model(), pack, scenario, req));
+                        ScenarioWindow window, StoryRequest req, StoryStyle style) {
+        var body = responses.prepare(sessionId, StoryWritingPrompt.body(responses.model(), pack, scenario, req, style));
         Long[] callId = new Long[1];
         Runnable beforeSend = () -> {
             if (!guard.check(runId)) {

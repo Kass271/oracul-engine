@@ -447,7 +447,7 @@ public final class StubResponses {
             if ("EVENT_CLASSIFICATION".equals(purpose)) return completed(defaultClassification(text));
             if ("SCENARIO_GENERATION".equals(purpose)) return completed(alternativeFixture(text));
             if ("SCENARIO_CRITIC".equals(purpose)) return completed(criticFixture("CR-PASS"));
-            if ("STORY_WRITING".equals(purpose)) return completed(StoryFixtures.stDefault(StoryFixtures.futureEventDate(text)));
+            if ("STORY_WRITING".equals(purpose)) return completed(StoryFixtures.styled(text)); // phase 04: per style and language, Official / Briefing + English = ST-DEFAULT
             return status(400, "{\"error\":\"unexpected request\"}");
         };
     }

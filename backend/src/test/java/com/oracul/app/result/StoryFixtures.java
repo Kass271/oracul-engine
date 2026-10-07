@@ -1,6 +1,8 @@
 package com.oracul.app.result;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -14,16 +16,18 @@ public final class StoryFixtures {
 
     public static final String HEADLINE = "Stub headline from the future";
 
-    /** S of StoryWritingPrompt.INSTRUCTIONS = ClosedEvidenceMode.INSTRUCTIONS + "\n" + S. */
+    /** S of StoryWritingPrompt.INSTRUCTIONS = ClosedEvidenceMode.INSTRUCTIONS + "\n" + S (phase 04 styled-story.md FR-65: 12 lines). */
     public static final String STORY_RULES = String.join("\n",
         "Return only JSON matching the schema.",
-        "Write a short news story from the future about the future event of the scenario in structured-scenario, reported on a date inside the story date window given in SETTINGS.",
+        "Write the story of the future event of the scenario in structured-scenario, reported on a date inside the story date window given in SETTINGS, in the writing style and the story language given in WRITING STYLE.",
         "Use only the facts, inferences, speculations and the future event of that scenario. Do not add current-world facts that are not facts of the scenario.",
         "Keep present-day facts recognisable as reported facts and everything after the cutoff date recognisably hypothetical.",
-        "headline: one line of at most 160 characters.",
+        "The scenario's events, dates, actors and causes take priority over the writing style: the style changes only how the future is told, never what happens, when, who acts or why.",
+        "Never add events, dates or outcomes that are not in the scenario.",
+        "headline: one line of at most 160 characters in the story language.",
         "futureDate: the date of the story as yyyy-MM-dd inside the story date window; prefer the future event date.",
-        "dateline: ORACUL FUTURE — followed by futureDate written as Month d, yyyy.",
-        "body: plain text of 150 to 900 words, paragraphs separated by one blank line, no HTML and no Markdown.",
+        "dateline: ORACUL FUTURE — followed by futureDate; ORACUL replaces it with its own dateline.",
+        "body: plain text of 150 to 900 words in the story language, paragraphs separated by one blank line, no HTML and no Markdown.",
         "Do not write the labels AI-GENERATED FUTURE SCENARIO or POSSIBLE FUTURE — NOT CURRENT NEWS; ORACUL adds them.",
         "Match the tone to Darkness and Optimism; they never permit invented evidence.");
 
@@ -84,6 +88,107 @@ public final class StoryFixtures {
     /** ST-DEFAULT(d). */
     public static String stDefault(String d) {
         return json(HEADLINE, d, body(3));
+    }
+
+    // ---- phase 04: styled stories (styled-story.md "Stubs") ----------------------------------------------------------
+
+    public static final String UK_HEADLINE = "Заголовок із майбутнього";
+
+    /** Paragraph k of UBODY: "Абзац k" followed by 58 x " слово" (60 words). */
+    public static String uparagraph(int k) {
+        return "Абзац " + k + " слово".repeat(58);
+    }
+
+    /** UBODY(n): n paragraphs joined by a blank line (UBODY(3) = 180 words). */
+    public static String ubody(int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int k = 1; k <= n; k++) {
+            if (k > 1) sb.append("\n\n");
+            sb.append(uparagraph(k));
+        }
+        return sb.toString();
+    }
+
+    /** A Ukrainian body of exactly {@code words} words in paragraphs of at most 60 words ("Абзац k" + " слово"...). */
+    public static String ubodyOfWords(int words) {
+        StringBuilder sb = new StringBuilder();
+        int left = words;
+        for (int k = 1; left > 0; k++) {
+            int w = Math.min(60, left);
+            left -= w;
+            if (k > 1) sb.append("\n\n");
+            sb.append(w == 1 ? "Абзац" : "Абзац " + k + " слово".repeat(w - 2));
+        }
+        return sb.toString();
+    }
+
+    private static final Pattern STYLE_PROFILE = Pattern.compile("^Style profile: (.+)$", Pattern.MULTILINE);
+    private static final Pattern STORY_LANGUAGE = Pattern.compile("^Story language: (.+)$", Pattern.MULTILINE);
+
+    /**
+     * The styled STORY_WRITING answer: no WRITING STYLE section = Official / Briefing + English = ST-DEFAULT; any other
+     * label L in English "Stub headline from the future — L" + BODY(3); Ukrainian "Заголовок із майбутнього — L" + UBODY(3).
+     */
+    public static String styled(String inputText) {
+        String d = futureEventDate(inputText);
+        Matcher p = STYLE_PROFILE.matcher(inputText);
+        String label = p.find() ? p.group(1) : "Official / Briefing";
+        Matcher l = STORY_LANGUAGE.matcher(inputText);
+        boolean uk = l.find() && "Ukrainian".equals(l.group(1));
+        if (uk) return json(UK_HEADLINE + " — " + label, d, ubody(3));
+        if ("Official / Briefing".equals(label)) return stDefault(d);
+        return json(HEADLINE + " — " + label, d, body(3));
+    }
+
+    /** Headline of the styled answer for a profile label and a language code. */
+    public static String styledHeadline(String label, String language) {
+        if ("uk".equals(language)) return UK_HEADLINE + " — " + label;
+        return "Official / Briefing".equals(label) ? HEADLINE : HEADLINE + " — " + label;
+    }
+
+    public static final String SECTION_PRIORITY =
+        "Priority: the scenario's events, dates, actors and causes take priority over this writing style.";
+    public static final List<String> OFFICIAL_MODE_LINES = List.of(
+        "Write a factual, concise and neutral analytical report about events, consequences, actors, dates and causal relationships, with no literary description and no invented scenes or characters.",
+        "Structure the body by short capitalised lead-ins: the first paragraph starts with SITUATION., a middle paragraph with CONSEQUENCES. and the last paragraph with OUTLOOK.");
+    public static final String OFFICIAL_UK_SUFFIX = " Write the lead-ins in Ukrainian: СИТУАЦІЯ., НАСЛІДКИ., ПЕРСПЕКТИВА.";
+    public static final List<String> NARRATIVE_MODE_LINES = List.of(
+        "Write literary prose that evokes the tone and themes of this style profile; atmosphere, scene setting, imagery and invented minor characters or scenes are allowed.",
+        "Do not copy or quote the author's text, signature phrases or characters; write original prose that is only inspired by the tone and themes.",
+        "Do not add events, dates or outcomes beyond the scenario.");
+
+    /** The WRITING STYLE section as the spec lists it (lines joined by "\n", no trailing newline). */
+    public static String styleSection(boolean official, String label, String characteristics, String instructions, boolean uk) {
+        List<String> lines = new ArrayList<>();
+        lines.add("WRITING STYLE");
+        lines.add("Writing mode: " + (official ? "Official / Briefing" : "Narrative"));
+        lines.add("Style profile: " + label);
+        lines.add("Style characteristics: " + characteristics);
+        lines.add("Story language: " + (uk ? "Ukrainian" : "English"));
+        lines.add("Style instructions: " + instructions);
+        if (official) {
+            lines.add(OFFICIAL_MODE_LINES.get(0));
+            lines.add(OFFICIAL_MODE_LINES.get(1) + (uk ? OFFICIAL_UK_SUFFIX : ""));
+        } else {
+            lines.addAll(NARRATIVE_MODE_LINES);
+        }
+        lines.add(uk ? "Write the headline and the body in Ukrainian." : "Write the headline and the body in English.");
+        lines.add(SECTION_PRIORITY);
+        return String.join("\n", lines);
+    }
+
+    /** Ukrainian genitive month names, month 1..12 (styled-story.md FR-66). */
+    public static final List<String> UK_MONTHS = List.of("січня", "лютого", "березня", "квітня", "травня", "червня",
+        "липня", "серпня", "вересня", "жовтня", "листопада", "грудня");
+
+    /** "ORACUL FUTURE — d <genitive month> yyyy" built independently of the production formatter. */
+    public static String ukDateline(LocalDate d) {
+        return "ORACUL FUTURE — " + d.getDayOfMonth() + " " + UK_MONTHS.get(d.getMonthValue() - 1) + " " + d.getYear();
+    }
+
+    /** The phase-01 English dateline "ORACUL FUTURE — Month d, yyyy". */
+    public static String enDateline(LocalDate d) {
+        return "ORACUL FUTURE — " + java.time.format.DateTimeFormatter.ofPattern("MMMM d, yyyy", java.util.Locale.ENGLISH).format(d);
     }
 
     // ---- request-text helpers (stub side) -----------------------------------------------------------------------

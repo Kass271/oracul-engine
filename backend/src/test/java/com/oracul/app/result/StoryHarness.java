@@ -21,6 +21,8 @@ import java.util.Optional;
  * Pure (no Spring) driver of the slice 09 classes (future-result.md "Slice 09_future-story"): Datelines, StoryParser,
  * StoryWritingPrompt, HorizonLabels and ScenarioMetadataMapper. They are reached by reflection so RED compiles whatever
  * they look like; a missing class or method is an AssertionError naming it. Generated API models are used directly.
+ * Since phase 04 (slice 03_styled-story) the prompt takes a StoryStyle and Datelines a Language; StoryStyle and
+ * com.oracul.app.style.Language are reached by reflection too (they do not exist before the slice is built).
  */
 final class StoryHarness {
 
@@ -96,6 +98,11 @@ final class StoryHarness {
         return (String) call("Datelines", "format", d);
     }
 
+    /** Datelines.format(d, language) with the language given as its code "en" / "uk". */
+    static String dateline(LocalDate d, String languageCode) {
+        return (String) call("Datelines", "format", d, language(languageCode));
+    }
+
     static String horizonLabel(Object horizonCode) {
         return (String) call("HorizonLabels", "label", horizonCode);
     }
@@ -134,13 +141,90 @@ final class StoryHarness {
         return (String) constant("StoryWritingPrompt", "INSTRUCTIONS");
     }
 
-    static String inputText(EvidencePack pack, StructuredScenario scenario, Object request) {
-        return (String) call("StoryWritingPrompt", "inputText", pack, scenario, request);
+    static final String STYLE_PKG = "com.oracul.app.style.";
+
+    static Class<?> styleType(String name) {
+        try {
+            return Class.forName(STYLE_PKG + name);
+        } catch (ClassNotFoundException e) {
+            throw new AssertionError(STYLE_PKG + name + " is missing");
+        }
+    }
+
+    /** com.oracul.app.style.Language.EN / UK from its code "en" / "uk". */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    static Object language(String code) {
+        Class<?> type = styleType("Language");
+        return Enum.valueOf((Class<Enum>) type, "uk".equals(code) ? "UK" : "EN");
+    }
+
+    /** StoryStyle(profile, language) built through its canonical record constructor. */
+    static Object style(com.oracul.app.style.WritingStyleProfile profile, String languageCode) {
+        Class<?> type = type("StoryStyle");
+        if (!type.isRecord()) throw new AssertionError("com.oracul.app.result.StoryStyle must be a record");
+        try {
+            Constructor<?> c = type.getDeclaredConstructor(com.oracul.app.style.WritingStyleProfile.class, styleType("Language"));
+            c.setAccessible(true);
+            return c.newInstance(profile, language(languageCode));
+        } catch (InvocationTargetException e) {
+            throw new AssertionError("StoryStyle constructor failed: " + e.getTargetException(), e.getTargetException());
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("StoryStyle(WritingStyleProfile, Language) is missing: " + e, e);
+        }
+    }
+
+    /** StoryStyle.of(configuration, styles). */
+    static Object styleOf(ScenarioConfiguration configuration, com.oracul.app.style.WritingStyles styles) {
+        Class<?> type = type("StoryStyle");
+        for (Method m : type.getDeclaredMethods()) {
+            if (m.getName().equals("of") && m.getParameterCount() == 2 && Modifier.isStatic(m.getModifiers())) {
+                try {
+                    m.setAccessible(true);
+                    return m.invoke(null, configuration, styles);
+                } catch (InvocationTargetException e) {
+                    throw new AssertionError("StoryStyle.of failed: " + e.getTargetException(), e.getTargetException());
+                } catch (IllegalAccessException e) {
+                    throw new AssertionError(e);
+                }
+            }
+        }
+        throw new AssertionError("StoryStyle.of(ScenarioConfiguration, WritingStyles) is missing");
+    }
+
+    /** The profile of a StoryStyle. */
+    static com.oracul.app.style.WritingStyleProfile profileOf(Object style) {
+        return (com.oracul.app.style.WritingStyleProfile) accessor(style, "profile");
+    }
+
+    /** The language of a StoryStyle as its code ("en" / "uk"). */
+    static String languageCodeOf(Object style) {
+        Object language = accessor(style, "language");
+        try {
+            return (String) language.getClass().getMethod("code").invoke(language);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Language.code() is missing: " + e, e);
+        }
+    }
+
+    static String languageLabelOf(Object language) {
+        try {
+            return (String) language.getClass().getMethod("label").invoke(language);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Language.label() is missing: " + e, e);
+        }
+    }
+
+    static String inputText(EvidencePack pack, StructuredScenario scenario, Object request, Object style) {
+        return (String) call("StoryWritingPrompt", "inputText", pack, scenario, request, style);
     }
 
     @SuppressWarnings("unchecked")
-    static Map<String, Object> body(String model, EvidencePack pack, StructuredScenario scenario, Object request) {
-        return (Map<String, Object>) call("StoryWritingPrompt", "body", model, pack, scenario, request);
+    static Map<String, Object> body(String model, EvidencePack pack, StructuredScenario scenario, Object request, Object style) {
+        return (Map<String, Object>) call("StoryWritingPrompt", "body", model, pack, scenario, request, style);
+    }
+
+    static String styleSection(Object style) {
+        return (String) call("StoryWritingPrompt", "styleSection", style);
     }
 
     // ---- ScenarioMetadataMapper ----------------------------------------------------------------------------------

@@ -1,0 +1,19 @@
+{
+  "slice": "03_styled-story",
+  "round": 1,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/result/StoryStyleTest.java",
+      "line": 117,
+      "fr": "FR-66",
+      "problem": "languages() lists \"absent\" and \"null\" as two classes, but both pass a null StoryLanguage into OutputSettings.setLanguage, so they are the same case. The JSON-level difference between a missing \"language\" key and \"language\": null is never exercised here. StyledStoryIT covers only the absent key (the \"absent\" CSV case leaves the key out).",
+      "fix": "Either merge the two rows, or build the 'absent' case from a configuration deserialised from JSON without the key and the 'null' case from JSON with \"language\": null (or run them through POST /api/runs in StyledStoryIT).",
+      "status": "open"
+    }
+  ]
+}

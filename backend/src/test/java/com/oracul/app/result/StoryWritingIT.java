@@ -14,7 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** future-result.md "Slice 09_future-story" ITs #1, #2, #4-#10, #15: the STORY_WRITING stage. */
-// @trace FR-23, FR-38, FR-39
+// @trace FR-23, FR-38, FR-39, FR-65
 class StoryWritingIT extends AbstractStoryIT {
 
     private static final String STORY_INVALID = "ORACUL could not construct a valid scenario";
@@ -44,6 +44,16 @@ class StoryWritingIT extends AbstractStoryIT {
             + "Cutoff date: " + c + "\n"
             + "Story date window: after " + c + " and no later than " + plusYears(c, 5) + "\n"
             + "Future event date: " + d);
+        // @trace FR-65: a run without writingStyle / language is written as Official / Briefing in English; the WRITING STYLE
+        // section sits between the Future event date line and TASK, everything after TASK is unchanged
+        var official = new com.oracul.app.style.WritingStyles("classpath:writing-styles.json",
+            new org.springframework.core.io.DefaultResourceLoader()).find("official-briefing").orElseThrow();
+        String section = StoryFixtures.styleSection(true, official.label(), official.characteristics(), official.instructions(), false);
+        assertThat(s(1)).contains("Future event date: " + d + "\n" + section + "\nTASK\n"
+            + "Write the story of the future event of the scenario in structured-scenario under the settings above.\n");
+        assertThat(instructionsOf(req)).contains("in the writing style and the story language given in WRITING STYLE.")
+            .doesNotContain("Write a short news story");
+        assertThat(StubResponses.dataBlock(s(1), "structured-scenario")).doesNotContain("WRITING STYLE");
     }
 
     // #2 (NFR-3)

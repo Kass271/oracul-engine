@@ -14,7 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** future-result.md "Slice 09_future-story" FR-23: StoryParser rows P1-P11 against window W (2026-10-02 .. 2031-10-02). */
-// @trace FR-23
+// @trace FR-23, FR-66
 class StoryParserTest {
 
     private static final LocalDate CUTOFF = LocalDate.parse("2026-10-02");
@@ -174,5 +174,33 @@ class StoryParserTest {
     @Test
     void trailingGarbageIsNotValidJson() {
         assertErrors(parse(StoryFixtures.stDefault(D) + " x"), false, "output is not valid JSON");
+    }
+
+    // ---- phase 04 styled-story.md FR-66: the word count is language-independent ---------------------------------
+
+    // @trace FR-66
+    @ParameterizedTest(name = "Ukrainian body of {0} words")
+    @org.junit.jupiter.params.provider.CsvSource({"149, false", "150, true", "151, true", "899, true", "900, true", "901, false"})
+    void aUkrainianBodyIsCountedLikeAnEnglishOneAndHasTheSameBoundaries(int words, boolean ok) {
+        String ukBody = StoryFixtures.ubodyOfWords(words);
+        assertThat(ukBody.trim().split("\\s+")).as("fixture word count").hasSize(words);
+        Parsed p = parse(json(StoryFixtures.UK_HEADLINE, D, ukBody));
+        if (ok) {
+            FutureStory s = valid(p);
+            assertThat(s.getBody()).isEqualTo(ukBody);
+            assertThat(s.getHeadline()).isEqualTo(StoryFixtures.UK_HEADLINE);
+            assertThat(s.getDateline()).as("the parser still returns the English dateline, StoryWriter replaces it")
+                .isEqualTo("ORACUL FUTURE — March 1, 2027");
+        } else {
+            assertErrors(p, false, "body must have 150 to 900 words (found " + words + ")");
+        }
+    }
+
+    // @trace FR-66
+    @Test
+    void theStubUkrainianBodyOfThreeParagraphsHas180WordsAndIsValid() {
+        FutureStory s = valid(parse(json(StoryFixtures.UK_HEADLINE + " — Narrative — inspired by Franz Kafka", D, StoryFixtures.ubody(3))));
+        assertThat(s.getBody()).isEqualTo(StoryFixtures.ubody(3));
+        assertThat(StoryFixtures.ubody(3).split("\\s+")).hasSize(180);
     }
 }

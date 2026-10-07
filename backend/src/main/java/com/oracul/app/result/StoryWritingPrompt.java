@@ -6,6 +6,8 @@ import com.oracul.app.api.model.StructuredScenario;
 import com.oracul.app.reasoning.ClosedEvidenceMode;
 import com.oracul.app.reasoning.ScenarioWindow;
 import com.oracul.app.reasoning.UntrustedText;
+import com.oracul.app.style.Language;
+import com.oracul.app.style.WritingMode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,16 +19,19 @@ public final class StoryWritingPrompt {
 
     static final String RULES = String.join("\n",
         "Return only JSON matching the schema.",
-        "Write a short news story from the future about the future event of the scenario in structured-scenario, "
-            + "reported on a date inside the story date window given in SETTINGS.",
+        "Write the story of the future event of the scenario in structured-scenario, reported on a date inside the "
+            + "story date window given in SETTINGS, in the writing style and the story language given in WRITING STYLE.",
         "Use only the facts, inferences, speculations and the future event of that scenario. Do not add "
             + "current-world facts that are not facts of the scenario.",
         "Keep present-day facts recognisable as reported facts and everything after the cutoff date recognisably "
             + "hypothetical.",
-        "headline: one line of at most 160 characters.",
+        "The scenario's events, dates, actors and causes take priority over the writing style: the style changes only "
+            + "how the future is told, never what happens, when, who acts or why.",
+        "Never add events, dates or outcomes that are not in the scenario.",
+        "headline: one line of at most 160 characters in the story language.",
         "futureDate: the date of the story as yyyy-MM-dd inside the story date window; prefer the future event date.",
-        "dateline: ORACUL FUTURE — followed by futureDate written as Month d, yyyy.",
-        "body: plain text of 150 to 900 words, paragraphs separated by one blank line, no HTML and no Markdown.",
+        "dateline: ORACUL FUTURE — followed by futureDate; ORACUL replaces it with its own dateline.",
+        "body: plain text of 150 to 900 words in the story language, paragraphs separated by one blank line, no HTML and no Markdown.",
         "Do not write the labels AI-GENERATED FUTURE SCENARIO or POSSIBLE FUTURE — NOT CURRENT NEWS; ORACUL adds them.",
         "Match the tone to Darkness and Optimism; they never permit invented evidence.");
 
@@ -47,7 +52,36 @@ public final class StoryWritingPrompt {
     private StoryWritingPrompt() {
     }
 
-    public static String inputText(EvidencePack pack, StructuredScenario scenario, StoryRequest req) {
+    public static String styleSection(StoryStyle style) {
+        var profile = style.profile();
+        List<String> lines = new ArrayList<>();
+        lines.add("WRITING STYLE");
+        lines.add("Writing mode: " + profile.mode().label());
+        lines.add("Style profile: " + profile.label());
+        lines.add("Style characteristics: " + profile.characteristics());
+        lines.add("Story language: " + style.language().label());
+        lines.add("Style instructions: " + profile.instructions());
+        if (profile.mode() == WritingMode.OFFICIAL) {
+            lines.add("Write a factual, concise and neutral analytical report about events, consequences, actors, "
+                + "dates and causal relationships, with no literary description and no invented scenes or characters.");
+            lines.add("Structure the body by short capitalised lead-ins: the first paragraph starts with SITUATION., "
+                + "a middle paragraph with CONSEQUENCES. and the last paragraph with OUTLOOK."
+                + (style.language() == Language.UK
+                    ? " Write the lead-ins in Ukrainian: СИТУАЦІЯ., НАСЛІДКИ., ПЕРСПЕКТИВА." : ""));
+        } else {
+            lines.add("Write literary prose that evokes the tone and themes of this style profile; atmosphere, scene "
+                + "setting, imagery and invented minor characters or scenes are allowed.");
+            lines.add("Do not copy or quote the author's text, signature phrases or characters; write original prose "
+                + "that is only inspired by the tone and themes.");
+            lines.add("Do not add events, dates or outcomes beyond the scenario.");
+        }
+        lines.add("Write the headline and the body in " + style.language().label() + ".");
+        lines.add("Priority: the scenario's events, dates, actors and causes take priority over this writing style.");
+        return String.join("\n", lines);
+    }
+
+    public static String inputText(EvidencePack pack, StructuredScenario scenario, StoryRequest req,
+                                  StoryStyle style) {
         ScenarioWindow window = ScenarioWindow.of(pack);
         var cfg = pack.getConfiguration();
         List<String> wildcards = new ArrayList<>();
@@ -69,6 +103,7 @@ public final class StoryWritingPrompt {
         lines.add("Cutoff date: " + window.cutoff());
         lines.add("Story date window: after " + window.cutoff() + " and no later than " + window.end());
         lines.add("Future event date: " + scenario.getFutureEvent().getDate());
+        lines.add(styleSection(style));
         lines.add("TASK");
         lines.add("Write the story of the future event of the scenario in structured-scenario under the settings "
             + "above.");
@@ -85,12 +120,12 @@ public final class StoryWritingPrompt {
     }
 
     public static Map<String, Object> body(String model, EvidencePack pack, StructuredScenario scenario,
-                                           StoryRequest req) {
+                                           StoryRequest req, StoryStyle style) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("instructions", INSTRUCTIONS);
         body.put("input", List.of(Map.of("role", "user",
-            "content", List.of(Map.of("type", "input_text", "text", inputText(pack, scenario, req))))));
+            "content", List.of(Map.of("type", "input_text", "text", inputText(pack, scenario, req, style))))));
         body.put("text", TEXT);
         body.put("store", false);
         return body;

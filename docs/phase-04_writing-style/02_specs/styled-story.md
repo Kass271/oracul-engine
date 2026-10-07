@@ -33,6 +33,16 @@ still clearly labelled as an AI-generated possible future.
 Effective style of a run = its `output.writingStyle`, or `official-briefing` when absent, or `official-briefing` when the
 stored profile is no longer in the style file. Effective language = `output.language`, or `en` when absent.
 
+### Interfaces (slice 03_styled-story — exact names, so tests can reach them by reflection)
+| Element | Signature / content |
+|---|---|
+| domain language | `com.oracul.app.style.Language` enum `EN` (`code()` `"en"`, `label()` `"English"`), `UK` (`"uk"`, `"Ukrainian"`); generated `StoryLanguage` is mapped to it at the boundary (`StoryStyle.of`), never switched on in domain code |
+| effective style | `com.oracul.app.result.StoryStyle` record `(WritingStyleProfile profile, Language language)`; `static StoryStyle of(ScenarioConfiguration configuration, WritingStyles styles)`: `profile` = `styles.find(output.writingStyle.profileId)`, else `styles.find("official-briefing")` (configuration `null`, `output` `null`, `writingStyle` absent / `null`, `profileId` not in the file). The stored `mode` is not used for the lookup: the profile's own `mode` is the effective mode. `language` = `UK` for stored `uk`, else `EN` (absent / `null`) |
+| mode label | `WritingMode.OFFICIAL` → `Official / Briefing`, `WritingMode.NARRATIVE` → `Narrative` (the same texts as `modes[].label` of `GET /api/writing-styles`) |
+| prompt | `StoryWritingPrompt.inputText(EvidencePack pack, StructuredScenario scenario, StoryRequest req, StoryStyle style)` and `StoryWritingPrompt.body(String model, EvidencePack pack, StructuredScenario scenario, StoryRequest req, StoryStyle style)`. The former 3-arg `inputText` / 4-arg `body` are removed. `StoryRequest(attempt, storyErrors)` is unchanged (2 components). `static String styleSection(StoryStyle style)` = the WRITING STYLE section lines joined by `\n`, first line `WRITING STYLE`, no trailing newline (T contains it verbatim). `INSTRUCTIONS` stays a public constant |
+| dateline | `Datelines.format(LocalDate d, Language language)`; `Datelines.format(LocalDate d)` stays = `format(d, Language.EN)`. Ukrainian months come from the fixed table of FR-66, not from JDK locale data |
+| writer | `StoryWriter` reads the run's own `GenerationRunRepository.Row.configuration()`, builds `StoryStyle.of(configuration, writingStyles)` once per stage, passes it to both attempts, and sets the stored and served `dateline` = `Datelines.format(story.futureDate, style.language())` for the parsed story and for the date fallback alike. `StoryParser.parse(outputText, cutoff, windowEnd)` is unchanged (it still returns the English dateline, which `StoryWriter` replaces) |
+
 ## Behaviour
 
 ### FR-65 — Style applied only when the story is written
@@ -106,13 +116,37 @@ stored profile is no longer in the style file. Effective language = `output.lang
 - Errors: unchanged from FR-23 — story invalid twice → FAILED `INVALID_SCENARIO` "ORACUL could not construct a valid
   scenario"; 429 → `CHATGPT_RATE_LIMITED`; 5xx / timeout → `CHATGPT_UNAVAILABLE`; 401/403 after refresh →
   `CHATGPT_SESSION_EXPIRED` (messages of `RunFailureCode`). A style can never cause a new failure code.
+- Tests (what the tester can assert):
+  - Unit (`StoryWritingPromptTest`, pure, profiles from `new WritingStyles("classpath:writing-styles.json",
+    new DefaultResourceLoader())`): `INSTRUCTIONS` = `StoryFixtures.INSTRUCTIONS` with the new rules; the full T of the
+    FR-23 example run for `official-briefing`/`EN` and for `kafka`/`UK` (lines 1–8 as FR-23, lines 9–20 the section,
+    then `TASK`); attempt 2 keeps the correction line and the `story-errors` block after `TASK`.
+  - Unit (`StoryStyleTest`): every class of the `StoryStyle.of` row of "Interfaces".
+  - Backend IT (stub `StubResponses`, run started through `POST /api/runs` with `output.writingStyle` /
+    `output.language`): the recorded STORY_WRITING `input` contains the section of the run's style; two runs with
+    `{OFFICIAL, official-briefing}`/`en` and `{NARRATIVE, kafka}`/`uk` in one session record pairwise equal bodies for
+    every non-STORY_WRITING request (same order, compared as JSON) and STORY_WRITING inputs that are equal after
+    `styleSection` is removed; no request but STORY_WRITING contains `WRITING STYLE`, `Style profile:`, any shipped
+    profile label, `Ukrainian` or `kafka`; an ALTERNATIVE of the Kafka/uk run sends the Kafka/uk section.
+  - E2E (`e2e/tests/styled-story.spec.ts`): two runs started via `POST /api/runs` that differ only in
+    `output.writingStyle` (`official-briefing` vs `poe`, both `en`): the Responses requests of
+    `GET http://localhost:4010/__control/requests?kind=responses` per run (between `POST /__control/reset` and the
+    terminal status) are pairwise identical except STORY_WRITING; the two `structured-scenario` blocks are byte-identical;
+    the Poe result shows `story-headline` `Stub headline from the future — Narrative — inspired by Edgar Allan Poe`.
+- Changes earlier behaviour: `RULES` lines "Write a short news story from the future …", "headline: one line of at most 160 characters.", "dateline: … written as Month d, yyyy." and "body: plain text of 150 to 900 words, …" → the 12 lines of FR-65 above (tests: backend/src/test/java/com/oracul/app/result/StoryFixtures.java, backend/src/test/java/com/oracul/app/result/StoryWritingIT.java)
+- Changes earlier behaviour: STORY_WRITING `input` line `Future event date: <d>` directly followed by `TASK` → the WRITING STYLE section between them; `StoryWritingPrompt.inputText(pack, scenario, req)` / `body(model, pack, scenario, req)` → `inputText(…, req, StoryStyle)` / `body(…, req, StoryStyle)` (tests: backend/src/test/java/com/oracul/app/result/StoryWritingPromptTest.java, backend/src/test/java/com/oracul/app/result/StoryHarness.java)
+- Changes earlier behaviour: backend stub default STORY_WRITING answer always ST-DEFAULT → the styled answer of "Stubs" (Official / Briefing + English, i.e. every earlier run, still ST-DEFAULT) (tests: backend/src/test/java/com/oracul/app/research/StubResponses.java)
 - Ranges & invariants: for each of the 9 shipped profiles × 2 languages (18 cases, parameterized): T contains exactly
   one `WRITING STYLE` line, directly after `Future event date:` and before `TASK`; the section has the profile's label,
   characteristics and instructions verbatim, the mode lines of its mode (OFFICIAL 2 lines with `SITUATION.`,
   `CONSEQUENCES.`, `OUTLOOK.`; NARRATIVE 3 lines with "Do not copy or quote" and "Do not add events, dates or outcomes")
   and the language line; `instructions` identical in all 18; T with the WRITING STYLE section removed is identical in all
   18; exactly one start and one end marker per data block; no `{` or `<` in `instructions`; no profile text inside a
-  data block. Absent `writingStyle` / `language` → the same T as `official-briefing` / `en`.
+  data block. Absent `writingStyle` / `language` → the same T as `official-briefing` / `en`. `StoryStyle.of` classes
+  (parameterized): configuration `null`, `output` `null`, `writingStyle` absent, `writingStyle` `null`, profileId
+  `dickens` (not in the file) → `official-briefing`; each of the 9 shipped `(mode, profileId)` pairs → that profile;
+  stored `{OFFICIAL, kafka}` → `kafka` (profile's own mode NARRATIVE); language absent / `null` / `en` → `EN`, `uk` → `UK`.
+  Uk suffix only for OFFICIAL + `uk` (exactly 1 of the 18 cases contains `СИТУАЦІЯ.`).
 
 ### FR-66 — Story in the chosen language
 - Happy path: with language `uk` the request asks for Ukrainian headline and body (FR-65); the stored story keeps the
@@ -132,6 +166,24 @@ stored profile is no longer in the style file. Effective language = `output.lang
   - Everything else in the UI (panel, metadata labels, buttons, failure messages) stays English.
 - Errors: as FR-65 (unchanged FR-23 failures); a Ukrainian story outside 150–900 words follows the FR-23 retry → FAILED
   `INVALID_SCENARIO` path.
+- Tests (what the tester can assert):
+  - Unit (`DatelinesTest` gets new cases only): the Ukrainian table and the English parity below.
+  - Backend IT: a run with `output.language` `uk` (style `kafka`) completes; `GET /api/runs/{runId}/result` → 200 with
+    `story.headline` `Заголовок із майбутнього — Narrative — inspired by Franz Kafka`, `story.body` = UBODY(3),
+    `story.dateline` = `ORACUL FUTURE — <d> <місяць> <yyyy>` of `story.futureDate`, `labels` =
+    `["AI-GENERATED FUTURE SCENARIO","POSSIBLE FUTURE — NOT CURRENT NEWS"]`; `future_story.dateline` row equal; with the
+    `BADDATE` fixture on attempt 1 and 2 (date fallback) the dateline is the Ukrainian form of the future event date;
+    the same run with `en` keeps `ORACUL FUTURE — <Month d, yyyy>`.
+  - Frontend unit (`frontend/src/app/result/future-result.spec.ts`, new `it` only): a result with headline
+    `Заголовок із майбутнього — Narrative — inspired by Franz Kafka`, dateline `ORACUL FUTURE — 12 вересня 2032` and a
+    2-paragraph Ukrainian body renders them verbatim in `story-headline`, `story-dateline`, `story-paragraph` (×2), and
+    `label-ai-generated` / `label-not-current-news` keep the English texts above `story-headline`.
+  - E2E (`e2e/tests/styled-story.spec.ts`): a run started from the panel with `writing-style-option-NARRATIVE`,
+    `narrative-style-option-kafka` and `story-language-option-uk`, opened at `/futures/:runId`: `story-dateline` matches
+    `^ORACUL FUTURE — [1-9][0-9]? (січня|…|грудня) [0-9]{4}$` and equals the Ukrainian form of `story.futureDate`,
+    `story-headline` is the Ukrainian stub headline, the two labels are English.
+- Changes earlier behaviour: `Datelines.format(d)` is the only formatter → `Datelines.format(d, language)` added, the 1-arg form unchanged (tests: backend/src/test/java/com/oracul/app/result/StoryHarness.java)
+- Changes earlier behaviour: none for stored / served datelines of English runs — every existing run in the tests has no `output.language` or `en` (grep: `StoryWritingIT`, `StoryParserTest`, `DatelinesTest`, `e2e/tests/future-story.spec.ts`, `e2e/tests/why-and-sources.spec.ts`, `frontend/src/app/result/*.spec.ts`, `frontend/src/app/runs/*.spec.ts` assert `ORACUL FUTURE — <Month d, yyyy>` only for English runs, so they stay green)
 - Ranges & invariants: `Datelines.format(d, UK)` for the 1st and the last day of each of the 12 months (24 cases) and
   for days 1, 9, 10, 31 → the table month and no leading zero; English output identical to the phase-01 formatter for
   the same 24 dates; every produced dateline matches the `FutureStory.dateline` pattern of the contract; Ukrainian body
@@ -148,7 +200,16 @@ section → as Official / Briefing, English); the existing story modes (`bad-dat
 | any other label `<L>` | English | `Stub headline from the future — <L>` | BODY(3) |
 | any label `<L>` | Ukrainian | `Заголовок із майбутнього — <L>` | UBODY(3) |
 `UBODY(n)` = n paragraphs joined by `\n\n`; paragraph k = `Абзац <k>` followed by 58 × ` слово` (60 words), so
-UBODY(3) = 180 words. Every Responses request keeps being recorded (`GET /__control/requests?kind=responses`, request
+UBODY(3) = 180 words.
+Parsing: `<L>` = the text after `Style profile: ` up to the line end (regex `^Style profile: (.+)$`, multiline);
+Ukrainian when the `^Story language: (.+)$` value is `Ukrainian`, else English. Mode precedence (E2E stub): `rate-limited`
+→ 429; `invalid` / `invalid-once` (call 1) → `not json`; `bad-date` / `bad-date-once` (call 1) → ST-DEFAULT with the
+cutoff date (unchanged, English headline whatever the style); every other call → the styled answer of the table. Backend
+`StubResponses.defaultResponder()` answers STORY_WRITING with the styled answer (`StoryFixtures.styled(inputText)`, new);
+named fixtures (`StoryFixtures.fixture`) are unchanged. Owners: `e2e/stubs/server.mjs` = backend-builder (stub service);
+`StubResponses` / `StoryFixtures` = tester. The E2E stub image is not rebuilt by `stack.mjs up` (`e2e/` is in
+`IMAGE_EXCLUDE`): the first E2E run of this slice needs `node factory-engine/bin/stack.mjs up --build`. `.oracul/stack.json`
+is unchanged (no new compose file, profile or service). Every Responses request keeps being recorded (`GET /__control/requests?kind=responses`, request
 bodies as received), so tests can compare the `structured-scenario` blocks and WRITING STYLE sections byte for byte.
 
 ## Non-functional — NFR-12 (real-service check, release step)
@@ -171,4 +232,8 @@ No new operation and no new error code.
 - Route: `/futures/:runId` (`result-view`) — no new element; `story-headline`, `story-dateline`, `story-body`,
   `story-paragraph`, `label-ai-generated`, `label-not-current-news` render the language-specific text as text (never
   `innerHTML`).
+- data-testid used by the slice's tests (all existing): result `result-view`, `story-labels`, `label-ai-generated`,
+  `label-not-current-news`, `story-headline`, `story-dateline`, `story-body`, `story-paragraph`; panel (slice 02)
+  `writing-style-option-NARRATIVE`, `narrative-style-option-<profileId>` (desktop radios), `story-language-select` →
+  `story-language-option-uk`.
 - States: unchanged (loading · success · failure).
