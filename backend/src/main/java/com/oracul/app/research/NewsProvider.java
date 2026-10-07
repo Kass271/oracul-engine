@@ -11,7 +11,15 @@ public interface NewsProvider {
     record Article(String url, String title, java.time.Instant publishedAt, String sourceName, String sourceUrl) {
     }
 
-    record Result(SearchQueryStatus status, List<Article> articles) {
+    record Result(SearchQueryStatus status, List<Article> articles, boolean rateLimited) {
+        public Result(SearchQueryStatus status, List<Article> articles) {
+            this(status, articles, false);
+        }
+
+        public static Result tooManyRequests() {
+            return new Result(SearchQueryStatus.FAILED, List.of(), true);
+        }
+
         public static Result failed() {
             return new Result(SearchQueryStatus.FAILED, List.of());
         }

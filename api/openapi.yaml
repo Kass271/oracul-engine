@@ -1284,6 +1284,7 @@ components:
           type: integer
           format: int32
           minimum: 0
+          description: Since phase 03 (wildcard-search.md FR-52) the items of the query's own Google News RSS answer (at most the first 100 are read); 0 for EMPTY and FAILED. Phase-02 runs counted the items attributed to the query from its OR-group answer.
 
     SearchIntent:
       type: object

@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/** Shared expectations of fixture F240 (budget 18): its usable candidates in arrival order and the topic of an intent. */
+/** Shared expectations of fixture F240 (budget 18, one Google request per query): its usable candidates in arrival order and the topic of an intent. */
 final class F240Support {
 
     private F240Support() {

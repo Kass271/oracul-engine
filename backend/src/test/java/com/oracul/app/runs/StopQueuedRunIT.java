@@ -15,7 +15,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * run-control.md FR-45 rule "a QUEUED run that is stopped before the executor picks it up never starts": a single executor
  * thread is held by the first session's run, the second session's run waits QUEUED, is stopped, and must never send a request.
  */
-// @trace FR-45
+// @trace FR-45, FR-52
 @TestPropertySource(properties = "oracul.run.executor-threads=1")
 class StopQueuedRunIT extends AbstractStoryIT {
 
@@ -49,7 +49,7 @@ class StopQueuedRunIT extends AbstractStoryIT {
                 .as("a stopped QUEUED run is never started, failed or timed out").isEqualTo(rowAtStop);
             assertThat(requests("QUERY_EXPANSION")).as("only run 1 expanded queries").hasSize(1);
             assertThat(responses.modelRequests).as("only run 1 read the model catalogue").hasSize(1);
-            assertThat(news.requests).as("only run 1 searched").hasSize(4);
+            assertThat(news.requests).as("only run 1 searched: one request per planned query").hasSize(20);
             assertThat(startRun(sidB, B).andReturn().getResponse().getStatus()).as("the slot of the stopped run is free").isEqualTo(202);
         } finally {
             responses.release("QUERY_EXPANSION");

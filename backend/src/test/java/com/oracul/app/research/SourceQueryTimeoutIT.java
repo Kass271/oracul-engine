@@ -9,11 +9,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** Provider timeout (oracul.news.google.timeout, the only per-request timeout) counts as FAILED, like any other provider error. */
-// @trace FR-13, FR-44, FR-47
+// @trace FR-13, FR-44, FR-47, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=14",
     "oracul.news.google.timeout=PT0.5S",
+    "oracul.news.google.concurrency=8", // FR-52: 20 slow requests, 8 at a time (the assertions are counts only)
 })
 class SourceQueryTimeoutIT extends AbstractRunIT {
 
@@ -23,7 +24,7 @@ class SourceQueryTimeoutIT extends AbstractRunIT {
 
     @Test
     @SuppressWarnings("unchecked")
-    void oneSlowGroupFailsAndTheRunContinues() throws Exception {
+    void oneSlowQueryFailsAndTheRunContinues() throws Exception {
         news.responder = req -> req.number() == 1
             ? SLOW
             : StubNews.rss(StubNews.rssItem("Title x" + req.number(), news.baseUrl() + "/rss/articles/x" + req.number(),
@@ -34,27 +35,27 @@ class SourceQueryTimeoutIT extends AbstractRunIT {
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         List<Map<String, Object>> queries =
             (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
-        // group 1 (Q01-Q05) timed out; groups 2-4 answer one article each, attributed to their first element
-        assertThat(news.requests).as("a timeout is not retried").hasSize(4);
-        assertThat(queries.stream().filter(q -> "FAILED".equals(q.get("status"))).count()).isEqualTo(5);
-        assertThat(queries.stream().filter(q -> "OK".equals(q.get("status"))).count()).isEqualTo(3);
-        assertThat(queries.stream().filter(q -> "EMPTY".equals(q.get("status"))).count()).isEqualTo(12);
+        // the query of the first request timed out; the other 19 answer one article each (FR-52: one request per query)
+        assertThat(news.requests).as("a timeout is not retried: one request per query").hasSize(20);
+        assertThat(queries.stream().filter(q -> "FAILED".equals(q.get("status"))).count()).isEqualTo(1);
+        assertThat(queries.stream().filter(q -> "OK".equals(q.get("status"))).count()).isEqualTo(19);
+        assertThat(queries.stream().filter(q -> "EMPTY".equals(q.get("status"))).count()).isEqualTo(0);
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void everyGroupSlowStillCompletesWithTheNoEvidenceNote() throws Exception {
+    void everyQuerySlowStillCompletesWithTheNoEvidenceNote() throws Exception {
         news.responder = req -> SLOW;
         String sid = connectedSid();
         String id = (String) startOk(sid, B).get("id");
         Map<String, Object> run = awaitRun(sid, id, 20_000, m -> "FAILED".equals(m.get("status")) || "COMPLETED".equals(m.get("status")));
-        // run-control.md FR-47: every group FAILED is no failure any more
+        // run-control.md FR-47: every query FAILED is no failure any more
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         assertThat(run.get("failure")).isNull();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(news.requests).hasSize(4);
         List<Map<String, Object>> queries =
             (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
-        assertThat(queries).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
+        assertThat(queries).isNotEmpty().allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
+        assertThat(news.requests).as("one request per planned query, none retried").hasSize(queries.size());
     }
 }

@@ -103,8 +103,17 @@ test.describe('FR-12 Search plan and query generation', () => {
   });
 });
 
-// @trace FR-46, FR-47, FR-48
-test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
+/** FR-52: the text sent for a planned query — quotes and parentheses become spaces, standalone upper-case OR / AND / NOT go, whitespace is collapsed. */
+function sentText(text: string): string {
+  return text
+    .replace(/["\u201C\u201D()]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t !== '' && !['OR', 'AND', 'NOT'].includes(t))
+    .join(' ');
+}
+
+// @trace FR-46, FR-47, FR-48, FR-52
+test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 sources', () => {
   async function rssMode(page: Page, mode: string): Promise<void> {
     const r = await page.request.post(`${STUB}/__control/rss`, { data: { mode } });
     expect(r.status(), `rss mode ${mode}`).toBe(204);
@@ -117,7 +126,7 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     expect(all.filter((r) => String(r.path).startsWith('/api/v2/doc'))).toHaveLength(0);
   }
 
-  test('the acceptance run searches 20 queries as 4 Google News RSS requests and keeps 30 sources', async ({ page }) => {
+  test('the acceptance run searches 20 queries as 20 bare Google News RSS requests and keeps 30 sources', async ({ page }) => {
     test.setTimeout(90_000);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
@@ -125,18 +134,24 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     expect(run.counts.articlesRetrieved).toBe(100);
     expect(run.counts.articlesConsidered).toBe(30);
 
+    const plan0 = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
     const rss = await recorded(page, 'rss');
-    expect(rss).toHaveLength(4);
+    expect(rss, 'one request per planned query (counts.searches)').toHaveLength(run.counts.searches);
     for (const r of rss) {
       expect(Object.keys(r.params).sort()).toEqual(['ceid', 'gl', 'hl', 'q']);
       expect(r.params.hl).toBe('en-US');
       expect(r.params.gl).toBe('US');
       expect(r.params.ceid).toBe('US:en');
-      expect(r.q).toMatch(/^\(.+( OR .+)+\) when:\d+d$/);
-      expect(r.q).toMatch(/ when:90d$/);
+      expect(r.q).toMatch(/^[^()"]+ when:90d$/);
+      expect(r.q).not.toContain(' OR ');
     }
-    // the E2E stack spaces Google request starts by 0.2 s (slack for clock jitter between the two ends)
-    for (let k = 1; k < rss.length; k++) expect(rss[k].at - rss[k - 1].at).toBeGreaterThanOrEqual(150);
+    expect(
+      rss.map((r) => r.q).sort(),
+      'every planned query once, cleaned, plus the window',
+    ).toEqual(plan0.queries.map((q: any) => `${sentText(q.text)} when:90d`).sort());
+    // no spacing: all 20 requests arrive within 1.5 s
+    const arrivals = rss.map((r) => r.at);
+    expect(Math.max(...arrivals) - Math.min(...arrivals)).toBeLessThan(1500);
     await expectNoFormerProviderRequest(page);
 
     const res = await page.request.get(`/api/runs/${id}/sources`);
@@ -155,10 +170,10 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
       expect(s.metadataFetched).toBe(true);
     }
     expect(new Set(items.map((s: any) => s.url)).size).toBe(30);
-    // the first candidate is the article all queries share; every group answers it with the same title, which
-    // matches no query element, so each group attributes it to its first query (news-search FR-44 steps 7 and 9)
+    // the first candidate is the article every query's own answer holds: it lists all 20 plan ids (FR-52: a source belongs to
+    // the queries whose request returned it)
     expect(items[0].url).toBe('http://stub:4010/articles/shared');
-    expect(items[0].queryIds).toEqual(['Q01', 'Q06', 'Q11', 'Q16']);
+    expect(items[0].queryIds).toEqual(plan0.queries.map((q: any) => q.id));
     // topic round robin: 6 topics, all with at least 5 candidates -> exactly 5 each
     const perTopic = new Map<string, number>();
     for (const s of items) perTopic.set(s.topic, (perTopic.get(s.topic) ?? 0) + 1);
@@ -175,7 +190,7 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     await rssMode(page, 'down');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(await recorded(page, 'rss')).toHaveLength(4);
+    expect(await recorded(page, 'rss'), 'one request per query, a 503 is not retried').toHaveLength(20);
     await expectNoFormerProviderRequest(page);
     expect(run.counts.searches).toBe(20);
     expect(run.counts.articlesRetrieved).toBe(0);
@@ -193,7 +208,7 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     await rssMode(page, 'empty');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(await recorded(page, 'rss')).toHaveLength(4);
+    expect(await recorded(page, 'rss')).toHaveLength(20);
     await expectNoFormerProviderRequest(page);
     const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
     for (const q of plan.queries) expect(q.status).toBe('EMPTY');
@@ -207,7 +222,7 @@ test.describe('FR-48 / FR-46 Google News RSS first, at most 30 sources', () => {
     await rssMode(page, 'malformed');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(await recorded(page, 'rss')).toHaveLength(4);
+    expect(await recorded(page, 'rss')).toHaveLength(20);
     await expectNoFormerProviderRequest(page);
     expect(run.counts.searches).toBe(20);
     expect(run.counts.articlesRetrieved).toBe(0);
@@ -248,7 +263,7 @@ test.describe('FR-13 Current-news search and source retrieval', () => {
   });
 });
 
-// @trace FR-49
+// @trace FR-49, FR-52
 test.describe('FR-49 The former news provider is gone (E2E stub)', () => {
   // the name of the former provider, in pieces: the scan of FR-49 allows it in one backend test file only
   const FORMER = ['gd', 'elt'].join('');
@@ -268,8 +283,8 @@ test.describe('FR-49 The former news provider is gone (E2E stub)', () => {
     const id = await startAcceptanceRun(page);
     await awaitStatus(page, id, 'COMPLETED', 40_000);
     const all = await recorded(page, 'all');
-    expect(all.length).toBeGreaterThan(4);
-    expect(all.filter((r) => r.path === '/rss/search')).toHaveLength(4);
+    expect(all.length).toBeGreaterThan(20);
+    expect(all.filter((r) => r.path === '/rss/search')).toHaveLength(20);
     for (const r of all) {
       expect(String(r.path).startsWith('/__control/')).toBe(false);
       expect(typeof r.method).toBe('string');

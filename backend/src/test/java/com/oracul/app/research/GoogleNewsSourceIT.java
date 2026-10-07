@@ -19,12 +19,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * phase-02 news-search.md FR-48 steps 3, 4 and 8: what a Google News RSS item becomes — title cleaning, attribution on the
- * cleaned title, pubDate and link classes, the article fetch that resolves a Google link (or does not), publisher and
- * publisherUrl, source type and quality from the publisher host. The search stage always sends min(4, n) group requests,
- * so a plan whose elements must share a group is padded with filler queries (4 x k queries: group 1 = the k real ones).
+ * phase-02 news-search.md FR-48 steps 3, 4 and 8 as changed by FR-52: what a Google News RSS item becomes — title
+ * cleaning, attribution to the query whose own request returned the item (no longer by title), pubDate and link classes,
+ * the article fetch that resolves a Google link (or does not), publisher and publisherUrl, source type and quality from
+ * the publisher host. The search stage sends one request per planned query.
  */
-// @trace FR-48
+// @trace FR-48, FR-52
 @TestPropertySource(properties = {
     "oracul.news.google.timeout=PT1S",
 })
@@ -40,29 +40,17 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
         return StubNews.pubDate(Instant.now().minus(1, ChronoUnit.DAYS));
     }
 
-    /**
-     * A plan whose first {@code real.size()} queries share group 1: one real element needs no padding, k >= 2 elements are
-     * followed by 3k filler queries (4 groups of k elements; the fillers match no title).
-     */
-    private static com.oracul.app.api.model.SearchPlan sharedGroupPlan(List<String> real) {
-        List<String> texts = new ArrayList<>(real);
-        if (real.size() > 1) {
-            for (int i = 0; i < 3 * real.size(); i++) texts.add("filler" + i + " zzz");
-        }
-        return planOf(texts);
+    /** The feed is answered to the request of the query with this text; every other query gets an empty feed. */
+    private static java.util.function.Function<StubNews.Request, StubNews.Reply> queryAnswers(String text, StubNews.Reply answer) {
+        return req -> req.elements().contains(text) ? answer : StubNews.rss();
     }
 
-    /** The feed is answered to the request of group 1 (the one holding the first element); every other group gets an empty feed. */
-    private static java.util.function.Function<StubNews.Request, StubNews.Reply> groupOneAnswers(String firstElement, StubNews.Reply answer) {
-        return req -> req.elements().contains(firstElement) ? answer : StubNews.rss();
-    }
-
-    /** Search + readSources over a feed of the given items for the plan; one Google request per group, no other request. */
+    /** Search + readSources over a feed of the given items for the first query of the plan; one request per query, no other request. */
     private List<Source> sources(SearchPlanHolder plan, String... items) throws Exception {
         String first = plan.plan().getQueries().get(0).getText();
-        news.responder = groupOneAnswers(first, StubNews.rss(items));
+        news.responder = queryAnswers(first, StubNews.rss(items));
         var outcome = search(plan.plan());
-        assertThat(news.requests).hasSize(Math.min(4, plan.plan().getQueries().size()));
+        assertThat(news.requests).as("one request per planned query").hasSize(plan.plan().getQueries().size());
         assertThat(news.paths).as("only Google News and article requests").allSatisfy(p -> assertThat(p).doesNotStartWith("/api/v2/doc"));
         List<Source> out = new ArrayList<>();
         for (var st : retrieval.readSources(outcome, plan.horizon())) out.add(st.source());
@@ -100,41 +88,42 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
         assertThat(s.get(0).getTitle()).isEqualTo(expected);
     }
 
+    // FR-52: an item belongs to the query whose request returned it, whatever its title says
     @Test
-    void attributionUsesTheCleanedTitle() throws Exception {
-        // uncleaned, the title contains the phrase of element 1 ("reuters wire") and would be attributed there
-        var plan = new SearchPlanHolder(sharedGroupPlan(List.of("reuters wire", "solar eclipse")), HorizonCode._1Y);
-        news.responder = groupOneAnswers("reuters wire", StubNews.rss(StubNews.rssItem("Solar eclipse draws crowds - Reuters wire",
-            base() + "/articles/clean", recent(), "Reuters wire", REUTERS)));
-        var outcome = search(plan.plan());
-        assertThat(news.requests).as("4 groups of 2").hasSize(4);
-        List<SearchQuery> q = outcome.plan().getQueries();
-        assertThat(q.get(0).getStatus()).isEqualTo(SearchQueryStatus.EMPTY);
-        assertThat(q.get(1).getStatus()).as("cleaned title 'Solar eclipse draws crowds' matches element 2").isEqualTo(SearchQueryStatus.OK);
-        assertThat(q.get(1).getArticlesReturned()).isEqualTo(1);
-        assertThat(outcome.articles().get("Q02").get(0).title()).isEqualTo("Solar eclipse draws crowds");
+    void anItemBelongsToTheQueryWhoseRequestReturnedItNotToTheOneItsTitleNames() throws Exception {
+        List<String> elements = List.of("solar eclipse", "wind farm", "mars rover", "fusion plant");
+        // every title names "solar eclipse" (query 1), but the answers are returned by queries 2, 3 and 4
+        news.responder = req -> {
+            int idx = elements.indexOf(req.elements().get(0));
+            if (idx <= 0) return StubNews.rss();
+            return StubNews.rss(
+                StubNews.rssItem("Solar eclipse draws crowds " + idx + " - Reuters", base() + "/articles/e" + idx + "a", recent(), "Reuters", REUTERS),
+                StubNews.rssItem("Solar eclipse again " + idx + " - Reuters", base() + "/articles/e" + idx + "b", recent(), "Reuters", REUTERS));
+        };
+        var outcome = search(planOf(elements));
+        assertThat(news.requests).hasSize(4);
+        int[] expected = {0, 2, 2, 2};
+        for (int i = 0; i < elements.size(); i++) {
+            SearchQuery q = outcome.plan().getQueries().get(i);
+            assertThat(q.getArticlesReturned()).as(q.getId()).isEqualTo(expected[i]);
+            assertThat(q.getStatus()).isEqualTo(expected[i] > 0 ? SearchQueryStatus.OK : SearchQueryStatus.EMPTY);
+        }
+        assertThat(outcome.articles().get("Q02").get(0).title()).isEqualTo("Solar eclipse draws crowds 1");
+        assertThat(outcome.ordered().stream().map(SourceRetrieval.Attributed::queryId).toList())
+            .containsExactly("Q02", "Q02", "Q03", "Q03", "Q04", "Q04");
+        assertThat(outcome.articlesRetrieved()).isEqualTo(6);
     }
 
     @Test
-    void entriesOfAnAnsweredGroupAreAttributedByPhraseThenOverlapThenFirstElement() throws Exception {
-        List<String> elements = List.of("solar eclipse", "wind farm", "mars rover", "fusion plant");
-        List<String> titles = List.of("Solar eclipse draws crowds", "Wind farm approved", "Rover on Mars wakes", "Unrelated headline",
-            "Fusion plant opens", "Wind farm and fusion plant", "The solar eclipse", "Nothing to see");
-        String[] items = new String[titles.size()];
-        for (int i = 0; i < titles.size(); i++) {
-            items[i] = StubNews.rssItem(titles.get(i) + " - Reuters", base() + "/articles/e" + i, recent(), "Reuters", REUTERS);
-        }
-        news.responder = groupOneAnswers("solar eclipse", StubNews.rss(items));
-        var outcome = search(sharedGroupPlan(elements));
-        int[] expected = {0, 1, 2, 0, 3, 1, 0, 0}; // phrase / overlap / first element
-        int[] counts = new int[elements.size()];
-        for (int e : expected) counts[e]++;
-        for (int i = 0; i < elements.size(); i++) {
-            SearchQuery q = outcome.plan().getQueries().get(i);
-            assertThat(q.getArticlesReturned()).as(q.getId()).isEqualTo(counts[i]);
-            assertThat(q.getStatus()).isEqualTo(counts[i] > 0 ? SearchQueryStatus.OK : SearchQueryStatus.EMPTY);
-        }
-        assertThat(outcome.articlesRetrieved()).isEqualTo(titles.size());
+    void theCleanedTitleIsWhatTheOutcomeHolds() throws Exception {
+        news.responder = queryAnswers("reuters wire", StubNews.rss(StubNews.rssItem("Solar eclipse draws crowds - Reuters wire",
+            base() + "/articles/clean", recent(), "Reuters wire", REUTERS)));
+        var outcome = search(planOf(List.of("reuters wire", "solar eclipse")));
+        assertThat(news.requests).hasSize(2);
+        List<SearchQuery> q = outcome.plan().getQueries();
+        assertThat(q.get(0).getStatus()).as("the query that returned it, not the one the cleaned title matches").isEqualTo(SearchQueryStatus.OK);
+        assertThat(q.get(1).getStatus()).isEqualTo(SearchQueryStatus.EMPTY);
+        assertThat(outcome.articles().get("Q01").get(0).title()).isEqualTo("Solar eclipse draws crowds");
     }
 
     // ---- pubDate ---------------------------------------------------------------------------------------------------
@@ -312,13 +301,29 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
 
     @Test
     void googleSourcesCarryTopicAndQueryIds() throws Exception {
-        var plan = new SearchPlanHolder(sharedGroupPlan(List.of("alpha one", "beta two")), HorizonCode._1Y);
-        List<Source> s = sources(plan,
-            StubNews.rssItem("Beta two arrives - Reuters", base() + "/articles/q-b", recent(), "Reuters", REUTERS),
-            StubNews.rssItem("Alpha one arrives - Reuters", base() + "/articles/q-a", recent(), "Reuters", REUTERS));
+        var plan = new SearchPlanHolder(planOf(List.of("alpha one", "beta two")), HorizonCode._1Y);
+        news.responder = req -> req.elements().contains("alpha one")
+            ? StubNews.rss(StubNews.rssItem("Alpha one arrives - Reuters", base() + "/articles/q-a", recent(), "Reuters", REUTERS))
+            : StubNews.rss(StubNews.rssItem("Beta two arrives - Reuters", base() + "/articles/q-b", recent(), "Reuters", REUTERS));
+        var outcome = search(plan.plan());
+        List<Source> s = new ArrayList<>();
+        for (var st : retrieval.readSources(outcome, plan.horizon())) s.add(st.source());
         assertThat(s).extracting(Source::getId).containsExactly("S001", "S002");
-        assertThat(s.get(0).getQueryIds()).as("response order within the group").isEqualTo(List.of("Q02"));
-        assertThat(s.get(1).getQueryIds()).isEqualTo(List.of("Q01"));
+        assertThat(s.get(0).getQueryIds()).as("plan order, then feed order: the item of query 1 first").isEqualTo(List.of("Q01"));
+        assertThat(s.get(1).getQueryIds()).isEqualTo(List.of("Q02"));
         assertThat(s.get(0).getTopic()).isNotNull();
+    }
+
+    @Test
+    void anArticleReturnedByTwoQueriesIsOneSourceListingBoth() throws Exception {
+        var plan = new SearchPlanHolder(planOf(List.of("alpha one", "beta two", "gamma three")), HorizonCode._1Y);
+        news.responder = req -> req.elements().contains("gamma three") ? StubNews.rss()
+            : StubNews.rss(StubNews.rssItem("Common story - Reuters", base() + "/articles/q-common?utm_source=q" + req.number(), recent(), "Reuters", REUTERS));
+        var outcome = search(plan.plan());
+        List<Source> s = new ArrayList<>();
+        for (var st : retrieval.readSources(outcome, plan.horizon())) s.add(st.source());
+        assertThat(s).hasSize(1);
+        assertThat(s.get(0).getQueryIds()).as("exactly the queries whose own answer held its URL, sorted").isEqualTo(List.of("Q01", "Q02"));
+        assertThat(outcome.articlesRetrieved()).as("both answers are counted").isEqualTo(2);
     }
 }

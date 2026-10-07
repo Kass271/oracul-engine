@@ -1,4 +1,4 @@
-// @trace FR-30
+// @trace FR-30, FR-52
 import { expect, test, type Page } from '@playwright/test';
 import { evidence } from './evidence';
 
@@ -85,8 +85,9 @@ test('FR-30 ALTERNATIVE FUTURE reuses the evidence and produces a different futu
   expect(body.evidencePackId).toBe(first.evidencePackId);
   await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 60_000 });
 
-  // an ALTERNATIVE run searches nothing: no Google News request either (news-search.md FR-48)
-  expect(rssBefore).toBe(4);
+  // an ALTERNATIVE run searches nothing: no Google News request either (news-search.md FR-48); the first run sent one request per planned query (FR-52)
+  expect(first.counts.searches).toBe(20);
+  expect(rssBefore).toBe(first.counts.searches);
   expect((await recorded(page, 'rss')).length).toBe(rssBefore);
   const texts = await generationTexts(page);
   const last = texts[texts.length - 1];

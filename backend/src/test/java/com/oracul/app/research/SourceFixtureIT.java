@@ -11,8 +11,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
-/** Row 9: fixture F240 (budget 18) end to end - filtering, de-duplication and the source fields. */
-// @trace FR-13, FR-44, FR-46
+/** Row 9: fixture F240 (budget 18) end to end - filtering, de-duplication and the source fields (one request per query, FR-52). */
+// @trace FR-13, FR-44, FR-46, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
@@ -33,8 +33,8 @@ class SourceFixtureIT extends AbstractEventIT {
         assertThat(counts.get("searches")).isEqualTo(18);
         assertThat(counts.get("articlesRetrieved")).as("every raw entry is still counted").isEqualTo(240);
         assertThat(counts.get("articlesConsidered")).as("news-search.md FR-46: at most 30 kept").isEqualTo(30);
-        assertThat(news.requests).as("18 queries go out as 4 OR-group requests (5,5,4,4)").hasSize(4);
-        assertThat(news.requests.stream().map(r -> r.elements().size()).toList()).containsExactly(5, 5, 4, 4);
+        assertThat(news.requests).as("18 queries go out as 18 requests").hasSize(18);
+        assertThat(news.requests.stream().map(r -> r.elements().size()).distinct().toList()).as("one text per request").containsExactly(1);
 
         Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
         List<Map<String, Object>> queries = (List<Map<String, Object>>) plan.get("queries");
@@ -47,10 +47,8 @@ class SourceFixtureIT extends AbstractEventIT {
             Map<String, Object> q = queries.get(i);
             assertThat(q.get("status")).isEqualTo("OK");
             int n = ((Number) q.get("articlesReturned")).intValue();
-            // every block goes to its own query (title carries the element text); the blank-title rows of queries 2-5
-            // have no title to match and are attributed to the first element of their group (query 1)
-            int own = (i + 1) <= 6 ? 14 : 13;
-            int expected = i == 0 ? 14 + 4 : (i >= 1 && i <= 4 ? own - 1 : own);
+            // every block belongs to the query whose request returned it (FR-52), blank titles included
+            int expected = (i + 1) <= 6 ? 14 : 13;
             assertThat(n).as("articlesReturned of query " + (i + 1)).isEqualTo(expected);
             returned += n;
             topicOfQuery.add(F240Support.topicOf(intents.get((String) q.get("intentId"))));

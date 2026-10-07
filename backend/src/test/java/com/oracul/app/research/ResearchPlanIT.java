@@ -18,7 +18,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.TestPropertySource;
 
 /** Rows 1-6 of research-pipeline.md "Slice 05_search-sources" integration tests (search plan, query expansion). */
-// @trace FR-12, FR-38, FR-39, FR-44, FR-47
+// @trace FR-12, FR-38, FR-39, FR-44, FR-47, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=6",
@@ -232,7 +232,7 @@ class ResearchPlanIT extends AbstractRunIT {
             assertThat(queries.get(i).get("intentId")).isEqualTo(t.getIntentId());
             assertThat(queries.get(i).get("text")).as("query " + t.getId()).isEqualTo(t.getText());
         }
-        assertThat(news.requests).as("Google News still queried for every template query (4 OR groups of 5)").hasSize(4);
+        assertThat(news.requests).as("Google News still queried for every template query (one request each)").hasSize(20);
         assertThat(news.requests.stream().mapToInt(r -> r.elements().size()).sum()).isEqualTo(20);
         assertThat(expansion()).as("no retry").hasSize(1);
     }
@@ -311,7 +311,7 @@ class ResearchPlanIT extends AbstractRunIT {
         assertThat(plan(researchBody(sid, id)).get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
         assertThat(expansion()).as("one attempt, no retry").hasSize(1);
         assertThat(stub.grant("refresh_token")).as("no refresh").hasSize(refreshesBefore);
-        assertThat(news.requests).as("Google News is still queried").hasSize(4);
+        assertThat(news.requests).as("Google News is still queried, one request per template query").hasSize(20);
     }
 
     // #6

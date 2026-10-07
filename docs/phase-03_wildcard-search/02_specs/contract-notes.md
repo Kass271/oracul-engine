@@ -26,6 +26,7 @@ Capability specs of this phase:
 | `SearchPlan` | + optional `pipelines` (`WildcardPipeline[]`, 1–33). New runs: `buckets` / `intents` / `queries` are `[]` (required arrays kept, so stored plans and existing consumers stay valid) |
 | `WildcardPipeline`, `PipelineQuery`, `WildcardPipelineKind` | new |
 | `SearchQueryStatus` | description only (one request per query; no OR-groups, no GDELT) |
+| `SearchQuery` | description only: `articlesReturned` = items of the query's own RSS answer, at most 100 (slice 03_parallel-search) |
 | `ResearchCounts` | + optional `sourcesKept`, `sourcesWithContent` (0–30, always sent for new runs); descriptions of `searches`, `articlesRetrieved`, `articlesConsidered` (distinct usable candidates again), `eventsSelected` (= distinct Evidence IDs), `counterSignals` (0 for new runs) |
 | `Source` | + optional `publisherHost`, `contentStatus`, `excerpts`, `pipelineIds`; descriptions of `url`, `summary`, `topic`, `metadataFetched`, `publisherUrl` |
 | `ArticleContentStatus`, `SourceExcerpt` | new |

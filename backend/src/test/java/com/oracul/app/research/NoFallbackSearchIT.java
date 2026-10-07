@@ -18,21 +18,22 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * phase-03 FR-49 range (2): there is no fallback provider. For every Google failure class {503, 429, dropped connection,
- * timeout, malformed XML, not started (guard / budget)} x {the first group only, every group}: the queries of the failed
- * group are FAILED, exactly one {@code /rss/search} request goes out per started group, and the stub records no path
- * starting {@code /api/v2/doc} (the path of the former provider) nor any other route.
- * A group the run guard did not let start cannot be "first only": for that class the two cases are "no group starts" and
- * "only group 1 starts" (groups 2-4 are never started, so FAILED).
+ * phase-03 FR-49 range (2), as changed by FR-52: there is no fallback provider. For every Google failure class {503, 429,
+ * dropped connection, timeout, malformed XML, not started (guard)} x {the first query only, every query}: the failed
+ * queries are FAILED, exactly one {@code /rss/search} request goes out per started query (two for a 429: the one retry
+ * after rate-limit-wait), and the stub records no path starting {@code /api/v2/doc} (the path of the former provider) nor
+ * any other route. A query the run guard did not let start cannot be "first only": for that class the two cases are "no
+ * query starts" and "only query 1 starts" (the others are never started, so FAILED). Concurrency is 1 (harness default).
  */
-// @trace FR-49
+// @trace FR-49, FR-52
 @ExtendWith(OutputCaptureExtension.class)
 @TestPropertySource(properties = {
     "oracul.news.google.timeout=PT1S",
+    "oracul.news.google.rate-limit-wait=PT0S",
 })
 class NoFallbackSearchIT extends AbstractNewsSearchIT {
 
-    private static final String FIRST_ELEMENT = "alpha1 beta1";
+    private static final String FIRST_TEXT = "alpha1 beta1";
 
     enum Failure { HTTP_503, HTTP_429, DROPPED_CONNECTION, TIMEOUT, MALFORMED_XML, NOT_STARTED }
 
@@ -56,58 +57,53 @@ class NoFallbackSearchIT extends AbstractNewsSearchIT {
         };
     }
 
-    /** A good answer: one item whose title carries the first element of the requested group. */
+    /** A good answer: one item whose title carries the text of the requested query. */
     private StubNews.Reply good(StubNews.Request req) {
         return StubNews.rss(item("https://news.example.org/ok-" + req.number(), req.elements().get(0) + " story"));
     }
 
-    @ParameterizedTest(name = "{0}, every group failing = {1}")
+    @ParameterizedTest(name = "{0}, every query failing = {1}")
     @MethodSource("grid")
-    void aFailedGroupIsFailedAfterExactlyOneRequestAndNoOtherProviderIsAsked(Failure failure, boolean everyGroup, CapturedOutput out) throws Exception {
-        var plan = planOfSize(8); // 4 groups of 2: Q01-Q02, Q03-Q04, Q05-Q06, Q07-Q08
-        boolean[] failed = new boolean[4];
+    void aFailedQueryIsFailedAfterItsRequestsAndNoOtherProviderIsAsked(Failure failure, boolean everyQuery, CapturedOutput out) throws Exception {
+        var plan = planOfSize(8); // Q01...Q08, one request each
+        boolean[] failed = new boolean[8];
+        int perFailed = failure == Failure.HTTP_429 ? 2 : 1; // a 429 is retried once
         int started;
         SearchOutcomeHolder holder = new SearchOutcomeHolder();
         if (failure == Failure.NOT_STARTED) {
-            BooleanSupplier guard = everyGroup ? () -> false : () -> news.requests.isEmpty();
+            BooleanSupplier guard = everyQuery ? () -> false : () -> news.requests.isEmpty();
             news.responder = this::good;
             holder.outcome = retrieval.search(plan, HorizonCode._1Y, guard);
-            started = everyGroup ? 0 : 1;
-            for (int g = 0; g < 4; g++) failed[g] = everyGroup || g > 0;
+            started = everyQuery ? 0 : 1;
+            for (int i = 0; i < 8; i++) failed[i] = everyQuery || i > 0;
+            assertThat(news.requests).as("exactly one request per started query").hasSize(started);
         } else {
             StubNews.Reply bad = failingReply(failure);
-            news.responder = req -> everyGroup || req.elements().contains(FIRST_ELEMENT) ? bad : good(req);
+            news.responder = req -> everyQuery || req.elements().contains(FIRST_TEXT) ? bad : good(req);
             holder.outcome = search(plan);
-            started = 4;
-            for (int g = 0; g < 4; g++) failed[g] = everyGroup || g == 0;
+            for (int i = 0; i < 8; i++) failed[i] = everyQuery || i == 0;
+            int failedCount = everyQuery ? 8 : 1;
+            started = failedCount * perFailed + (8 - failedCount);
+            assertThat(news.requests).as("one request per query, two for a retried 429, no fallback").hasSize(started);
         }
 
-        assertThat(news.requests).as("exactly one /rss/search request per started group (no retry, no fallback)").hasSize(started);
-        assertThat(news.requests.stream().map(StubNews.Request::elements).distinct().count()).as("each started group once").isEqualTo(started);
         assertThat(news.paths).as("no path starting /api/v2/doc, no other route either").noneMatch(p -> p.startsWith("/api/v2/doc"))
             .allMatch(p -> p.equals("/rss/search"));
         assertThat(news.paths).hasSize(started);
 
         List<SearchQuery> q = holder.outcome.plan().getQueries();
         assertThat(q).hasSize(8);
-        for (int g = 0; g < 4; g++) {
-            for (int i = 2 * g; i < 2 * g + 2; i++) {
-                if (failed[g]) {
-                    assertThat(q.get(i).getStatus()).as("group " + (g + 1) + " " + q.get(i).getId()).isEqualTo(SearchQueryStatus.FAILED);
-                    assertThat(q.get(i).getArticlesReturned()).isEqualTo(0);
-                } else {
-                    assertThat(q.get(i).getStatus()).as("group " + (g + 1) + " was answered").isIn(SearchQueryStatus.OK, SearchQueryStatus.EMPTY);
-                }
+        for (int i = 0; i < 8; i++) {
+            if (failed[i]) {
+                assertThat(q.get(i).getStatus()).as(q.get(i).getId()).isEqualTo(SearchQueryStatus.FAILED);
+                assertThat(q.get(i).getArticlesReturned()).isEqualTo(0);
+            } else {
+                assertThat(q.get(i).getStatus()).as(q.get(i).getId() + " was answered").isIn(SearchQueryStatus.OK, SearchQueryStatus.EMPTY);
             }
         }
-        boolean allFailed = everyGroup;
-        assertThat(holder.outcome.allFailed()).isEqualTo(allFailed);
+        assertThat(holder.outcome.allFailed()).isEqualTo(everyQuery);
         String log = out.getOut() + out.getErr();
-        assertThat(log).doesNotContain("news group falling back");
-        if (failure != Failure.NOT_STARTED) {
-            long failedGroups = java.util.stream.IntStream.range(0, 4).filter(g -> failed[g]).count();
-            assertThat(log.split("news group failed", -1).length - 1).as("one WARN per failed group").isEqualTo((int) failedGroups);
-        }
+        assertThat(log).doesNotContain("news group falling back").doesNotContain("news group failed");
     }
 
     /** Holds the outcome of either search call (lambda-friendly). */

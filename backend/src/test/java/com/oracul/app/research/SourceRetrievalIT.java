@@ -27,11 +27,15 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
-/** Rows 8, 11-14 of research-pipeline.md "Slice 05_search-sources" integration tests (search stage, Google News RSS). */
-// @trace FR-13, FR-44, FR-47, FR-49
+/**
+ * Rows 8, 11-14 of research-pipeline.md "Slice 05_search-sources" integration tests (search stage, Google News RSS), as
+ * changed by FR-52: one request per planned query, a 429 retried once (after a short rate-limit-wait here).
+ */
+// @trace FR-13, FR-44, FR-47, FR-49, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=10",
+    "oracul.news.google.rate-limit-wait=PT0.05S",
 })
 class SourceRetrievalIT extends AbstractRunIT {
 
@@ -58,13 +62,13 @@ class SourceRetrievalIT extends AbstractRunIT {
             StubNews.pubDate(Instant.now().minus(1, ChronoUnit.DAYS)), "Reuters", "https://www.reuters.com");
     }
 
-    // #8 (FR-44: 20 queries go out as 4 OR-group requests)
+    // #8 (FR-52: 20 queries go out as 20 bare requests)
     @Test
-    void theQueriesAreSentToGoogleNewsAsFourOrGroupsWithExactlyTheSpecifiedParameters() throws Exception {
+    void theQueriesAreSentToGoogleNewsOnePerQueryWithExactlyTheSpecifiedParameters() throws Exception {
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
-        assertThat(news.requests).hasSize(4);
+        assertThat(news.requests).as("one request per planned query").hasSize(20);
         List<String> planTexts = new ArrayList<>();
         for (Map<String, Object> q : list(plan(researchBody(sid, id)).get("queries"))) planTexts.add((String) q.get("text"));
         List<String> sent = new ArrayList<>();
@@ -73,12 +77,14 @@ class SourceRetrievalIT extends AbstractRunIT {
             assertThat(r.params().get("hl")).isEqualTo("en-US");
             assertThat(r.params().get("gl")).isEqualTo("US");
             assertThat(r.params().get("ceid")).isEqualTo("US:en");
-            assertThat(r.q()).matches("^\\(.+( OR .+)+\\) when:90d$");
+            assertThat(r.q()).matches("^[^()\"]+ when:90d$");
+            assertThat(r.q()).doesNotContain(" OR ");
             assertThat(r.rawQuery()).as("parameters are URL-encoded").doesNotContain(" ");
-            assertThat(r.elements()).hasSize(5);
-            sent.addAll(r.elements());
+            assertThat(r.elements()).hasSize(1);
+            sent.add(r.q());
         }
-        assertThat(sent).as("plan order, contiguous groups").containsExactlyElementsOf(planTexts);
+        assertThat(sent.stream().sorted().toList()).as("every planned query once, cleaned, plus the window")
+            .containsExactlyElementsOf(planTexts.stream().map(t -> ParallelSearchSupport.text(t) + " when:90d").sorted().toList());
     }
 
     // #8 horizon -> when:<N>d
@@ -88,36 +94,33 @@ class SourceRetrievalIT extends AbstractRunIT {
         String sid = connectedSid();
         Map<String, Object> run = runToTerminal(sid, withHorizon(B, horizon));
         assertThat(run.get("status")).isEqualTo("COMPLETED");
-        assertThat(news.requests).hasSize(4);
+        assertThat(news.requests).as("one request per planned query").hasSize(20);
         assertThat(news.requests).allSatisfy(r -> assertThat(r.q()).endsWith(" when:" + days + "d"));
     }
 
-    // #8 + FR-13 rules: sources keep the topic of their (attributed) query, in group then response order
+    // #8 + FR-13 rules + FR-52: every source keeps the topic of the query whose request returned it, in plan order
     @Test
-    void sourcesCarryTheTopicOfTheirAttributedQueryInGroupOrder() throws Exception {
+    void sourcesCarryTheTopicOfTheQueryThatReturnedThemInPlanOrder() throws Exception {
         news.responder = req -> StubNews.rss(item("t" + req.number()));
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
-        assertThat(news.requests).hasSize(4);
+        assertThat(news.requests).hasSize(20);
         Map<String, Object> plan = plan(researchBody(sid, id));
         Map<String, Map<String, Object>> intents = new HashMap<>();
         for (Map<String, Object> i : list(plan.get("intents"))) intents.put((String) i.get("id"), i);
         List<Map<String, Object>> queries = list(plan.get("queries"));
-        // the titles share no token with any element: every article goes to the first element of its group (Q01, Q06, Q11, Q16)
         for (int i = 0; i < 20; i++) {
-            boolean first = i % 5 == 0;
-            assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo(first ? "OK" : "EMPTY");
-            assertThat(queries.get(i).get("articlesReturned")).as("Q" + (i + 1)).isEqualTo(first ? 1 : 0);
+            assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo("OK");
+            assertThat(queries.get(i).get("articlesReturned")).as("Q" + (i + 1)).isEqualTo(1);
         }
         List<Map<String, Object>> sources = sourceItems(sid, id);
-        assertThat(sources).hasSize(4);
-        for (int g = 0; g < 4; g++) {
+        assertThat(sources).hasSize(20);
+        for (int g = 0; g < 20; g++) {
             Map<String, Object> s = sources.get(g);
-            int qi = g * 5;
             assertThat(s.get("id")).isEqualTo(String.format("S%03d", g + 1));
-            assertThat(s.get("queryIds")).as(s.get("id") + " queryIds").isEqualTo(List.of(String.format("Q%02d", qi + 1)));
-            Map<String, Object> intent = intents.get((String) queries.get(qi).get("intentId"));
+            assertThat(s.get("queryIds")).as(s.get("id") + " queryIds").isEqualTo(List.of(String.format("Q%02d", g + 1)));
+            Map<String, Object> intent = intents.get((String) queries.get(g).get("intentId"));
             String expected = switch ((String) intent.get("bucket")) {
                 case "WILDCARD" -> (String) intent.get("topicKey");
                 case "ADJACENT" -> intent.get("category") == null ? "general" : (String) intent.get("category");
@@ -129,9 +132,9 @@ class SourceRetrievalIT extends AbstractRunIT {
         Map<String, Object> run = json(getRun(sid, id));
         Map<String, Object> counts = castMap((Map<?, ?>) run.get("counts"));
         assertThat(counts.get("searches")).isEqualTo(20);
-        assertThat(counts.get("articlesRetrieved")).as("4 answered groups x 1 article").isEqualTo(4);
-        assertThat(counts.get("articlesConsidered")).isEqualTo(4);
-        assertThat(counts.get("uniqueEvents")).isEqualTo(4);
+        assertThat(counts.get("articlesRetrieved")).as("20 answered queries x 1 article").isEqualTo(20);
+        assertThat(counts.get("articlesConsidered")).isEqualTo(20);
+        assertThat(counts.get("uniqueEvents")).isEqualTo(20);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
     }
 
@@ -140,9 +143,9 @@ class SourceRetrievalIT extends AbstractRunIT {
         return (Map<String, Object>) m;
     }
 
-    // #11 (FR-44: groups fail, not single queries)
+    // #11 (FR-52: a failing request fails one query, not a group)
     @Test
-    void failedGroupsDoNotStopTheRun() throws Exception {
+    void failedQueriesDoNotStopTheRun() throws Exception {
         news.responder = req -> req.number() <= 2 ? StubNews.status(503)
             : StubNews.rss(item("n" + req.number()));
         String sid = connectedSid();
@@ -153,16 +156,16 @@ class SourceRetrievalIT extends AbstractRunIT {
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("searches")).isEqualTo(20);
-        assertThat(counts.get("articlesRetrieved")).isEqualTo(2);
-        assertThat(counts.get("articlesConsidered")).isEqualTo(2);
-        assertThat(news.requests).as("a 503 is never retried").hasSize(4);
+        assertThat(counts.get("articlesRetrieved")).isEqualTo(18);
+        assertThat(counts.get("articlesConsidered")).isEqualTo(18);
+        assertThat(news.requests).as("a 503 is never retried: one request per query").hasSize(20);
         List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
         for (int i = 0; i < 20; i++) {
-            String expected = i < 10 ? "FAILED" : i % 5 == 0 ? "OK" : "EMPTY";
+            String expected = i < 2 ? "FAILED" : "OK";
             assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo(expected);
             assertThat(queries.get(i).get("articlesReturned")).as("Q" + (i + 1)).isEqualTo(expected.equals("OK") ? 1 : 0);
         }
-        assertThat(sourceItems(sid, id)).hasSize(2);
+        assertThat(sourceItems(sid, id)).hasSize(18);
     }
 
     static Stream<Arguments> unavailableProviders() {
@@ -194,7 +197,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(counts.get("searches")).isEqualTo(20);
         assertThat(counts.get("articlesRetrieved")).isEqualTo(0);
         assertThat(counts.get("articlesConsidered")).isEqualTo(0);
-        assertThat(news.requests).as("one request per group, none of these answers is retried, no fallback").hasSize(4);
+        assertThat(news.requests).as("one request per query, none of these answers is retried, no fallback").hasSize(20);
         List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
         assertThat(queries).hasSize(20).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("FAILED");
@@ -210,9 +213,9 @@ class SourceRetrievalIT extends AbstractRunIT {
         awaitDone(sid, (String) json(second.getResponse().getContentAsString()).get("id"));
     }
 
-    // FR-49 / FR-48: a 429 is not retried in this slice (the retry comes with FR-52) and has no fallback: its group is FAILED
+    // FR-52: a 429 is retried once after rate-limit-wait with the identical request
     @Test
-    void aRateLimitedGroupFailsWithoutRetryAndTheRunCompletes() throws Exception {
+    void aRateLimitedQueryIsRetriedOnceAndTheRunCompletes() throws Exception {
         news.responder = req -> req.number() == 1
             ? new StubNews.Reply(429, "text/plain", "Too Many Requests", 0)
             : StubNews.rss(item("r" + req.number()));
@@ -220,18 +223,24 @@ class SourceRetrievalIT extends AbstractRunIT {
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
-        assertThat(news.requests).as("4 groups, the 429 is not retried").hasSize(4);
-        assertThat(news.paths.stream().filter(p -> p.equals("/rss/search")).count()).isEqualTo(4);
+        assertThat(news.requests).as("20 queries + 1 retry").hasSize(21);
+        // the retry comes after rate-limit-wait and a fresh permit, so not necessarily right after the 429: find it by content
+        String limited = news.requests.get(0).rawQuery();
+        assertThat(news.requests.stream().filter(r -> r.rawQuery().equals(limited)).count())
+            .as("the 429'd request plus exactly one identical retry").isEqualTo(2);
+        assertThat(news.requests.stream().map(StubNews.Request::rawQuery).distinct().count())
+            .as("every other request is sent once").isEqualTo(20);
+        assertThat(news.paths.stream().filter(p -> p.equals("/rss/search")).count()).isEqualTo(21);
         List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
         for (int i = 0; i < 20; i++) {
-            assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo(i < 5 ? "FAILED" : i % 5 == 0 ? "OK" : "EMPTY");
+            assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo("OK");
         }
-        assertThat(sourceItems(sid, id)).hasSize(3);
+        assertThat(sourceItems(sid, id)).hasSize(20);
     }
 
-    // a 429 on every group fails the groups but not the run (run-control.md FR-47)
+    // a second 429 fails the query after exactly 2 requests, never the run (run-control.md FR-47)
     @Test
-    void rateLimitedOnEveryGroupFailsTheGroupsButNotTheRun() throws Exception {
+    void rateLimitedTwiceOnEveryQueryFailsTheQueriesButNotTheRun() throws Exception {
         news.responder = req -> new StubNews.Reply(429, "text/plain", "Too Many Requests", 0);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
@@ -239,7 +248,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(absent(run, "failure")).isTrue();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(news.requests).as("4 groups, one request each").hasSize(4);
+        assertThat(news.requests).as("20 queries, two requests each").hasSize(40);
         assertThat(list(plan(researchBody(sid, id)).get("queries"))).hasSize(20)
             .allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
     }
@@ -252,7 +261,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":20")));
-        assertThat(news.requests).hasSize(4);
+        assertThat(news.requests).as("one request per planned query").hasSize(20);
         assertThat(list(plan(researchBody(sid, id)).get("queries"))).hasSize(20).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("EMPTY");
             assertThat(q.get("articlesReturned")).isEqualTo(0);

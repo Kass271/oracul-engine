@@ -86,6 +86,12 @@ public class GenerationRunRepository {
             + "where id = ? and status = 'QUEUED' and deadline_at > ?", now, id, now) == 1;
     }
 
+    /** The run's deadline, null when the run does not exist. */
+    java.time.Instant deadlineAt(UUID id) {
+        return jdbc.query("select deadline_at from generation_run where id = ?",
+            rs -> rs.next() ? rs.getObject("deadline_at", OffsetDateTime.class).toInstant() : null, id);
+    }
+
     /** Stage transition of an active run. */
     void markStage(UUID id, RunStage stage, OffsetDateTime now) {
         jdbc.update("update generation_run set stage = ?, updated_at = ? where id = ? and status = 'RUNNING'",

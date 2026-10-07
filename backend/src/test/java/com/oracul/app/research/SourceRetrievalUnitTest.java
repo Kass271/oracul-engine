@@ -28,9 +28,15 @@ import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
-/** SourceRetrieval without Spring or internet: search budget, a failing article fetch, an interrupted wait (FR-13, FR-48). */
+/**
+ * SourceRetrieval without Spring or internet: the search window, a failing article fetch, an interrupted wait (FR-13, FR-48,
+ * FR-52). The new constructor {@code SourceRetrieval(NewsSearchProvider, ArticleMetadataFetcher, SourceQualityTable, Clock,
+ * Duration searchWindow, int)} and {@code GoogleNewsSearch} are reached reflectively (they do not exist while the RED tests
+ * are written).
+ */
 // @trace FR-13
 // @trace FR-48
+// @trace FR-52
 // @trace FR-56
 @Timeout(30)
 class SourceRetrievalUnitTest {
@@ -74,10 +80,15 @@ class SourceRetrievalUnitTest {
         fetchers.forEach(f -> f.release.countDown());
     }
 
-    private SourceRetrieval retrieval(NewsProvider provider, FakeFetcher fetcher, Duration budget) {
+    private SourceRetrieval retrieval(NewsProvider provider, FakeFetcher fetcher, Duration window, Clock clock) {
         fetchers.add(fetcher);
         SourceQualityTable table = new SourceQualityTable("who.int", "nature.com", "reuters.com", "medium.com");
-        return new SourceRetrieval(provider, fetcher.fetcher, table, CLOCK, Duration.ofMillis(1), Duration.ofSeconds(1), budget, 2);
+        Object search = ParallelSearchSupport.googleSearch(provider, 1, Duration.ofSeconds(1), Duration.ZERO);
+        return ParallelSearchSupport.retrieval(search, fetcher.fetcher, table, clock, window, 2);
+    }
+
+    private SourceRetrieval retrieval(NewsProvider provider, FakeFetcher fetcher, Duration window) {
+        return retrieval(provider, fetcher, window, CLOCK);
     }
 
     private static SearchPlan plan(String... texts) {
@@ -105,13 +116,14 @@ class SourceRetrievalUnitTest {
     }
 
     @Test
-    void noRequestStartsWhenTheSearchBudgetEndsWhileTheRunGuardIsBeingAsked() throws Exception {
+    void noRequestStartsWhenTheSearchWindowEndsWhileTheRunGuardIsBeingAsked() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         NewsProvider provider = (q, max, timeout) -> {
             requests.incrementAndGet();
             return new NewsProvider.Result(SearchQueryStatus.EMPTY, List.of());
         };
-        SourceRetrieval retrieval = retrieval(provider, new FakeFetcher(false), Duration.ofMillis(40));
+        // a real clock: the 40 ms window is over while the guard sleeps 150 ms
+        SourceRetrieval retrieval = retrieval(provider, new FakeFetcher(false), Duration.ofMillis(40), Clock.systemUTC());
         SourceRetrieval.SearchOutcome out = retrieval.search(plan("alpha", "beta", "gamma", "delta"), HorizonCode._1Y, () -> {
             try {
                 Thread.sleep(150);
@@ -125,6 +137,38 @@ class SourceRetrievalUnitTest {
         assertThat(out.articlesRetrieved()).isZero();
         assertThat(out.plan().getQueries()).extracting(SearchQuery::getStatus)
             .containsOnly(SearchQueryStatus.FAILED);
+    }
+
+    @Test
+    void aFixedTestClockNeverEndsTheSearchWindow() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        NewsProvider provider = (q, max, timeout) -> {
+            requests.incrementAndGet();
+            return new NewsProvider.Result(SearchQueryStatus.EMPTY, List.of());
+        };
+        SourceRetrieval retrieval = retrieval(provider, new FakeFetcher(false), Duration.ofMillis(1));
+        SourceRetrieval.SearchOutcome out = retrieval.search(plan("alpha", "beta", "gamma", "delta"), HorizonCode._1Y, () -> {
+            try {
+                Thread.sleep(30);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return true;
+        });
+        assertThat(requests).as("the clock never moves, so the 1 ms window is never over").hasValue(4);
+        assertThat(out.plan().getQueries()).extracting(SearchQuery::getStatus).containsOnly(SearchQueryStatus.EMPTY);
+    }
+
+    @Test
+    void everyQueryOfThePlanIsSentOnceAndAttributedToItself() throws Exception {
+        NewsProvider provider = (q, max, timeout) -> new NewsProvider.Result(SearchQueryStatus.OK,
+            List.of(new NewsProvider.Article("https://example.com/" + q.replace(' ', '-').replace(':', '_'), "Headline " + q, null, "Wire", null)));
+        SourceRetrieval retrieval = retrieval(provider, new FakeFetcher(false), Duration.ofSeconds(30));
+        SourceRetrieval.SearchOutcome out = retrieval.search(plan("alpha", "beta", "gamma"), HorizonCode._1Y);
+        assertThat(out.plan().getQueries()).extracting(SearchQuery::getStatus).containsOnly(SearchQueryStatus.OK);
+        assertThat(out.ordered()).extracting(SourceRetrieval.Attributed::queryId).containsExactly("Q01", "Q02", "Q03");
+        assertThat(out.articles().get("Q02")).extracting(NewsProvider.Article::title).containsExactly("Headline beta when:90d");
+        assertThat(out.searches()).isEqualTo(3);
     }
 
     @Test

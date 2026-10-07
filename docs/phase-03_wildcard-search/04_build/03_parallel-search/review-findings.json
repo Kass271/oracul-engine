@@ -1,0 +1,91 @@
+{
+  "slice": "03_parallel-search",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/AbstractNewsSearchIT.java",
+      "line": 58,
+      "fr": "FR-52",
+      "problem": "This slice made the suite slower. ParallelSearchIT adds 41 test invocations on AbstractNewsSearchIT, and each one pays the fixed `Thread.sleep(1500)` in resetNews() (@BeforeEach). That is about 61 s of the class's measured 74.9 s (build/test-results: ParallelSearchIT time=74.906), so it is now the slowest class, ahead of GoogleNewsSourceIT (65 s, the earlier slowest). Most of these cases (7 horizons, 10 failure classes, 6 item counts, 4 sent texts) never start a run, so they have no in-flight request from an earlier run to wait for. testing-rules 'Wait for a condition, never a fixed time' applies. Round 3: unchanged. resetNews() still sleeps 1500 ms (line 57), and ParallelSearchIT still takes 74.8 s in build/test-results. Round 4: fixed. resetNews() now polls news.open() every 10 ms, for at most 1.5 s, after the existing QUEUED/RUNNING wait (lines 57-61), and StubNews.open() returns the live counter. The epoch guard keeps a handler from an earlier test from decrementing the counter after reset(). ParallelSearchIT now takes 13.0 s (build/test-results, 41 tests, 0 failures). The isolation gap that remains is recorded as R7 (low).",
+      "fix": "Replace the fixed sleep with a bounded wait on a condition: no run QUEUED/RUNNING (already polled) and no open /rss/search exchange on the stub (StubNews already tracks `open`; expose an `open()` getter and poll until it is 0, at most 1.5 s). Or move the pure dispatcher matrices (horizons, failure classes, item counts, sent texts) to a plain-JUnit class over `new GoogleNewsSearch(new GoogleNewsProvider(StubNews.INSTANCE.baseUrl()), …)`, as GoogleNewsSearchConcurrencyTest does.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/GoogleNewsSearchConcurrencyTest.java",
+      "line": 143,
+      "fr": "FR-52",
+      "problem": "theCallReturnsOnlyWhenEveryRequestHasEnded asserts `System.nanoTime() >= lastFinished`. That is always true once finishedNanos has been read, so it proves nothing about the join. The real proof is the allSatisfy(OK, 1 article) check, plus ParallelSearchRunIT's arrival-order check. The `hasSize(9)` on finishedNanos also races with the stub thread, which writes the entry just after send(). Round 3: unchanged (now lines 141-143). Round 4: fixed. The tautology and the racy finishedNanos size check are gone. Only the query 'concurrency9 topic9' gets an 800 ms delay ('concurrency9 ' matches only text 9 of 9), the others 100 ms, and the request timeout is 10 s. The test asserts elapsed >= 800 ms and 9 OK results with 1 article each.",
+      "fix": "Remove the tautological assertion. Instead give one query a much longer delay (for example Q09 at 800 ms, the others at 100 ms) and assert that the call took at least 800 ms and that Q09 is OK with its item.",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/GoogleNewsSearchConcurrencyTest.java",
+      "line": 116,
+      "fr": "FR-52",
+      "problem": "Spec rule: 'the guard is checked before every request and retry'. GoogleNewsSearch.run() does check mayStart before the 429 retry (line 170), but no test covers it. If the guard turns false (STOP) during the rate-limit wait, there must be no retry and the query must be FAILED. A regression that drops this check would pass every current test.",
+      "fix": "Add a case with concurrency 1, rate-limit-wait PT0.2S, a responder that answers 429 first, and a guard that turns false after the first request. Expect exactly 1 request and FAILED.",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/research/NewsProvider.java",
+      "line": 19,
+      "fr": "FR-52",
+      "problem": "The slice spec names the factory `static Result rateLimited()`. The code calls it `tooManyRequests()`. The deviation is forced: a static no-arg `rateLimited()` would clash with the record accessor `rateLimited()` of the `boolean rateLimited` component. Behaviour is as specified (FAILED, no articles, rateLimited true), but the spec and the code disagree. Round 4: unchanged (test-only round, production and ParallelSearchSupport not touched).",
+      "fix": "Keep `tooManyRequests()` and correct the slice delta in wildcard-search.md (analyst) so the spec names a method that can exist.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ParallelSearchSerialIT.java",
+      "line": 7,
+      "fr": "FR-52",
+      "problem": "ParallelSearchSerialIT declares `oracul.news.google.concurrency=1` again, although AbstractNewsSearchIT already sets it. The merged property array differs from the base's, so this 1-test class starts its own Spring context. ParallelSearchTimingIT (concurrency 8, timeout PT10S) and ParallelSearchIT (concurrency 8, timeout PT1S) also differ only in the timeout, which costs another context. Round 4: fixed. The redundant @TestPropertySource is removed, so ParallelSearchSerialIT now has the same configuration as SourceCapIT (AbstractNewsSearchIT, no extra properties) and shares its cached context. The optional Timing/ParallelSearchIT context merge was not done; it is a suggestion only.",
+      "fix": "Drop the redundant @TestPropertySource from ParallelSearchSerialIT. Consider running the timing case in ParallelSearchIT's context with a per-test responder delay below its 1 s timeout (for example 9 queries x 800 ms and a < 3 s bound), or with a timeout shared by both classes.",
+      "status": "fixed"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ParallelSearchSupport.java",
+      "line": 31,
+      "fr": "FR-52",
+      "problem": "GoogleNewsSearch, SearchBudget, NewsSearchProvider and the new SourceRetrieval constructor now exist, but every new test still reaches them by reflection (method lookup by name and signature string). A later rename or signature change shows up only as a runtime 'is missing' failure, with no compile error and no IDE refactoring support. Round 4: unchanged (test-only round, production and ParallelSearchSupport not touched).",
+      "fix": "Now that the slice is GREEN, replace the reflective calls with direct calls (same package) and keep only the startup helpers that need ApplicationContextRunner.",
+      "status": "open"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/AbstractNewsSearchIT.java",
+      "line": 59,
+      "fr": "FR-52",
+      "problem": "Isolation check on the new condition wait. open() counts only /rss/search exchanges between handler entry and the written answer. Three cases fall outside it. (1) A request from a run that has just turned terminal: it passed guard.check (RunGuard re-reads the row) but has not yet reached handleSearch, so it is not open yet. (2) A redirect follow-up (/rss/articles/x 302 -> /articles/x): the HTTP client follows it without a guard check. (3) An article fetch in flight: handleArticle never touches open. The old 1.5 s sleep covered these windows; the poll now exits at once when open()==0. A late arrival lands after news.reset() and pollutes news.paths, requests or arrivals of the next test. Several tests assert on these lists, for example GoogleNewsSearchIT:183 `paths isEmpty`, the `containsOnly(\"/rss/search\")` checks and NoFallbackSearchIT:92 `paths hasSize(started)`. The window is a few ms on loopback, and it opens only when a run of another class (AbstractRunIT, same JVM and same singleton stub) ends FAILED (STOP, RUN_TIMEOUT) in the middle of a stage. Runs that end COMPLETED have joined all their requests. The direct SourceRetrieval.search calls of these ITs join before they return. No flake has been observed, and the green related-class run did not include the runs ITs.",
+      "fix": "Make the wait settle: after open()==0, also require that arrivals.size() stays unchanged for a short quiet period (for example 50 ms, still bounded by the 1.5 s). Optionally, count /rss/articles and /articles exchanges in a second open counter. Or skip the extra wait entirely when no run reached a terminal state since the previous reset (for example, compare max(updated_at) of generation_run).",
+      "status": "open"
+    }
+  ]
+}

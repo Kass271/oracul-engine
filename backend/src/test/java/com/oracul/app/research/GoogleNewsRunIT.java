@@ -13,10 +13,10 @@ import org.springframework.test.context.TestPropertySource;
 
 /**
  * phase-02 news-search.md FR-48 + FR-46 through whole runs (phase-03 FR-49: Google is the only provider): Google News RSS
- * answers every group of fixture F240 (items with " - Reuters" title suffixes), the run keeps 30 of the 205 usable
+ * answers every query of fixture F240 (items with " - Reuters" title suffixes), the run keeps 30 of the 205 usable
  * candidates, resolves their links through the article fetch and exposes publisherUrl; failing and empty feeds.
  */
-// @trace FR-46, FR-48, FR-49
+// @trace FR-46, FR-48, FR-49, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
@@ -37,10 +37,10 @@ class GoogleNewsRunIT extends AbstractEventIT {
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("searches")).isEqualTo(18);
-        assertThat(counts.get("articlesRetrieved")).as("every item of the answered groups").isEqualTo(240);
+        assertThat(counts.get("articlesRetrieved")).as("every item of the answered queries").isEqualTo(240);
         assertThat(counts.get("articlesConsidered")).isEqualTo(30);
-        assertThat(news.requests).as("18 queries go out as 4 OR-group requests (5,5,4,4)").hasSize(4);
-        assertThat(news.requests.stream().map(r -> r.elements().size()).toList()).containsExactly(5, 5, 4, 4);
+        assertThat(news.requests).as("18 queries go out as 18 requests").hasSize(18);
+        assertThat(news.requests.stream().map(r -> r.elements().size()).distinct().toList()).as("one text per request").containsExactly(1);
         assertThat(news.paths).as("no request to a former provider path").noneMatch(p -> p.startsWith("/api/v2/doc"));
 
         Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
@@ -50,7 +50,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
         List<String> topicOfQuery = new ArrayList<>();
         int returned = 0;
         for (Map<String, Object> q : queries) {
-            assertThat(q.get("status")).as("every group was answered").isEqualTo("OK");
+            assertThat(q.get("status")).as("every query was answered").isEqualTo("OK");
             returned += ((Number) q.get("articlesReturned")).intValue();
             topicOfQuery.add(F240Support.topicOf(intents.get((String) q.get("intentId"))));
         }
@@ -86,30 +86,30 @@ class GoogleNewsRunIT extends AbstractEventIT {
 
     @SuppressWarnings("unchecked")
     @Test
-    void oneGoogleGroupFailingFailsOnlyThatGroupAndSendsNothingElse() throws Exception {
+    void oneGoogleQueryFailingFailsOnlyThatQueryAndSendsNothingElse() throws Exception {
         news.responder = req -> req.number() == 2 ? StubNews.status(503) : f240(req);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
-        assertThat(news.requests).as("one request per group, no fallback request").hasSize(4);
+        assertThat(news.requests).as("one request per query, no fallback request, a 503 is not retried").hasSize(18);
         assertThat(news.paths).noneMatch(p -> p.startsWith("/api/v2/doc"));
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("searches")).isEqualTo(18);
-        assertThat(counts.get("articlesRetrieved")).as("240 minus the 66 items of the failed group (r6 has 14, r7-r10 have 13)").isEqualTo(174);
+        assertThat(counts.get("articlesRetrieved")).as("240 minus the 14 items of the failed query (r2 has 14)").isEqualTo(226);
         assertThat(counts.get("articlesConsidered")).isEqualTo(30);
         List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
         for (int i = 0; i < queries.size(); i++) {
             Map<String, Object> q = queries.get(i);
-            boolean inFailedGroup = i >= 5 && i <= 9; // group 2 = Q06..Q10
-            assertThat(q.get("status")).as(q.get("id").toString()).isEqualTo(inFailedGroup ? "FAILED" : "OK");
-            if (inFailedGroup) assertThat(q.get("articlesReturned")).isEqualTo(0);
+            boolean failedQuery = i == 1; // request number 2 = Q02
+            assertThat(q.get("status")).as(q.get("id").toString()).isEqualTo(failedQuery ? "FAILED" : "OK");
+            if (failedQuery) assertThat(q.get("articlesReturned")).isEqualTo(0);
         }
         List<Map<String, Object>> sources = sourceItems(sid, id);
         assertThat(sources).hasSize(30);
         assertThat(sources).allSatisfy(s -> assertThat(s.get("publisherUrl")).as("every source comes from a Google item").isEqualTo(REUTERS));
-        assertThat(sources.stream().flatMap(s -> ((List<String>) s.get("queryIds")).stream()).filter(q -> List.of("Q06", "Q07", "Q08", "Q09", "Q10").contains(q)))
-            .as("no source belongs to a query of the failed group").isEmpty();
+        assertThat(sources.stream().flatMap(s -> ((List<String>) s.get("queryIds")).stream()).filter(q -> q.equals("Q02")))
+            .as("no source belongs to the failed query").isEmpty();
     }
 
     @SuppressWarnings("unchecked")
@@ -120,7 +120,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
-        assertThat(news.requests).hasSize(4);
+        assertThat(news.requests).as("one request per query").hasSize(18);
         assertThat(news.paths).noneMatch(p -> p.startsWith("/api/v2/doc"));
         List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
         assertThat(queries).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("EMPTY"));
@@ -158,7 +158,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(run.get("failure")).isNull();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(news.requests).as("one request per group, 4 groups").hasSize(4);
+        assertThat(news.requests).as("one request per query, 18 queries").hasSize(18);
         assertThat(news.paths).as("no request to any other route").containsOnly("/rss/search");
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");

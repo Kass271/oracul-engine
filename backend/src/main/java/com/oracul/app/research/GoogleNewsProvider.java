@@ -27,7 +27,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-/** Google News RSS search (FR-48): one request per group, never retried; the answer is parsed as plain XML (no DTD). */
+/** Google News RSS search (FR-48): one request per query; the answer is parsed as plain XML (no DTD). */
 @Component
 public class GoogleNewsProvider implements NewsProvider {
 
@@ -48,12 +48,6 @@ public class GoogleNewsProvider implements NewsProvider {
             base = base.substring(0, base.length() - 1);
         }
         this.baseUrl = base;
-    }
-
-    /** {@code (<e1> OR <e2> ...) when:<N>d}; no parentheses around a single element. */
-    public static String q(List<String> elements, com.oracul.app.api.model.HorizonCode horizon) {
-        String body = elements.size() == 1 ? elements.get(0) : "(" + String.join(" OR ", elements) + ")";
-        return body + " when:" + GoogleQueryGroups.timespanDays(horizon) + "d";
     }
 
     /** Removes one trailing " - <source>" from the title (both trimmed). */
@@ -83,6 +77,9 @@ public class GoogleNewsProvider implements NewsProvider {
                 Map.of("Accept", ACCEPT, "User-Agent", USER_AGENT), timeout);
             if (response.status() / 100 != 2) {
                 log.warn("google news request failed: status={}", response.status());
+                if (response.status() == 429) {
+                    return NewsProvider.Result.tooManyRequests();
+                }
                 return NewsProvider.Result.failed();
             }
             return parse(response.body(), maxItems);

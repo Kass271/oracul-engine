@@ -21,8 +21,8 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
-// no wait between Google requests in ITs (a subclass may pin its own spacing)
-@org.springframework.test.context.TestPropertySource(properties = "oracul.news.google.request-spacing=PT0S")
+// FR-52: one Google request at a time in ITs, so request number k = plan query k (a subclass pins its own concurrency)
+@org.springframework.test.context.TestPropertySource(properties = "oracul.news.google.concurrency=1")
 abstract class AbstractNewsSearchIT {
 
     @Autowired
@@ -54,7 +54,11 @@ abstract class AbstractNewsSearchIT {
         if (jdbc.queryForObject(active, Integer.class) > 0) {
             jdbc.update("update generation_run set status = 'FAILED' where status in ('QUEUED','RUNNING')");
         }
-        Thread.sleep(1500); // a request already on the wire of a just-ended run
+        // a request already on the wire of a just-ended run: wait (bounded, 1.5 s) until no /rss/search exchange is open
+        long wireEnd = System.currentTimeMillis() + 1500;
+        while (news.open() > 0 && System.currentTimeMillis() < wireEnd) {
+            Thread.sleep(10);
+        }
         news.reset();
     }
 

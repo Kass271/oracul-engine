@@ -35,6 +35,9 @@ public final class StubNews {
     /** status 0 = drop the connection without answering. */
     public record Reply(int status, String contentType, String body, long delayMs) {}
 
+    /** One request of any route: its path and arrival time (System.nanoTime). */
+    public record Arrival(String path, long nanos) {}
+
     /** A custom article page for /articles/<name>. */
     public record Page(int status, String contentType, String body) {}
 
@@ -47,6 +50,14 @@ public final class StubNews {
     public final List<Request> requests = new CopyOnWriteArrayList<>();
     /** Every request path the stub receives (any route, also unknown ones), in arrival order; cleared by {@link #reset()}. */
     public final List<String> paths = new CopyOnWriteArrayList<>();
+    /** Every request of any route in arrival order with its arrival time; cleared by {@link #reset()}. */
+    public final List<Arrival> arrivals = new CopyOnWriteArrayList<>();
+    /** FR-52: request number to System.nanoTime() right after the answer was written or the connection was dropped. */
+    public final Map<Integer, Long> finishedNanos = new ConcurrentHashMap<>();
+    private final AtomicInteger open = new AtomicInteger();
+    /** Incremented by reset(): a handler that entered before a reset must not touch the counters of the next test. */
+    private volatile int epoch;
+    private final AtomicInteger maxOpen = new AtomicInteger();
     /** Names of the article pages (/articles/<name>) that were requested, in arrival order. */
     public final List<String> articleRequests = new CopyOnWriteArrayList<>();
     /** When set, every article page request waits until the latch is counted down (at most 60 s). */
@@ -83,7 +94,6 @@ public final class StubNews {
 
     public static void registerAll(DynamicPropertyRegistry r) {
         registerBaseUrls(r);
-        r.add("oracul.news.google.request-spacing", () -> "PT0S");
     }
 
     /** Points the Google News client at this stub (NFR-7): a request never reaches the real internet. */
@@ -99,6 +109,11 @@ public final class StubNews {
         if (gate != null) gate.countDown(); // never leave a handler thread parked
         requests.clear();
         paths.clear();
+        arrivals.clear();
+        finishedNanos.clear();
+        epoch++;
+        open.set(0);
+        maxOpen.set(0);
         counter.set(0);
         elementCounter.set(0);
         responder = defaultResponder();
@@ -110,6 +125,41 @@ public final class StubNews {
     /** Registers the og:site_name of /articles/<name>; unregistered pages keep "Stub Site". */
     public void site(String name, String siteName) {
         sites.put(name, siteName);
+    }
+
+    /** The {@code /rss/search} exchanges open right now (handler entry until the answer was written); 0 = nothing in flight. */
+    public int open() {
+        return open.get();
+    }
+
+    /** FR-52: the most {@code /rss/search} exchanges open at the same time since reset (open = handler entry until finished, incl. the reply delay). */
+    public int maxOpen() {
+        return maxOpen.get();
+    }
+
+    /** A Google answer of HTTP 429 (text/plain "Too Many Requests"). */
+    public static Reply tooMany() {
+        return new Reply(429, "text/plain", "Too Many Requests", 0);
+    }
+
+    /** The first request of each distinct {@code q} gets 429, later requests of that {@code q} get {@code then}. */
+    public static Function<Request, Reply> rateLimitedOnce(Function<Request, Reply> then) {
+        java.util.Set<String> seen = ConcurrentHashMap.newKeySet();
+        return req -> seen.add(req.q()) ? tooMany() : then.apply(req);
+    }
+
+    /** The reply of {@code then}, delayed by {@code ms}. */
+    public static Function<Request, Reply> slow(long ms, Function<Request, Reply> then) {
+        return req -> {
+            Reply r = then.apply(req);
+            return new Reply(r.status(), r.contentType(), r.body(), ms);
+        };
+    }
+
+    private void arrive(HttpExchange ex) {
+        String path = ex.getRequestURI().getPath();
+        paths.add(path);
+        arrivals.add(new Arrival(path, System.nanoTime()));
     }
 
     public static Reply status(int status) {
@@ -169,43 +219,61 @@ public final class StubNews {
 
     /** Any path no route handles (answers 404); recorded so that a request to a removed route is visible. */
     private void handleOther(HttpExchange ex) throws IOException {
-        paths.add(ex.getRequestURI().getPath());
+        arrive(ex);
         send(ex, 404, "text/plain", "not found".getBytes(StandardCharsets.UTF_8));
     }
 
     private void handleSearch(HttpExchange ex) throws IOException {
-        paths.add(ex.getRequestURI().getPath());
-        String raw = ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery();
-        Map<String, String> params = new LinkedHashMap<>();
-        for (String pair : raw.split("&")) {
-            if (pair.isEmpty()) continue;
-            int i = pair.indexOf('=');
-            params.put(URLDecoder.decode(i < 0 ? pair : pair.substring(0, i), StandardCharsets.UTF_8),
-                i < 0 ? "" : URLDecoder.decode(pair.substring(i + 1), StandardCharsets.UTF_8));
-        }
-        Map<String, String> headers = new LinkedHashMap<>();
-        ex.getRequestHeaders().forEach((k, v) -> headers.put(k.toLowerCase(), String.join(",", v)));
-        String q = params.getOrDefault("q", "");
-        List<String> elements = elementsOf(q);
-        int first = elementCounter.getAndAdd(elements.size()) + 1;
-        Request req = new Request(counter.incrementAndGet(), raw, params, q, elements, first, headers, System.nanoTime());
-        requests.add(req);
-        Reply reply;
+        arrive(ex);
+        int myEpoch = epoch;
+        int now = open.incrementAndGet();
+        maxOpen.accumulateAndGet(now, Math::max);
+        int number = -1;
+        boolean counted = true;
         try {
-            reply = responder.apply(req);
-        } catch (RuntimeException e) {
-            reply = status(500);
+            String raw = ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery();
+            Map<String, String> params = new LinkedHashMap<>();
+            for (String pair : raw.split("&")) {
+                if (pair.isEmpty()) continue;
+                int i = pair.indexOf('=');
+                params.put(URLDecoder.decode(i < 0 ? pair : pair.substring(0, i), StandardCharsets.UTF_8),
+                    i < 0 ? "" : URLDecoder.decode(pair.substring(i + 1), StandardCharsets.UTF_8));
+            }
+            Map<String, String> headers = new LinkedHashMap<>();
+            ex.getRequestHeaders().forEach((k, v) -> headers.put(k.toLowerCase(), String.join(",", v)));
+            String q = params.getOrDefault("q", "");
+            List<String> elements = elementsOf(q);
+            int first = elementCounter.getAndAdd(elements.size()) + 1;
+            Request req = new Request(counter.incrementAndGet(), raw, params, q, elements, first, headers, System.nanoTime());
+            number = req.number();
+            requests.add(req);
+            Reply reply;
+            try {
+                reply = responder.apply(req);
+            } catch (RuntimeException e) {
+                reply = status(500);
+            }
+            try {
+                if (reply.delayMs() > 0) Thread.sleep(reply.delayMs());
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            // no longer "open" once the client can see the answer (it may release its permit and send the next request at once)
+            if (myEpoch == epoch) {
+                open.decrementAndGet();
+                counted = false;
+            }
+            if (reply.status() == 0) {
+                ex.close();
+                return;
+            }
+            send(ex, reply.status(), reply.contentType(), reply.body().getBytes(StandardCharsets.UTF_8));
+        } finally {
+            if (myEpoch == epoch) {
+                if (number > 0) finishedNanos.put(number, System.nanoTime());
+                if (counted) open.decrementAndGet();
+            }
         }
-        try {
-            if (reply.delayMs() > 0) Thread.sleep(reply.delayMs());
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
-        }
-        if (reply.status() == 0) {
-            ex.close();
-            return;
-        }
-        send(ex, reply.status(), reply.contentType(), reply.body().getBytes(StandardCharsets.UTF_8));
     }
 
     /** Elements of a decoded Google query "(<e1> OR <e2>) when:7d" / "<e1> when:7d", unquoted. */
@@ -223,7 +291,7 @@ public final class StubNews {
 
     /** /rss/articles/<rest> answers 302 to {base}/articles/<rest> (the query string is dropped). */
     private void handleRssArticle(HttpExchange ex) throws IOException {
-        paths.add(ex.getRequestURI().getPath());
+        arrive(ex);
         String rest = ex.getRequestURI().getPath().substring("/rss/articles/".length());
         ex.getResponseHeaders().add("Location", baseUrl() + "/articles/" + rest);
         ex.sendResponseHeaders(302, -1);
@@ -231,7 +299,7 @@ public final class StubNews {
     }
 
     private void handleArticle(HttpExchange ex) throws IOException {
-        paths.add(ex.getRequestURI().getPath());
+        arrive(ex);
         String name = ex.getRequestURI().getPath().substring("/articles/".length());
         articleRequests.add(name);
         java.util.concurrent.CountDownLatch gate = articleGate;
@@ -263,7 +331,7 @@ public final class StubNews {
 
     /** /redirect/N answers 302 to /redirect/N-1; /redirect/0 is an article page "redirected". */
     private void handleRedirect(HttpExchange ex) throws IOException {
-        paths.add(ex.getRequestURI().getPath());
+        arrive(ex);
         int n = Integer.parseInt(ex.getRequestURI().getPath().substring("/redirect/".length()));
         if (n <= 0) {
             send(ex, 200, "text/html", html("redirected").getBytes(StandardCharsets.UTF_8));
@@ -276,7 +344,7 @@ public final class StubNews {
 
     /** /redirect-to?location=<url-encoded> answers 302 with that Location verbatim (FR-56 cases: any scheme, host, port). */
     private void handleRedirectTo(HttpExchange ex) throws IOException {
-        paths.add(ex.getRequestURI().getPath());
+        arrive(ex);
         String raw = ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery();
         String location = "";
         for (String pair : raw.split("&")) {
@@ -294,7 +362,7 @@ public final class StubNews {
      * {@code <meta property="og:description" content="Big page text">} starting at byte &lt;offset&gt; (default 0).
      */
     private void handleBig(HttpExchange ex) throws IOException {
-        paths.add(ex.getRequestURI().getPath());
+        arrive(ex);
         int size = Integer.parseInt(ex.getRequestURI().getPath().substring("/big/".length()));
         int offset = 0;
         String raw = ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery();

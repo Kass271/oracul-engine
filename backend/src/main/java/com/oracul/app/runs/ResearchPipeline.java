@@ -97,10 +97,12 @@ public class ResearchPipeline {
     boolean run(UUID runId, UUID sessionId, ScenarioConfiguration cfg, ResearchProfile profile)
         throws InterruptedException {
         // ---- stage 2: RESEARCH_STRATEGY ----
-        long started = begin(runId, RunStage.RESEARCH_STRATEGY);
+        Instant t0 = clock.instant();
+        long started = begin(runId, RunStage.RESEARCH_STRATEGY, t0);
         if (started < 0) {
             return false;
         }
+        Instant deadlineAt = runs.deadlineAt(runId);
         SearchPlan plan;
         try {
             SearchPlan template = planner.plan(profile, cfg, queryBudget);
@@ -117,13 +119,21 @@ public class ResearchPipeline {
         if (started < 0) {
             return false;
         }
-        SourceRetrieval.SearchOutcome outcome = retrieval.search(plan, cfg.getHorizon(), () -> guard.check(runId));
-        if (!guard.check(runId)) {
+        SourceRetrieval.SearchOutcome outcome = retrieval.search(plan, cfg.getHorizon(), t0, deadlineAt,
+            () -> guard.check(runId));
+        ResearchCounts counts = new ResearchCounts(outcome.searches(), outcome.articlesRetrieved(), 0, 0, 0, 0, 0);
+        Boolean searched = tx.execute(s -> {
+            if (!guard.lockAndCheck(runId)) {
+                s.setRollbackOnly();
+                return false;
+            }
+            runs.storeSearchResults(runId, outcome.plan(), counts, now());
+            return true;
+        });
+        if (!Boolean.TRUE.equals(searched)) {
             abandon(runId);
             return false;
         }
-        ResearchCounts counts = new ResearchCounts(outcome.searches(), outcome.articlesRetrieved(), 0, 0, 0, 0, 0);
-        runs.storeSearchResults(runId, outcome.plan(), counts, now());
         remainder(started);
 
         // ---- stage 4: READING_SOURCES ----
@@ -256,11 +266,15 @@ public class ResearchPipeline {
 
     /** Checks the run guard, then persists the stage; -1 when the run must be abandoned. */
     private long begin(UUID runId, RunStage stage) {
+        return begin(runId, stage, clock.instant());
+    }
+
+    private long begin(UUID runId, RunStage stage, Instant at) {
         if (!guard.check(runId)) {
             abandon(runId);
             return -1;
         }
-        runs.markStage(runId, stage, now());
+        runs.markStage(runId, stage, at.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC));
         return System.nanoTime();
     }
 

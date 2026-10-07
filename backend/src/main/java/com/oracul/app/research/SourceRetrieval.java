@@ -66,30 +66,26 @@ public class SourceRetrieval {
     /** FR-46: the most sources a run keeps. */
     public static final int MAX_SOURCES = SourceCap.MAX;
     private static final int GOOGLE_REDIRECTS = 5;
-    private static final int MAX_PER_QUERY = 25;
 
-    private final NewsProvider google;
-    private final Duration googleSpacing;
-    private final Duration googleTimeout;
+    private final NewsSearchProvider search;
     private final ArticleMetadataFetcher fetcher;
     private final SourceQualityTable quality;
     private final Clock clock;
-    private final Duration searchBudget;
+    private final Duration searchWindow;
     private final int fetchConcurrency;
     private final ExecutorService fetchPool;
 
-    SourceRetrieval(NewsProvider google, ArticleMetadataFetcher fetcher, SourceQualityTable quality, Clock clock,
-                    @Value("${oracul.news.google.request-spacing:PT1S}") Duration googleSpacing,
-                    @Value("${oracul.news.google.timeout:PT10S}") Duration googleTimeout,
-                    @Value("${oracul.news.search-budget:PT75S}") Duration searchBudget,
+    SourceRetrieval(NewsSearchProvider search, ArticleMetadataFetcher fetcher, SourceQualityTable quality, Clock clock,
+                    @Value("${oracul.search.search-window:PT60S}") Duration searchWindow,
                     @Value("${oracul.news.article-fetch-concurrency:8}") int fetchConcurrency) {
-        this.google = google;
-        this.googleSpacing = googleSpacing;
-        this.googleTimeout = googleTimeout;
+        if (searchWindow.isZero() || searchWindow.isNegative()) {
+            throw new IllegalStateException("oracul.search.search-window must be greater than zero");
+        }
+        this.search = search;
         this.fetcher = fetcher;
         this.quality = quality;
         this.clock = clock;
-        this.searchBudget = searchBudget;
+        this.searchWindow = searchWindow;
         this.fetchConcurrency = Math.max(1, fetchConcurrency);
         this.fetchPool = Executors.newVirtualThreadPerTaskExecutor();
     }
@@ -103,105 +99,36 @@ public class SourceRetrieval {
         return search(plan, horizon, () -> true);
     }
 
-    /**
-     * Sends the planned queries as 4 OR-group requests, one at a time and spaced (FR-48).
-     * {@code mayStart} is the run guard: no request starts once it says no.
-     */
     public SearchOutcome search(SearchPlan plan, HorizonCode horizon, BooleanSupplier mayStart)
         throws InterruptedException {
-        List<SearchQuery> queries = plan.getQueries();
-        String[] elements = new String[queries.size()];
-        List<Integer> sendable = new ArrayList<>();
-        for (int i = 0; i < queries.size(); i++) {
-            elements[i] = GoogleQueryGroups.element(queries.get(i).getText());
-            if (elements[i] != null) {
-                sendable.add(i);
-            }
-        }
-        long budgetEnd = System.nanoTime() + searchBudget.toNanos();
-        Scheduler scheduler = new Scheduler(budgetEnd, mayStart);
-        Map<String, List<NewsProvider.Article>> articles = new LinkedHashMap<>();
-        queries.forEach(q -> articles.put(q.getId(), new ArrayList<>()));
-        SearchQueryStatus[] status = new SearchQueryStatus[queries.size()];
-        java.util.Arrays.fill(status, SearchQueryStatus.EMPTY);
-        List<Attributed> ordered = new ArrayList<>();
+        return search(plan, horizon, clock.instant(), null, mayStart);
+    }
 
-        int from = 0;
-        for (int size : GoogleQueryGroups.groupSizes(sendable.size(), GoogleQueryGroups.GROUPS)) {
-            List<Integer> members = sendable.subList(from, from + size);
-            from += size;
-            List<String> groupElements = new ArrayList<>();
-            members.forEach(i -> groupElements.add(elements[i]));
-            int maxRecords = GoogleQueryGroups.maxRecords(MAX_PER_QUERY, size);
-            NewsProvider.Result result = scheduler.google(GoogleNewsProvider.q(groupElements, horizon), maxRecords);
-            if (result == null) {
-                result = NewsProvider.Result.failed(); // not started
-            }
-            if (result.status() == SearchQueryStatus.FAILED) {
-                log.warn("news group failed");
-                members.forEach(i -> status[i] = SearchQueryStatus.FAILED);
-                continue;
-            }
-            for (NewsProvider.Article a : result.articles()) {
-                int member = GoogleQueryGroups.attribute(groupElements, a.title());
-                int queryIndex = members.get(member);
-                articles.get(queries.get(queryIndex).getId()).add(a);
-                ordered.add(new Attributed(queries.get(queryIndex).getId(), a));
-                status[queryIndex] = SearchQueryStatus.OK;
-            }
-        }
+    /**
+     * One request per planned query (FR-52). {@code mayStart} is the run guard: no request starts once it says no;
+     * the window runs from {@code t0} and is cut by {@code deadlineAt} (null: none).
+     */
+    public SearchOutcome search(SearchPlan plan, HorizonCode horizon, Instant t0, Instant deadlineAt,
+                                BooleanSupplier mayStart) throws InterruptedException {
+        List<SearchQuery> queries = plan.getQueries();
+        List<String> texts = new ArrayList<>();
+        queries.forEach(q -> texts.add(q.getText()));
+        List<NewsSearchProvider.QueryResult> results = search.search(texts, horizon,
+            SearchBudget.search(clock, t0, searchWindow, deadlineAt), mayStart);
+        Map<String, List<NewsProvider.Article>> articles = new LinkedHashMap<>();
+        List<Attributed> ordered = new ArrayList<>();
         List<SearchQuery> updated = new ArrayList<>();
         for (int i = 0; i < queries.size(); i++) {
             SearchQuery q = queries.get(i);
-            updated.add(new SearchQuery(q.getId(), q.getIntentId(), q.getBucket(), q.getText(), status[i],
-                articles.get(q.getId()).size()));
+            NewsSearchProvider.QueryResult r = results.get(i);
+            List<NewsProvider.Article> own = new ArrayList<>(r.articles());
+            articles.put(q.getId(), own);
+            own.forEach(a -> ordered.add(new Attributed(q.getId(), a)));
+            updated.add(new SearchQuery(q.getId(), q.getIntentId(), q.getBucket(), q.getText(), r.status(), own.size()));
         }
         SearchPlan out = new SearchPlan(plan.getQueryBudget(), plan.getExpansionMode(), plan.getBuckets(),
             plan.getIntents(), updated);
         return new SearchOutcome(out, articles, ordered);
-    }
-
-    /** Serial, spaced Google requests inside the search budget (never retried). */
-    private final class Scheduler {
-        private final long budgetEnd;
-        private final BooleanSupplier mayStart;
-        private long lastGoogleStart;
-        private boolean googleStarted;
-
-        Scheduler(long budgetEnd, BooleanSupplier mayStart) {
-            this.budgetEnd = budgetEnd;
-            this.mayStart = mayStart;
-        }
-
-        /** One Google request (never retried); null when it could not be started (budget, deadline, STOP). */
-        NewsProvider.Result google(String q, int maxItems) throws InterruptedException {
-            long now = System.nanoTime();
-            long start = googleStarted ? Math.max(now, lastGoogleStart + googleSpacing.toNanos()) : now;
-            if (start >= budgetEnd) {
-                log.warn("news request skipped: search budget exhausted");
-                return null;
-            }
-            sleepUntil(start);
-            if (!mayStart.getAsBoolean()) {
-                return null;
-            }
-            now = System.nanoTime();
-            long left = budgetEnd - now;
-            if (left <= 0) {
-                log.warn("news request skipped: search budget exhausted");
-                return null;
-            }
-            lastGoogleStart = now;
-            googleStarted = true;
-            return google.search(q, maxItems, Duration.ofNanos(Math.min(googleTimeout.toNanos(), left)));
-        }
-
-        private void sleepUntil(long nanoTime) throws InterruptedException {
-            long wait;
-            while ((wait = nanoTime - System.nanoTime()) > 0) {
-                Thread.sleep(wait / 1_000_000, (int) (wait % 1_000_000));
-            }
-        }
     }
 
     private record Candidate(NewsProvider.Article article, String url, List<String> queryIds, String topic,
@@ -256,7 +183,7 @@ public class SourceRetrieval {
     private List<Candidate> filter(SearchOutcome outcome, HorizonCode horizon) {
         Map<String, SearchIntent> intents = new HashMap<>();
         outcome.plan().getIntents().forEach(in -> intents.put(in.getId(), in));
-        Instant cutoff = clock.instant().minus(GoogleQueryGroups.timespanDays(horizon), ChronoUnit.DAYS);
+        Instant cutoff = clock.instant().minus(GoogleNewsSearch.timespanDays(horizon), ChronoUnit.DAYS);
         Map<String, SearchQuery> byId = new HashMap<>();
         outcome.plan().getQueries().forEach(q -> byId.put(q.getId(), q));
         Map<String, Candidate> byUrl = new LinkedHashMap<>();

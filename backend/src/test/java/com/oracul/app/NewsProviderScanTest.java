@@ -22,7 +22,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * {@code relative/path:line} that holds the search word in any letter case; plus the removed-property check over
  * {@code backend/src/main/**}. This file is excluded from the scan by its own path (it holds the search word).
  */
-// @trace FR-49
+// @trace FR-49, FR-52
 class NewsProviderScanTest {
 
     /** The search word, matched case-insensitively. */

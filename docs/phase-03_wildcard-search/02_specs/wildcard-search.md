@@ -327,6 +327,113 @@ Removed (no longer read; a value that is still set is ignored and the backend st
   exactly 2 requests; 101 items → `articlesReturned` 100. Join invariant: the first selection / Google-page / decode /
   publisher request of the run starts after the last search request ended (stub event order). Σ `articlesReturned`
   = `articlesRetrieved`; a query is FAILED iff it got no answer (failed, retried and failed, cut off or never sent).
+  Slice 03 additions: (a) sent text (unit, `GoogleNewsSearch.text`): `pandemic vaccine` → `pandemic vaccine`;
+  `"mRNA vaccine" approval` → `mRNA vaccine approval`; `(fusion OR fission) energy` → `fusion fission energy`;
+  `“curly” quotes` → `curly quotes`; `a  b<TAB>c` → `a b c`; `war or peace` → `war or peace` (lower-case `or` is a word);
+  `OR AND NOT`, blank, null → null (not sent, EMPTY — the only EMPTY without an answer, transitional until 04);
+  (b) startup classes: `oracul.news.google.concurrency` 0, 9, -1 → fails naming the property; 1, 8 → starts;
+  `oracul.news.google.rate-limit-wait` `PT0S` → starts, `-PT1S` → fails naming it; `oracul.search.search-window`
+  `PT0S`, `-PT1S` → fails naming it, `PT0.001S` → starts; (c) window cut: `search-window` PT2S, concurrency 8, 20
+  queries, every answer delayed 1.5 s → exactly 16 requests, Q01–Q08 EMPTY, Q09–Q20 FAILED, call returns in < 2.5 s,
+  `google news request skipped: search window ended` logged 4 times; a 429 whose wait would end after the window →
+  FAILED after 1 request; (d) guard: false from the start → 0 requests, every query FAILED; with concurrency 1 and a
+  guard that turns false after k requests (k = 0, 1, 5) → exactly k requests, Q(k+1)… FAILED; (e) order invariant:
+  the outcome (statuses, `articlesReturned`, `ordered`, every source's `queryIds` and order) is identical for
+  concurrency 1 and 8 when a `q`-keyed responder delays the answers in reverse plan order (Q20 fastest); `ordered` =
+  plan order, then feed order; a source's `queryIds` = exactly the queries whose own answer held its normalised URL,
+  sorted; (f) `counts.searches` = number of planned queries (also the unsendable ones).
+- Changes earlier behaviour: FR-48 OR-group search (4 requests `(<e1> OR …) when:<N>d`, serial, `google.request-spacing` apart, items per group min(250, 25 × size), each item attributed to a query by its title) → one `GET /rss/search` per planned query, `q` = cleaned text + ` when:<N>d` (no `(`, `)`, `"`, ` OR `), dispatched in plan order to at most `oracul.news.google.concurrency` (8) open requests without spacing, at most 100 items read per answer, each item belongs to the query whose request returned it; a run of the 20-query plan now sends 20 requests (18 for the F240 budget) instead of 4, `StubNews.Request.elements()` always has one entry, a failing request fails one query instead of a group, the shared F240 / E2E article lists every query that returned it; `GoogleQueryGroups` (grouping, attribution, `maxRecords`, quoting) is deleted, its cleaning and `timespanDays` move to `GoogleNewsSearch`; the OR-group rules test class is deleted, not rewritten (FR-52 supersedes the OR-group behaviour) — removed tests: `research/GoogleQueryGroupsRulesTest.java` (under `backend/src/test/java/com/oracul/app/`); its cleaning/`timespanDays` cases live in GoogleNewsSearchTextTest (tests: backend/src/test/java/com/oracul/app/research/GoogleNewsSearchIT.java, backend/src/test/java/com/oracul/app/research/GoogleNewsTimingIT.java, backend/src/test/java/com/oracul/app/research/GoogleNewsSourceIT.java, backend/src/test/java/com/oracul/app/research/SourceRetrievalIT.java, backend/src/test/java/com/oracul/app/research/NoFallbackSearchIT.java, backend/src/test/java/com/oracul/app/research/GoogleNewsRunIT.java, backend/src/test/java/com/oracul/app/research/SourceFixtureIT.java, backend/src/test/java/com/oracul/app/research/SourceCapIT.java, backend/src/test/java/com/oracul/app/research/ResearchPlanIT.java, backend/src/test/java/com/oracul/app/research/ResearchPlanTimeoutIT.java, backend/src/test/java/com/oracul/app/runs/StopQueuedRunIT.java, backend/src/test/java/com/oracul/app/research/SourceQueryTimeoutIT.java)
+- Changes earlier behaviour: HTTP 429 → the group is FAILED after exactly one request, never retried → the query is retried once after `oracul.news.google.rate-limit-wait` (PT2S) with the identical request; 429 then 200 → OK after 2 requests; a second 429 or any failure of the retry → FAILED after 2 requests; log `google news request rate-limited, retrying once` (tests: backend/src/test/java/com/oracul/app/research/SourceRetrievalIT.java, backend/src/test/java/com/oracul/app/research/NoFallbackSearchIT.java, backend/src/test/java/com/oracul/app/research/GoogleNewsSearchIT.java)
+- Changes earlier behaviour: `oracul.news.search-budget` (PT75S, measured with System.nanoTime from the start of the search call, PT0S allowed = nothing sent, log `news request skipped: search budget exhausted`) → `oracul.search.search-window` (PT60S, must be > 0 or startup fails, measured on the injected `Clock` from t0 = start of RESEARCH_STRATEGY and cut by the run's `deadlineAt` through `SearchBudget`; log `google news request skipped: search window ended`); `SourceRetrieval`'s package-private constructor loses `googleSpacing`/`googleTimeout`/`searchBudget` and takes a `NewsSearchProvider` and `searchWindow`, so a fixed test clock never ends the window (tests: backend/src/test/java/com/oracul/app/research/GoogleNewsBudgetIT.java, backend/src/test/java/com/oracul/app/research/NewsSearchNoBudgetIT.java, backend/src/test/java/com/oracul/app/research/SourceRetrievalUnitTest.java)
+- Changes earlier behaviour: WARN `news group failed` once per failed group → no group line any more (a failed query logs only the provider lines `google news request failed: …` / `google news answer is not RSS`) (tests: backend/src/test/java/com/oracul/app/research/NoFallbackSearchIT.java, backend/src/test/java/com/oracul/app/research/GoogleNewsSearchIT.java)
+- Changes earlier behaviour: FR-49 range (3) "removed properties" covers 7 keys → 9 keys: + `oracul.news.search-budget`, `oracul.news.google.request-spacing` (and their env vars) are no longer read; the IT that sets all of them also sets these two (`PT0.001S`, `PT5S`) and now expects 20 requests (one per query), Q01 OK, Q02–Q20 EMPTY, all 20 arriving within 1 s (tests: backend/src/test/java/com/oracul/app/NewsProviderScanTest.java, backend/src/test/java/com/oracul/app/research/RemovedNewsPropertiesIT.java)
+- Changes earlier behaviour: test harness `oracul.news.google.request-spacing=PT0S` (`StubNews.registerAll`, `AbstractNewsSearchIT`) and arrival-only request records → `oracul.news.google.concurrency=1` in the property sources of `AbstractRunIT` and `AbstractNewsSearchIT` (so request number k = plan query k and `newsArticles` / `f240` / `req.number()` responders keep their meaning; FR-52 tests override it), `StubNews` gains `finishedNanos`, `maxOpen()`, `arrivals`, `tooMany()`, `rateLimitedOnce(…)`, `slow(…)` (harness contract below) (tests: backend/src/test/java/com/oracul/app/research/StubNews.java, backend/src/test/java/com/oracul/app/runs/AbstractRunIT.java, backend/src/test/java/com/oracul/app/research/AbstractNewsSearchIT.java)
+- Changes earlier behaviour: `docker-compose.e2e.yml` backend environment `ORACUL_NEWS_GOOGLE_REQUEST_SPACING: PT0.2S` → removed; `ORACUL_NEWS_GOOGLE_RATE_LIMIT_WAIT: PT0.2S` added (every other variable unchanged) (tests: e2e/tests/run-modes.spec.ts)
+- Changes earlier behaviour: E2E acceptance / failure runs send 4 `/rss/search` requests of the shape `(… OR …) when:90d`, ≥ 0.15 s apart, and the shared article has `queryIds` [Q01, Q06, Q11, Q16] → one request per planned query (`counts.searches`, 20 for body A), no `(`, `)`, `"` or ` OR ` in any `q`, no spacing (all 20 arrive within 1.5 s), the shared article lists all 20 query ids; `kind=all` holds 20 `/rss/search` entries; Google down / empty / malformed → 20 requests (503 is not retried); the ALTERNATIVE run still sends none (tests: e2e/tests/search-sources.spec.ts, e2e/tests/alternative-future.spec.ts, e2e/tests/insufficient-evidence.spec.ts)
+- Slice 03_parallel-search delta (step 4a) — what the tests pin down:
+  - **Scope.** Only the Google search of stage SEARCHING (and its budget) changes. The plan is still the phase-01 plan
+    (QUERY_EXPANSION, `searchPlan.queries[]`, statuses written there; `pipelines` comes in 04). Selection, the article
+    metadata fetch (SafeFetcher), `SourceCap`, events, pack and result are unchanged. Not read yet in this slice:
+    `oracul.search.query-generation-window` (04), `oracul.search.stage-budget` (08), `oracul.search.query-generation-concurrency` (04).
+  - **Sent text (transitional until 04's rule Q).** `GoogleNewsSearch.text(String queryText)` (public static): `"`, `“`,
+    `”`, `(`, `)` → space; whitespace collapsed and trimmed; standalone upper-case tokens `OR`, `AND`, `NOT` removed;
+    nothing left (or null) → null = the query is not sent and stays EMPTY with 0 items. Never quoted.
+    `GoogleNewsSearch.q(String text, HorizonCode h)` = text + ` when:` + `timespanDays(h)` + `d`;
+    `GoogleNewsSearch.timespanDays(HorizonCode)`: `1d`, `1w` → 7, `1m` → 14, `1y`, `5y`, `10y`, `20y` → 90 (also the age filter).
+  - **Production seams (package `com.oracul.app.research`).**
+    - `NewsProvider` (one request) stays: `Result search(String q, int maxItems, Duration timeout)`; `Result` becomes
+      `record Result(SearchQueryStatus status, List<Article> articles, boolean rateLimited)` with the old 2-argument
+      constructor kept (`rateLimited` false) and `static Result rateLimited()` (FAILED, no articles, `rateLimited` true).
+      `GoogleNewsProvider` returns `Result.rateLimited()` for HTTP 429 (log `google news request failed: status=429`);
+      `parse`, `cleanTitle`, `parseDate` unchanged; `q(List, HorizonCode)` is removed.
+    - `interface NewsSearchProvider { List<QueryResult> search(List<String> texts, HorizonCode horizon, SearchBudget budget,
+      BooleanSupplier mayStart) throws InterruptedException; record QueryResult(SearchQueryStatus status,
+      List<NewsProvider.Article> articles) {} }` — one result per text, same order; a null text → EMPTY without request.
+    - `GoogleNewsSearch implements NewsSearchProvider` (`@Component`). Spring constructor reads
+      `oracul.news.google.concurrency` (8), `oracul.news.google.timeout` (PT10S), `oracul.news.google.rate-limit-wait`
+      (PT2S); package-private test constructor `GoogleNewsSearch(NewsProvider provider, int concurrency, Duration timeout,
+      Duration rateLimitWait)`. Both throw `IllegalStateException` whose message contains the property name for
+      concurrency outside 1…8 or a negative rate-limit-wait. `MAX_ITEMS` = 100 (`maxItems` of every request).
+      Dispatch: one dispatcher walks the texts in plan order; for each sendable text it takes a permit of a fair
+      semaphore (`concurrency` permits), then checks `mayStart` and `budget.remaining(SEARCH)` (> 0), then starts the
+      request on a virtual thread with timeout min(`google.timeout`, remaining); the permit is released when the answer
+      (or failure) is in. So Q(k) starts only after Q(k−1) got its permit; with concurrency 1 the requests are strictly
+      sequential in plan order. A 429 releases the permit, waits `rate-limit-wait` (not if that ends at/after the window
+      end → FAILED at once), re-takes a permit, re-checks guard and window, sends the identical request once. The call
+      returns when every text has an outcome (join); a query whose permit or start check fails is FAILED (log `google news
+      request skipped: search window ended` when the window caused it; nothing extra for the guard).
+    - `record SearchBudget(Clock clock, Instant t0, Map<SearchBudget.Phase, Duration> windows, Instant deadlineAt)`;
+      `enum Phase { SEARCH }` in this slice (04 / 08 add their phases); `Duration remaining(Phase p)` = max(0,
+      min(t0 + window, deadlineAt) − clock.instant()) (`deadlineAt` null = no deadline; a phase without a window →
+      `IllegalArgumentException`); `boolean expired(Phase p)` = remaining is zero; `static SearchBudget search(Clock clock,
+      Instant t0, Duration searchWindow, Instant deadlineAt)`.
+    - `SourceRetrieval`: package-private constructor `SourceRetrieval(NewsSearchProvider search, ArticleMetadataFetcher
+      fetcher, SourceQualityTable quality, Clock clock, Duration searchWindow, int fetchConcurrency)`; Spring reads
+      `oracul.search.search-window` (PT60S; ≤ 0 → `IllegalStateException` naming it) and
+      `oracul.news.article-fetch-concurrency` (8). `search(plan, horizon)` and `search(plan, horizon, mayStart)` use t0 =
+      `clock.instant()` at the call and no deadline; `search(plan, horizon, Instant t0, Instant deadlineAt,
+      BooleanSupplier mayStart)` is the pipeline's call. `SearchOutcome(plan, articles, ordered)` keeps its shape:
+      `articles` = each query's own items (≤ 100, usable or not), `ordered` = plan order then feed order,
+      `Attributed.queryId` = the query whose request returned the item. `searches()` = planned queries.
+    - `ResearchPipeline`: t0 = the instant passed to `markStage(runId, RESEARCH_STRATEGY, …)`; `deadlineAt` = the run's
+      `deadline_at`, read once at RESEARCH_STRATEGY start; SEARCHING calls the 5-argument `search`; the SEARCHING commit
+      (plan statuses + counts) runs in one transaction after `guard.lockAndCheck(runId)` — a run that is no longer
+      RUNNING gets nothing written and is abandoned as today.
+  - **Harness contract (owner: tester).**
+    - `AbstractRunIT` and `AbstractNewsSearchIT` property sources: `oracul.news.google.concurrency=1` (replaces
+      `oracul.news.google.request-spacing=PT0S`; `StubNews.registerAll` no longer sets request-spacing). FR-52 classes
+      set `oracul.news.google.concurrency=8` in their own `@TestPropertySource` (a subclass value wins).
+      `SourceQueryTimeoutIT` may also set 8 (its assertions are counts only: 1 FAILED + 19 OK; all slow → 20 FAILED).
+    - `StubNews`: `Request` keeps its components. New, all cleared by `reset()`: `Map<Integer, Long> finishedNanos`
+      (request number → `System.nanoTime()` right after the answer was written or the connection was dropped);
+      `int maxOpen()` (most `/rss/search` exchanges open at the same time since reset; open = from handler entry until
+      finished, including the reply delay); `List<Arrival> arrivals` with `record Arrival(String path, long nanos)` for
+      every request of any route in arrival order. Responders: `static Reply tooMany()` (429 `text/plain` `Too Many
+      Requests`); `static Function<Request, Reply> rateLimitedOnce(Function<Request, Reply> then)` (the first request of
+      each distinct `q` → `tooMany()`, later requests of that `q` → `then`); `static Function<Request, Reply> slow(long ms,
+      Function<Request, Reply> then)` (the reply of `then` with `delayMs` = ms).
+    - Join check: every `arrivals` entry whose path is not `/rss/search` has `nanos` > max(`finishedNanos`).
+  - **New tests (suggested names, `// @trace FR-52`).** `ParallelSearchIT extends AbstractNewsSearchIT` (concurrency 8;
+    shape per horizon, 9 queries × 2 s → < 6 s with `maxOpen()` = 8, answer classes, 429 classes with the default PT2S
+    wait, 101 items → 100, order invariant (e), logs never contain a query text, `q` or a body); `ParallelSearchWindowIT`
+    (`oracul.search.search-window=PT2S`, range c); `GoogleNewsSearchConcurrencyTest` (plain JUnit:
+    `new GoogleNewsSearch(new GoogleNewsProvider(StubNews.INSTANCE.baseUrl()), c, PT10S, PT0S)`, c ∈ {1, 2, 8} × {9, 20}
+    queries with a 300 ms delay → `maxOpen()` = min(c, n); guard classes (d); startup classes (b) via both
+    constructors); `SearchBudgetTest` (NFR-10 unit classes for phase SEARCH); `ParallelSearchRunIT extends AbstractEventIT`
+    (concurrency 8, a `q`-keyed responder with 3 items per query: run COMPLETED, 20 requests, join check, every source's
+    `queryIds` = the query that returned it; STOP while 8 requests are held → after release no further `/rss/search`
+    arrives, the run stays STOPPED); `NewsSearchNoBudgetIT` rewritten on `AbstractDeadlineIT` (QUERY_EXPANSION held, the
+    `MutableClock` advanced 61 s (< 3 min run deadline), released → 0 `/rss/search`, all 20 FAILED, the window log line,
+    run COMPLETED with `evidenceNote.kind` NO_EVIDENCE).
+  - **E2E (`e2e/tests/search-sources.spec.ts`).** Body A run: `kind=rss` has `counts.searches` (20) entries; each has params
+    exactly `ceid`, `gl`, `hl`, `q`; every `q` matches `/^[^()"]+ when:90d$/` and contains no ` OR `; the sorted `q` list
+    equals the sorted `text(query) + ' when:90d'` of the plan's queries; max(`at`) − min(`at`) < 1500 ms;
+    `articlesRetrieved` 100, `articlesConsidered` 30, sources unchanged except `items[0].queryIds` = all 20 plan ids.
+    The E2E stub itself is unchanged in this slice (one element per request → 5 items; `/__control/rss` stays until 08).
+  - **Compose / stack.** `docker-compose.e2e.yml` as in the change line above; `docker-compose.yml` unchanged;
+    `.oracul/stack.json` unchanged (modes `e2e` and `run` start the same compose files).
+  - **Contract.** `api/openapi.yaml` stays 0.7.0: no path, operation, status, `ApiError.code` or schema change; only the
+    description of `SearchQuery.articlesReturned` names the per-query answer (≤ 100 since phase 03). No UI, no `data-testid`.
 
 ### FR-61 — E2E stub answers like real Google
 - Happy path: the Docker E2E stub (`e2e/stubs/server.mjs`) and the in-process backend test stub (`StubNews`, formerly

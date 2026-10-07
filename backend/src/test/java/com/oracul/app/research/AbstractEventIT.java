@@ -154,8 +154,8 @@ public abstract class AbstractEventIT extends AbstractRunIT {
     private static final String F240_PUBLISHER_URL = "https://www.reuters.com";
 
     /**
-     * Fixture F240 (205 usable candidates after filtering) as Google News items: per OR element (global element index r =
-     * {@code req.firstElement() + e}) the block of items r-a1 ... Every pubDate is {@code testNow - 1 day} except the
+     * Fixture F240 (205 usable candidates after filtering) as Google News items: per query (FR-52: one text per request, so the
+     * query number r = {@code req.firstElement()} = the request number at concurrency 1) the block of items r-a1 ... Every pubDate is {@code testNow - 1 day} except the
      * deliberately old ones; "unusable link" entries (javascript:void(0)) and blank titles are filtered by the pipeline.
      */
     protected StubNews.Reply f240(StubNews.Request req) {

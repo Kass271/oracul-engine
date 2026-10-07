@@ -1,0 +1,37 @@
+package com.oracul.app.research;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+
+/** NFR-10 part 1: the time window of a search phase, measured on the injected clock and cut by the run's deadline. */
+public record SearchBudget(Clock clock, Instant t0, Map<Phase, Duration> windows, Instant deadlineAt) {
+
+    /** Phases with a window (later slices add more). */
+    public enum Phase {
+        SEARCH
+    }
+
+    public static SearchBudget search(Clock clock, Instant t0, Duration searchWindow, Instant deadlineAt) {
+        return new SearchBudget(clock, t0, Map.of(Phase.SEARCH, searchWindow), deadlineAt);
+    }
+
+    /** max(0, min(t0 + window, deadlineAt) - now). */
+    public Duration remaining(Phase phase) {
+        Duration window = windows.get(phase);
+        if (window == null) {
+            throw new IllegalArgumentException("no window for phase " + phase);
+        }
+        Instant end = t0.plus(window);
+        if (deadlineAt != null && deadlineAt.isBefore(end)) {
+            end = deadlineAt;
+        }
+        Duration left = Duration.between(clock.instant(), end);
+        return left.isNegative() ? Duration.ZERO : left;
+    }
+
+    public boolean expired(Phase phase) {
+        return remaining(phase).isZero();
+    }
+}

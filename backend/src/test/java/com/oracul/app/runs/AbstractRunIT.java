@@ -41,6 +41,8 @@ import org.springframework.test.web.servlet.ResultActions;
     "oracul.evidence.min-core.high=0",
     "oracul.evidence.min-core.medium=0",
     "oracul.evidence.min-core.low=0",
+    // FR-52: one Google request at a time, so request number k = plan query k (the FR-52 tests set 8 themselves)
+    "oracul.news.google.concurrency=1",
 })
 public abstract class AbstractRunIT {
 

@@ -23,12 +23,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * phase-02 news-search.md FR-46 "At most 30 sources per run", exhaustive over the count and round-robin classes and the
- * invariants of the spec. The stage seams are the existing ones: {@code SourceRetrieval.search} (4 Google groups; the
- * plan is laid out so that group 1 holds every topic query, the stub answers that group in the arrival order of the
- * test and the three others with the empty feed) followed by {@code readSources}. Candidates are told apart by topic
- * (intent topicKey of their query) and quality (publisher domain through the quality table).
+ * invariants of the spec. The stage seams are the existing ones: {@code SourceRetrieval.search} (one Google request per
+ * query, FR-52: the stub answers the query of topic t with the candidates of topic t, so a candidate belongs to the
+ * query that returned it and the arrival order is plan order, then feed order) followed by {@code readSources}.
+ * Candidates are told apart by topic (intent topicKey of their query) and quality (publisher domain through the quality
+ * table).
  */
-// @trace FR-46
+// @trace FR-46, FR-52
 class SourceCapIT extends AbstractNewsSearchIT {
 
     private static final AtomicInteger RUN = new AtomicInteger();
@@ -63,23 +64,20 @@ class SourceCapIT extends AbstractNewsSearchIT {
         return "topic-" + topic;
     }
 
-    /** Result of one run of the stage pair. */
-    record Kept(List<String> names, List<Map<String, Object>> sources, int fetches, int retrieved) {}
+    /** Result of one run of the stage pair; {@code arrival} = the candidates in the order the search delivered them. */
+    record Kept(List<String> names, List<Map<String, Object>> sources, int fetches, int retrieved, List<C> arrival) {}
 
     /**
-     * Runs search + readSources over the candidates (arrival order = list order). {@code extra} lists, per candidate name, a second
-     * topic whose query lists the same URL later in the same answer.
+     * Runs search + readSources over the candidates. The query of topic t (Q0(t+1)) answers the candidates of topic t in list
+     * order, then the candidates listed in {@code extra} with second topic t; the no-topic query comes after the topic
+     * queries. {@code extra} lists, per candidate name, a second topic whose query lists the same URL.
      */
     private Kept stage(List<C> cands, int topics, Map<String, Integer> extra) throws Exception {
         String prefix = "cap" + RUN.incrementAndGet() + "-";
-        List<String> texts = new ArrayList<>();
         List<SearchIntent> intents = new ArrayList<>();
         List<SearchQuery> queries = new ArrayList<>();
         SearchPlan template = PlanSupport.plan(PlanSupport.cfgA(), 20);
         boolean noTopic = cands.stream().anyMatch(c -> c.topic() < 0);
-        // 4 contiguous groups of `group` queries: group 1 holds the topic queries (and the no-topic one), its cap
-        // min(250, 25 x group) leaves room for every entry; the other groups hold unused filler queries (answered empty)
-        int group = Math.max(8, topics + (noTopic ? 1 : 0));
         for (int t = 0; t < topics; t++) {
             SearchIntent in = new SearchIntent(String.format("I%02d", t + 1), QueryBucket.WILDCARD, "topic " + t, List.of());
             in.setTopicKey(topicKey(t));
@@ -91,30 +89,36 @@ class SourceCapIT extends AbstractNewsSearchIT {
             queries.add(new SearchQuery(String.format("Q%02d", queries.size() + 1), "I99", QueryBucket.WILDCARD, "tcapnone news",
                 SearchQueryStatus.EMPTY, 0));
         }
-        while (queries.size() < 4 * group) {
-            queries.add(new SearchQuery(String.format("Q%02d", queries.size() + 1), intents.get(0).getId(), QueryBucket.WILDCARD,
-                "tcapfill" + queries.size() + " news", SearchQueryStatus.EMPTY, 0));
-        }
         SearchPlan plan = new SearchPlan(template.getQueryBudget(), template.getExpansionMode(), template.getBuckets(), intents, queries);
 
         Instant day = Instant.now().minus(1, ChronoUnit.DAYS);
-        List<String> entries = new ArrayList<>();
-        for (C c : cands) {
-            String element = c.topic() < 0 ? "tcapnone news" : element(c.topic());
-            entries.add(StubNews.rssItem(element + " story " + c.name(), news.baseUrl() + "/rss/articles/" + prefix + c.name(),
-                StubNews.pubDate(day), c.domain(), "https://" + c.domain()));
-        }
-        for (C c : cands) {
-            if (extra.containsKey(c.name())) {
-                entries.add(StubNews.rssItem(element(extra.get(c.name())) + " again " + c.name(),
-                    news.baseUrl() + "/rss/articles/" + prefix + c.name(), StubNews.pubDate(day), c.domain(), "https://" + c.domain()));
+        // per query text: its answer (own candidates, then the extras) and the arrival order of first appearances
+        Map<String, List<String>> answers = new LinkedHashMap<>();
+        List<C> arrival = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (SearchQuery q : queries) {
+            int t = q.getText().equals("tcapnone news") ? -1 : Integer.parseInt(q.getText().substring("tcap".length(), q.getText().indexOf(' ')));
+            List<String> entries = new ArrayList<>();
+            for (C c : cands) {
+                if (c.topic() == t) {
+                    entries.add(StubNews.rssItem(q.getText() + " story " + c.name(), news.baseUrl() + "/rss/articles/" + prefix + c.name(),
+                        StubNews.pubDate(day), c.domain(), "https://" + c.domain()));
+                    if (seen.add(c.name())) arrival.add(c);
+                }
             }
+            for (C c : cands) {
+                if (extra.containsKey(c.name()) && extra.get(c.name()) == t) {
+                    entries.add(StubNews.rssItem(q.getText() + " again " + c.name(), news.baseUrl() + "/rss/articles/" + prefix + c.name(),
+                        StubNews.pubDate(day), c.domain(), "https://" + c.domain()));
+                    if (seen.add(c.name())) arrival.add(c);
+                }
+            }
+            answers.put(q.getText(), entries);
         }
-        StubNews.Reply answer = StubNews.rss(entries.toArray(String[]::new));
-        news.responder = req -> req.elements().contains(element(0)) ? answer : StubNews.rss();
+        news.responder = req -> StubNews.rss(answers.getOrDefault(req.elements().get(0), List.of()).toArray(String[]::new));
 
         var outcome = search(plan);
-        assertThat(news.requests).as("4 groups, the first holds every topic element").hasSize(4);
+        assertThat(news.requests).as("one request per planned query").hasSize(queries.size());
         int retrieved = outcome.articlesRetrieved();
         var stored = retrieval.readSources(outcome, HorizonCode._1Y);
         List<String> names = new ArrayList<>();
@@ -131,7 +135,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
             sources.add(m);
         }
         int fetches = (int) news.articleRequests.stream().filter(n -> n.startsWith(prefix)).count();
-        return new Kept(names, sources, fetches, retrieved);
+        return new Kept(names, sources, fetches, retrieved, arrival);
     }
 
     private Kept stage(List<C> cands, int topics) throws Exception {
@@ -220,12 +224,14 @@ class SourceCapIT extends AbstractNewsSearchIT {
     void theSelectionFollowsTheSpecForEveryUsableCount(int n, int topics, boolean blocks) throws Exception {
         List<C> cands = generate(n, topics, blocks);
         Kept kept = stage(cands, topics);
-        List<String> expected = CapOracle.select(oracleInput(cands)).stream().map(i -> cands.get(i).name()).toList();
+        List<C> arrival = kept.arrival(); // plan order (topic by topic), then feed order
+        assertThat(arrival).as("every candidate arrives exactly once").hasSize(n).containsExactlyInAnyOrderElementsOf(cands);
+        List<String> expected = CapOracle.select(oracleInput(arrival)).stream().map(i -> arrival.get(i).name()).toList();
         assertThat(kept.names()).as("kept candidates").containsExactlyElementsOf(expected);
         if (n <= 30) {
-            assertThat(kept.names()).as("n <= 30: identical to today, same order").containsExactlyElementsOf(cands.stream().map(C::name).toList());
+            assertThat(kept.names()).as("n <= 30: all kept, in arrival order").containsExactlyElementsOf(arrival.stream().map(C::name).toList());
         }
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     private static List<C> repeat(List<C> out, int topic, int count, String domain) {
@@ -245,7 +251,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
         // 10 candidates of each quality: the ten blog ones (0.35) are the worst
         assertThat(kept.names()).hasSize(30);
         for (String n : kept.names()) assertThat(cands.get(Integer.parseInt(n.substring(1))).domain()).isNotEqualTo("medium.com");
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     @Test
@@ -261,7 +267,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
         assertThat(keptOfTopic(kept, 2)).as("C").isEqualTo(1);
         assertThat(keptOfTopic(kept, 1)).as("B").isEqualTo(2);
         assertThat(keptOfTopic(kept, 0)).as("A").isEqualTo(27);
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     @Test
@@ -270,7 +276,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
         for (int t = 0; t < 31; t++) cands.add(new C("only" + t, t, "reuters.com"));
         Kept kept = stage(cands, 31);
         assertThat(kept.names()).containsExactlyElementsOf(cands.subList(0, 30).stream().map(C::name).toList());
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     static Stream<Arguments> evenSplits() {
@@ -296,7 +302,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
         }
         Kept kept = stage(cands, sizes.length);
         for (int t = 0; t < sizes.length; t++) assertThat(keptOfTopic(kept, t)).as(name + " topic " + t).isEqualTo(expected[t]);
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     @Test
@@ -304,7 +310,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
         List<C> cands = repeat(new ArrayList<>(), 0, 31, "reuters.com");
         Kept kept = stage(cands, 4);
         assertThat(kept.names()).containsExactlyElementsOf(cands.subList(0, 30).stream().map(C::name).toList());
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     @Test
@@ -316,7 +322,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
         assertThat(kept.names()).as("the last of the equal 0.6 candidates is the one dropped")
             .doesNotContain(cands.get(29).name());
         assertThat(kept.names()).containsAll(cands.subList(0, 29).stream().map(C::name).toList());
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     @Test
@@ -329,7 +335,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
         Kept kept = stage(cands, 4);
         assertThat(kept.sources().stream().filter(s -> s.get("topic") == null).count()).isEqualTo(15);
         assertThat(keptOfTopic(kept, 0)).isEqualTo(15);
-        assertInvariants(cands, kept);
+        assertInvariants(kept.arrival(), kept);
     }
 
     @Test
@@ -339,13 +345,14 @@ class SourceCapIT extends AbstractNewsSearchIT {
             cands.add(new C("p" + i, 0, "reuters.com"));
             cands.add(new C("q" + i, 1, "reuters.com"));
         }
-        // p0 is also listed by the query of topic 1 (later in the same answer); q0 by the query of topic 0
-        Kept kept = stage(cands, 4, Map.of("p0", 1, "q0", 0));
+        // p0 is also listed by the (later) query of topic 1, q0 by the (later) query of topic 2: each URL is one source that
+        // lists exactly the queries whose own answer held it, and its topic is the topic of the first of them
+        Kept kept = stage(cands, 4, Map.of("p0", 1, "q0", 2));
         assertThat(kept.names()).hasSize(30).contains("p0", "q0");
         Map<String, Object> p0 = kept.sources().get(kept.names().indexOf("p0"));
         Map<String, Object> q0 = kept.sources().get(kept.names().indexOf("q0"));
         assertThat(p0.get("queryIds")).as("pre-cap queryIds, sorted").isEqualTo(List.of("Q01", "Q02"));
-        assertThat(q0.get("queryIds")).isEqualTo(List.of("Q01", "Q02"));
+        assertThat(q0.get("queryIds")).isEqualTo(List.of("Q02", "Q03"));
         assertThat(p0.get("topic")).as("topic of the first query").isEqualTo(topicKey(0));
         assertThat(q0.get("topic")).isEqualTo(topicKey(1));
         for (int i = 0; i < kept.names().size(); i++) {
