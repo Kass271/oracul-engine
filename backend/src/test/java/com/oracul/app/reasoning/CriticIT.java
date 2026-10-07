@@ -106,7 +106,7 @@ class CriticIT extends AbstractStoryIT {
     void aPassingCriticIsCalledOnceBetweenTheScenarioAndTheStory() throws Exception {
         Ran r = runV4(A);
         assertStoryCompleted(r.run());
-        assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, GEN, CRITIC, STORY);
+        assertThat(purposes()).containsExactly(QUERY_GENERATION, QUERY_GENERATION, NORMALIZATION, CLASSIFICATION, GEN, CRITIC, STORY);
         StubResponses.Request req = kreq(1);
         Map<String, Object> body = JsonPath.read(req.body(), "$");
         assertThat(body.keySet()).containsExactlyInAnyOrder("model", "instructions", "input", "text", "store", "stream");

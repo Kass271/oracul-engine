@@ -333,10 +333,12 @@ export const routes = {
     // asynchronous delay so concurrent requests really overlap. Every answer depends on its own request text only.
     if (purpose === 'EVENT_NORMALIZATION' || purpose === 'EVENT_CLASSIFICATION') await sleep(40);
     let output;
-    if (purpose === 'QUERY_EXPANSION') {
+    if (purpose === 'QUERY_GENERATION') {
+      const pipeline = /^Pipeline: (W\d{2})/m.exec(text);
+      const count = /^Queries: (\d+)/m.exec(text);
       const queries = [];
-      for (const m of text.matchAll(/^- (\S+) \| \S+ \| (\d+) \|/gm)) {
-        for (let i = 1; i <= Number(m[2]); i++) queries.push({ intentId: m[1], text: `${m[1]} stub query ${i}` });
+      if (pipeline && count) {
+        for (let i = 1; i <= Number(count[1]); i++) queries.push(`${pipeline[1]} stub query ${i}`);
       }
       output = JSON.stringify({ queries });
     } else if (purpose === 'EVENT_NORMALIZATION') {

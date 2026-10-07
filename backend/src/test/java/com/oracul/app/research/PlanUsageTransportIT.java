@@ -18,7 +18,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * carries store:false, stream:true and the SSE Accept header; the answer is read as a Server-Sent-Events stream and
  * counts as success only on response.completed; text.format rejections fall back once.
  */
-// @trace FR-38
+// @trace FR-38, FR-51
 class PlanUsageTransportIT extends AbstractPlanUsageIT {
 
     private static final List<String> ALLOWED_KEYS = List.of("model", "instructions", "input", "text", "store", "stream");
@@ -32,7 +32,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     void everyCallOfARunIsAStreamedStoreFalseCallWithTheSseAcceptHeader() throws Exception {
         Ran r = runV4(A);
         assertStoryCompleted(r.run());
-        assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, GEN, "SCENARIO_CRITIC", STORY);
+        assertThat(purposes()).containsExactly(QUERY_GENERATION, QUERY_GENERATION, NORMALIZATION, CLASSIFICATION, GEN, "SCENARIO_CRITIC", STORY);
         for (StubResponses.Request req : responses.requests) {
             String purpose = StubResponses.purpose(req);
             assertThat(req.headers().get("accept")).as(purpose + " Accept").isEqualTo("text/event-stream");
@@ -65,13 +65,15 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
         }
     }
 
-    // ---- SSE sequences that are successes (observed through the query expansion: MODEL vs TEMPLATE_FALLBACK) ----
+    // ---- SSE sequences that are successes (observed through the query generation: MODEL vs TEMPLATE_FALLBACK) ----
 
-    /** The text the expansion call must return: the default queries with a recognisable prefix. */
-    private static String expansionText(String input) {
-        List<String[]> pairs = new ArrayList<>();
-        for (String[] p : StubResponses.defaultQueries(input)) pairs.add(new String[] {p[0], "sse " + p[1]});
-        return StubResponses.queriesJson(pairs);
+    /** The text a query-generation call must return: the default queries of its pipeline with a recognisable prefix. */
+    private static String generationText(String input) {
+        List<String> texts = new ArrayList<>();
+        for (int i = 1; i <= StubResponses.queryCount(input); i++) {
+            texts.add("sse " + StubResponses.pipelineOf(input) + " stub query " + i);
+        }
+        return StubResponses.generationJson(texts);
     }
 
     private static String[] thirds(String t) {
@@ -146,18 +148,17 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     @MethodSource("successfulStreams")
     void aCompletedStreamIsReadAsTheAnswer(String name, Function<String, StubResponses.Reply> stream) throws Exception {
         responses.responder = req -> {
-            if (!"QUERY_EXPANSION".equals(StubResponses.purpose(req))) return responses.defaultResponder().apply(req);
-            return stream.apply(expansionText(req.inputText()));
+            if (!"QUERY_GENERATION".equals(StubResponses.purpose(req))) return responses.defaultResponder().apply(req);
+            return stream.apply(generationText(req.inputText()));
         };
         Ran r = run(A);
         assertThat(r.run().get("status")).as(name + ": " + r.run()).isEqualTo("COMPLETED");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> plan = (Map<String, Object>) researchBody(r.sid(), r.id()).get("searchPlan");
-        assertThat(plan.get("expansionMode")).as(name).isEqualTo("MODEL");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) plan.get("queries");
-        assertThat(queries).hasSize(20).allSatisfy(q -> assertThat((String) q.get("text")).startsWith("sse "));
-        assertThat(requests(EXPANSION)).hasSize(1);
+        Map<String, Object> research = researchBody(r.sid(), r.id());
+        assertThat(PlanJson.plan(research).get("expansionMode")).as(name).isEqualTo("MODEL");
+        assertThat(PlanJson.pipelines(research)).as(name).hasSize(2)
+            .allSatisfy(p -> assertThat(p.get("queryMode")).isEqualTo("MODEL"));
+        assertThat(PlanJson.queries(research)).as(name).hasSize(6).allSatisfy(q -> assertThat((String) q.get("text")).startsWith("sse "));
+        assertThat(requests(QUERY_GENERATION)).as("one call per pipeline").hasSize(2);
     }
 
     // ---- SSE sequences that end a stage call without an answer: CHATGPT_INCOMPLETE ---------------------------
@@ -208,16 +209,15 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
     }
 
     @Test
-    void anIncompleteQueryExpansionFallsBackToTemplatesInsteadOfFailingTheRun() throws Exception {
-        responses.responder = req -> "QUERY_EXPANSION".equals(StubResponses.purpose(req))
+    void anIncompleteQueryGenerationFallsBackToTemplatesInsteadOfFailingTheRun() throws Exception {
+        responses.responder = req -> "QUERY_GENERATION".equals(StubResponses.purpose(req))
             ? StubResponses.sse(StubResponses.createdEvent(), StubResponses.deltaEvent("{\"queries\":"), StubResponses.incompleteEvent())
             : responses.defaultResponder().apply(req);
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> plan = (Map<String, Object>) researchBody(r.sid(), r.id()).get("searchPlan");
-        assertThat(plan.get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
-        assertThat(requests(EXPANSION)).as("query expansion is never retried").hasSize(1);
+        Map<String, Object> research = researchBody(r.sid(), r.id());
+        assertThat(PlanJson.plan(research).get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
+        assertThat(requests(QUERY_GENERATION)).as("query generation is never retried: one call per pipeline").hasSize(2);
     }
 
     // ---- structured-output fallback ----------------------------------------------------------------------------
@@ -250,27 +250,33 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         List<StubResponses.Request> all = responses.requests;
-        // the first call (query expansion) was rejected once and repeated once: 2 requests, then no more rejected round trips
-        assertThat(hasTextFormat(all.get(0))).as("first attempt carries text.format").isTrue();
-        assertThat(StubResponses.purpose(all.get(1))).isEqualTo(EXPANSION);
-        assertThat(hasTextFormat(all.get(1))).as("the repeat has no text").isFalse();
-        assertThat(json(all.get(1).body())).doesNotContainKey("text");
-        assertThat(all.stream().filter(PlanUsageTransportIT::hasTextFormat)).as("exactly one rejected round trip").hasSize(1);
-        // the repeat: same input, instructions = original + the sentence and the removed schema
-        String original = instructionsOf(all.get(0));
-        String repeated = instructionsOf(all.get(1));
-        assertThat(repeated).startsWith(original).contains(SENTENCE);
-        String schemaJson = repeated.substring(repeated.indexOf(SENTENCE) + SENTENCE.length()).trim();
-        Object schema = JsonPath.read(schemaJson, "$");
-        assertThat(schema).isEqualTo(JsonPath.read(all.get(0).body(), "$.text.format.schema"));
-        assertThat(all.get(1).inputText()).isEqualTo(all.get(0).inputText());
-        // later calls of every stage go without text.format and with the instruction from the start
-        for (StubResponses.Request req : all.subList(2, all.size())) {
+        // FR-51 change line: the QUERY_GENERATION calls started before the client has seen the rejection (body A: 1 or 2) each
+        // carry text.format, each rejected one is repeated exactly once without text, every call started later goes without it
+        List<StubResponses.Request> rejected = all.stream().filter(PlanUsageTransportIT::hasTextFormat).toList();
+        assertThat(rejected).as("1 or 2 text.format requests").hasSizeBetween(1, 2);
+        assertThat(rejected).as("all of them are QUERY_GENERATION").allSatisfy(q -> assertThat(StubResponses.purpose(q)).isEqualTo(QUERY_GENERATION));
+        List<StubResponses.Request> generation = requests(QUERY_GENERATION);
+        assertThat(generation).as("two pipelines + one repeat per rejected call").hasSize(2 + rejected.size());
+        List<StubResponses.Request> without = generation.stream().filter(q -> !hasTextFormat(q)).toList();
+        assertThat(without).as("one repeat per rejected call, plus the pipeline whose call started after the rejection (if any)").hasSize(2);
+        for (StubResponses.Request first : rejected) {
+            // the repeat: same input, no text, instructions = original + the sentence and the removed schema
+            StubResponses.Request repeat = without.stream().filter(q -> q.inputText().equals(first.inputText())).findFirst()
+                .orElseThrow(() -> new AssertionError("no repeat of the rejected call of " + StubResponses.pipelineOf(first.inputText())));
+            assertThat(json(repeat.body())).doesNotContainKey("text");
+            String original = instructionsOf(first);
+            String repeated = instructionsOf(repeat);
+            assertThat(repeated).startsWith(original).contains(SENTENCE);
+            String schemaJson = repeated.substring(repeated.indexOf(SENTENCE) + SENTENCE.length()).trim();
+            assertThat((Object) JsonPath.read(schemaJson, "$")).isEqualTo(JsonPath.read(first.body(), "$.text.format.schema"));
+        }
+        // every call without text.format (later QUERY_GENERATION calls, every later stage) carries the instruction from the start
+        for (StubResponses.Request req : all.stream().filter(q -> !hasTextFormat(q)).toList()) {
             assertThat(json(req.body())).as(StubResponses.purpose(req)).doesNotContainKey("text");
             assertThat(instructionsOf(req)).as(StubResponses.purpose(req)).contains(SENTENCE);
             assertThat(JsonPath.<Object>read(req.body(), "$.stream")).isEqualTo(true);
         }
-        assertThat(purposes().stream().filter(p -> !p.equals(EXPANSION)).distinct().toList())
+        assertThat(purposes().stream().filter(p -> !p.equals(QUERY_GENERATION)).distinct().toList())
             .contains(NORMALIZATION, CLASSIFICATION, GEN, "SCENARIO_CRITIC", STORY);
     }
 
@@ -290,9 +296,7 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
             newsArticles(v4());
             Ran r = run(A);
             assertThat(r.run().get("status")).as(fence + " run: " + r.run()).isEqualTo("COMPLETED");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> plan = (Map<String, Object>) researchBody(r.sid(), r.id()).get("searchPlan");
-            assertThat(plan.get("expansionMode")).as(fence).isEqualTo("MODEL");
+            assertThat(PlanJson.plan(researchBody(r.sid(), r.id())).get("expansionMode")).as(fence).isEqualTo("MODEL");
             assertThat(events(r)).as(fence).isNotEmpty();
             resetStructuredOutputFlag();
         }
@@ -329,7 +333,9 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
         newsArticles(v4());
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
-        assertThat(responses.requests.stream().filter(PlanUsageTransportIT::hasTextFormat)).hasSize(1);
+        // FR-51: the QUERY_GENERATION calls started before the first rejection was seen (1 or 2 of body A's two) carry text.format
+        assertThat(responses.requests.stream().filter(PlanUsageTransportIT::hasTextFormat)).hasSizeBetween(1, 2)
+            .allSatisfy(q -> assertThat(StubResponses.purpose(q)).isEqualTo(QUERY_GENERATION));
     }
 
     @Test
@@ -338,7 +344,8 @@ class PlanUsageTransportIT extends AbstractPlanUsageIT {
         newsArticles(v4());
         Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
-        assertThat(responses.requests.stream().filter(PlanUsageTransportIT::hasTextFormat)).hasSize(1);
+        assertThat(responses.requests.stream().filter(PlanUsageTransportIT::hasTextFormat)).hasSizeBetween(1, 2)
+            .allSatisfy(q -> assertThat(StubResponses.purpose(q)).isEqualTo(QUERY_GENERATION));
     }
 
     @Test

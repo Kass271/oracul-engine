@@ -64,7 +64,8 @@ public final class StubResponses {
 
     public static final StubResponses INSTANCE = new StubResponses();
 
-    private static final Pattern TASK_LINE = Pattern.compile("^- (I\\d+) \\| (\\w+) \\| (\\d+) \\| ", Pattern.MULTILINE);
+    private static final Pattern PIPELINE_LINE = Pattern.compile("^Pipeline: (W\\d{2})$", Pattern.MULTILINE);
+    private static final Pattern QUERIES_LINE = Pattern.compile("^Queries: (\\d+)$", Pattern.MULTILINE);
 
     private final HttpServer server;
     public final List<Request> requests = new CopyOnWriteArrayList<>();
@@ -264,14 +265,16 @@ public final class StubResponses {
         return n == null ? 0 : n.get();
     }
 
-    /** One TASK line of the QUERY_EXPANSION prompt. */
-    public record TaskLine(String intentId, String bucket, int count) {}
+    /** W01... of the "Pipeline: W01" line of a QUERY_GENERATION input text; "" when there is no such line. */
+    public static String pipelineOf(String inputText) {
+        Matcher m = PIPELINE_LINE.matcher(inputText);
+        return m.find() ? m.group(1) : "";
+    }
 
-    public static List<TaskLine> taskLines(String inputText) {
-        List<TaskLine> out = new ArrayList<>();
-        Matcher m = TASK_LINE.matcher(inputText);
-        while (m.find()) out.add(new TaskLine(m.group(1), m.group(2), Integer.parseInt(m.group(3))));
-        return out;
+    /** q of the "Queries: <q>" line of a QUERY_GENERATION input text; 0 when there is no such line. */
+    public static int queryCount(String inputText) {
+        Matcher m = QUERIES_LINE.matcher(inputText);
+        return m.find() ? Integer.parseInt(m.group(1)) : 0;
     }
 
     public static String jsonString(String s) {
@@ -293,26 +296,25 @@ public final class StubResponses {
             + "\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":" + jsonString(outputText) + "}]}]}", 0);
     }
 
-    /** {"queries":[{intentId,text}...]} from (intentId, text) pairs. */
-    public static String queriesJson(List<String[]> pairs) {
+    /** {"queries":["text",...]} - the strict query_generation answer. */
+    public static String generationJson(List<String> texts) {
         StringBuilder sb = new StringBuilder("{\"queries\":[");
-        for (int i = 0; i < pairs.size(); i++) {
+        for (int i = 0; i < texts.size(); i++) {
             if (i > 0) sb.append(',');
-            sb.append("{\"intentId\":").append(jsonString(pairs.get(i)[0])).append(",\"text\":")
-                .append(jsonString(pairs.get(i)[1])).append('}');
+            sb.append(jsonString(texts.get(i)));
         }
         return sb.append("]}").toString();
     }
 
-    /** Default answer: "<id> stub query <i>" for i = 1..n per intent. */
-    public static List<String[]> defaultQueries(String inputText) {
-        List<String[]> pairs = new ArrayList<>();
-        for (TaskLine t : taskLines(inputText)) {
-            for (int i = 1; i <= t.count(); i++) pairs.add(new String[] {t.intentId(), t.intentId() + " stub query " + i});
+    /** Default answer of a QUERY_GENERATION request: "<W> stub query <i>" for i = 1..q (W and q from the input text). */
+    public static String defaultGeneration(String inputText) {
+        String w = pipelineOf(inputText);
+        List<String> texts = new ArrayList<>();
+        if (!w.isEmpty()) {
+            for (int i = 1; i <= queryCount(inputText); i++) texts.add(w + " stub query " + i);
         }
-        return pairs;
+        return generationJson(texts);
     }
-
 
     private static final String PURPOSE_PREFIX = "ORACUL REQUEST ";
     private static final Pattern SOURCE_LINE = Pattern.compile("^(S\\d+) \\| ", Pattern.MULTILINE);
@@ -440,7 +442,7 @@ public final class StubResponses {
         return req -> {
             String text = req.inputText();
             String purpose = purposeOf(text);
-            if ("QUERY_EXPANSION".equals(purpose)) return completed(queriesJson(defaultQueries(text)));
+            if ("QUERY_GENERATION".equals(purpose)) return completed(defaultGeneration(text));
             if ("EVENT_NORMALIZATION".equals(purpose)) return completed(defaultNormalization(text));
             if ("EVENT_CLASSIFICATION".equals(purpose)) return completed(defaultClassification(text));
             if ("SCENARIO_GENERATION".equals(purpose)) return completed(alternativeFixture(text));

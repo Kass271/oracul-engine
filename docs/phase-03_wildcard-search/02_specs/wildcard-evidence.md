@@ -27,7 +27,7 @@ completes and says so plainly.
 ## Data
 | Entity | Field | Type | Rules |
 |---|---|---|---|
-| `evidence_pack` (Flyway `V11`) | `sections` | JSONB NULL | `PackWildcardSection[]` of new packs; NULL for stored packs |
+| `evidence_pack` (Flyway, migration of slice 06) | `sections` | JSONB NULL | `PackWildcardSection[]` of new packs; NULL for stored packs |
 | `evidence_pack` | `items` | JSONB | new packs: `{"core":[],"supporting":[],"counterSignals":[]}` |
 | `evidence_pack` | `source_ids` | JSONB | every kept source, ascending |
 | API `EvidencePack` | `wildcardSections` | PackWildcardSection[] (optional; always present for new packs) | pipeline order, one per pipeline (also empty ones) |
@@ -37,7 +37,7 @@ completes and says so plainly.
 | PackSourceItem | `contentRetrieved` | boolean | true iff this pipeline's excerpt of the source has ≥ 1 fragment |
 | PackSourceItem | `fragments` | string[] 0–3 | this pipeline's fragments (`[]` when not retrieved) |
 | PackSourceItem | `snippet` | string | present iff `contentRetrieved` false: the source `summary` (snippet or title, ≤ 600) |
-| `generation_run` (`V11`) | `evidence_note_wildcards` | JSONB NULL | labels of the wildcards without sources (FR-59), pipeline order; set iff the note names wildcards |
+| `generation_run` (Flyway, migration of slice 09) | `evidence_note_wildcards` | JSONB NULL | labels of the wildcards without sources (FR-59), pipeline order; set iff the note names wildcards |
 | API `EvidenceNote` | `wildcardsWithoutSources` | string[] (optional) | from that column |
 | API `EvidenceNote` | `message` | string 1–2000 (was ≤ 200) | built at read time from kind, numbers, wildcards and `configuration.realism` |
 | API `EvidenceNoteKind` | + `MISSING_WILDCARD_SOURCES` | enum value | FR-59 |

@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
 /** generation-runs.md "Slice 17_alternative-future" AlternativeRunIT rows 1 and 3-12 (row 2 is AlternativeRunStagesIT). */
-// @trace FR-30, FR-45
+// @trace FR-30, FR-45, FR-50, FR-51
 class AlternativeRunIT extends AbstractStoryIT {
 
     static final String NOT_COMPLETED_MSG = "Only a completed future can have an alternative";
@@ -471,7 +471,7 @@ class AlternativeRunIT extends AbstractStoryIT {
         Ran p = parent();
         altRun(p);
         int gen0 = requests(GEN).size();
-        int exp0 = requests(EXPANSION).size();
+        int exp0 = requests(QUERY_GENERATION).size();
         news.reset();
         newsArticles(v4());
         Map<String, Object> created = startOk(p.sid(), A);
@@ -481,6 +481,6 @@ class AlternativeRunIT extends AbstractStoryIT {
         for (StubResponses.Request g : gens) {
             assertThat(g.inputText()).doesNotContain("futures-to-avoid").doesNotContain("duplicate-future").doesNotContain(ALT_TASK);
         }
-        assertThat(after(EXPANSION, exp0)).isNotEmpty();
+        assertThat(after(QUERY_GENERATION, exp0)).as("a standard run generates queries again: one call per pipeline").hasSize(2);
     }
 }

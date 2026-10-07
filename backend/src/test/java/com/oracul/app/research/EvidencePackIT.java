@@ -168,7 +168,7 @@ class EvidencePackIT extends AbstractEvidenceIT {
         Ran r = runV4(A);
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
         // slice 08/10: ranking itself makes no call; the only later requests are the scenario, its critic and the story
-        assertThat(purposes()).containsExactlyInAnyOrder(EXPANSION, NORMALIZATION, CLASSIFICATION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
+        assertThat(purposes()).containsExactlyInAnyOrder(QUERY_GENERATION, QUERY_GENERATION, NORMALIZATION, CLASSIFICATION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
         assertThat(purposes().get(purposes().size() - 1)).isEqualTo("STORY_WRITING");
         String all = packRaw(r.sid(), r.id()) + eventsRaw(r.sid(), r.id())
             + getRun(r.sid(), r.id()).andReturn().getResponse().getContentAsString()

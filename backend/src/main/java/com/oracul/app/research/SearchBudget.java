@@ -10,11 +10,15 @@ public record SearchBudget(Clock clock, Instant t0, Map<Phase, Duration> windows
 
     /** Phases with a window (later slices add more). */
     public enum Phase {
-        SEARCH
+        QUERY_GENERATION, SEARCH
     }
 
     public static SearchBudget search(Clock clock, Instant t0, Duration searchWindow, Instant deadlineAt) {
         return new SearchBudget(clock, t0, Map.of(Phase.SEARCH, searchWindow), deadlineAt);
+    }
+
+    public static SearchBudget generation(Clock clock, Instant t0, Duration window, Instant deadlineAt) {
+        return new SearchBudget(clock, t0, Map.of(Phase.QUERY_GENERATION, window), deadlineAt);
     }
 
     /** max(0, min(t0 + window, deadlineAt) - now). */

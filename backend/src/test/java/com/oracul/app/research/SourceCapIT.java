@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.QueryBucket;
+import com.oracul.app.api.model.QueryExpansionMode;
 import com.oracul.app.api.model.SearchIntent;
 import com.oracul.app.api.model.SearchPlan;
 import com.oracul.app.api.model.SearchQuery;
@@ -27,7 +28,8 @@ import org.junit.jupiter.params.provider.MethodSource;
  * query, FR-52: the stub answers the query of topic t with the candidates of topic t, so a candidate belongs to the
  * query that returned it and the arrival order is plan order, then feed order) followed by {@code readSources}.
  * Candidates are told apart by topic (intent topicKey of their query) and quality (publisher domain through the quality
- * table).
+ * table). The plan is the phase-01 shape without pipelines (FR-50 slice 04: queryBudget / expansionMode / buckets are literals,
+ * no template plan; SourceRetrieval.search keeps reading {@code plan.getQueries()} when there are no pipelines).
  */
 // @trace FR-46, FR-52
 class SourceCapIT extends AbstractNewsSearchIT {
@@ -76,7 +78,6 @@ class SourceCapIT extends AbstractNewsSearchIT {
         String prefix = "cap" + RUN.incrementAndGet() + "-";
         List<SearchIntent> intents = new ArrayList<>();
         List<SearchQuery> queries = new ArrayList<>();
-        SearchPlan template = PlanSupport.plan(PlanSupport.cfgA(), 20);
         boolean noTopic = cands.stream().anyMatch(c -> c.topic() < 0);
         for (int t = 0; t < topics; t++) {
             SearchIntent in = new SearchIntent(String.format("I%02d", t + 1), QueryBucket.WILDCARD, "topic " + t, List.of());
@@ -89,7 +90,7 @@ class SourceCapIT extends AbstractNewsSearchIT {
             queries.add(new SearchQuery(String.format("Q%02d", queries.size() + 1), "I99", QueryBucket.WILDCARD, "tcapnone news",
                 SearchQueryStatus.EMPTY, 0));
         }
-        SearchPlan plan = new SearchPlan(template.getQueryBudget(), template.getExpansionMode(), template.getBuckets(), intents, queries);
+        SearchPlan plan = new SearchPlan(queries.size(), QueryExpansionMode.TEMPLATE_FALLBACK, new ArrayList<>(), intents, queries);
 
         Instant day = Instant.now().minus(1, ChronoUnit.DAYS);
         // per query text: its answer (own candidates, then the extras) and the arrival order of first appearances

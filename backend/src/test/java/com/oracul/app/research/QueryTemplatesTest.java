@@ -2,236 +2,254 @@ package com.oracul.app.research;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.oracul.app.api.model.QueryBucket;
-import com.oracul.app.api.model.SearchIntent;
-import com.oracul.app.api.model.WildcardCategory;
-import com.oracul.app.api.model.WildcardDefinition;
-import com.oracul.app.scenario.ScenarioCatalogueData;
+import com.oracul.app.api.model.HorizonCode;
+import com.oracul.app.api.model.QueryExpansionMode;
+import com.oracul.app.api.model.ScenarioConfiguration;
+import com.oracul.app.api.model.WildcardPipeline;
+import com.oracul.app.api.model.WildcardPipelineKind;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
-/** QueryTemplates list properties for every intent kind (research-pipeline.md slice 05). */
-// @trace FR-12
+/**
+ * QueryTemplates (pure) - wildcard-search.md FR-51 step 6 and its ranges: the label L, the band x direction vocabulary and the
+ * N / P term rules, every template obeying rule Q.
+ */
+// @trace FR-51
 class QueryTemplatesTest {
 
-    private static void assertWellFormed(String what, List<String> list) {
-        assertThat(list).as(what).isNotNull();
-        assertThat(list.size()).as(what + " size").isGreaterThanOrEqualTo(20);
-        assertThat(list).as(what + " non-blank").allMatch(s -> s != null && !s.isBlank());
-        assertThat(list).as(what + " <= 120 chars").allMatch(s -> s.length() <= 120);
-        assertThat(list.stream().map(s -> s.toLowerCase(Locale.ROOT)).distinct().count())
-            .as(what + " distinct case-insensitive").isEqualTo(list.size());
+    static final Set<String> N = Set.of("risk", "risks", "failure", "failures", "crisis", "crises", "conflict", "conflicts",
+        "disaster", "disasters", "threat", "threats", "warning", "warnings", "collapse", "catastrophe", "catastrophic");
+    static final Set<String> P = Set.of("progress", "breakthrough", "innovation", "research");
+
+    private static ScenarioConfiguration cfg(int darkness, int optimism) {
+        return PlanSupport.cfg(8, darkness, optimism, HorizonCode._5Y, List.of(), List.of());
     }
 
-    private static SearchIntent intent(String id, QueryBucket bucket, String topicKey, String category, String description) {
-        return new SearchIntent(id, bucket, description, List.of("Horizon 1 year")).topicKey(topicKey).category(category);
+    private static WildcardPipeline catalogue(String label, int level) {
+        return new WildcardPipeline("W01", WildcardPipelineKind.CATALOGUE, label, label + " " + level + "/10",
+            QueryExpansionMode.TEMPLATE_FALLBACK, new ArrayList<>()).level(level).topicKey("biology-new-pandemic");
+    }
+
+    private static WildcardPipeline general() {
+        return new WildcardPipeline("W01", WildcardPipelineKind.GENERAL, "General", "General",
+            QueryExpansionMode.TEMPLATE_FALLBACK, new ArrayList<>());
+    }
+
+    private static List<String> templates(WildcardPipeline p, int darkness, int optimism) {
+        return PlanSupport.templates(p, cfg(darkness, optimism));
+    }
+
+    /** The words a template adds to the label: the text without the leading "<L> ", or the whole text when it does not start with L. */
+    private static List<String> added(String text, String l) {
+        String rest = text.startsWith(l + " ") ? text.substring(l.length() + 1) : text;
+        return List.of(rest.toLowerCase(Locale.ROOT).split("\\s+"));
+    }
+
+    private static long count(List<String> words, Set<String> vocabulary) {
+        return words.stream().filter(vocabulary::contains).count();
+    }
+
+    // ---- the label L (QueryTemplates.label) ---------------------------------------------------------------------
+
+    static Stream<Arguments> labels() {
+        return Stream.of(
+            Arguments.of("Energy crisis", "Energy crisis"),
+            Arguments.of("\"Ocean\" (desalination) boom", "Ocean desalination boom"),
+            Arguments.of("OR", "future developments"),
+            Arguments.of("()", "future developments"),
+            Arguments.of("abcd def ghi jkl mno pqr stu vwx yza bcd", "abcd def ghi jkl mno pqr"),
+            Arguments.of("war or peace", "war peace"),
+            Arguments.of("Fusion OR fission", "Fusion fission"),
+            Arguments.of("Fusion Or fission", "Fusion fission"),
+            Arguments.of("A - B", "A B"),
+            Arguments.of("Earth's last ice", "Earth's last ice"),
+            Arguments.of("ocean: boom!", "ocean boom"),
+            Arguments.of("Rock AND roll", "Rock roll"),
+            Arguments.of("NOT again", "again"),
+            Arguments.of("  spaced   out   label ", "spaced out label"),
+            Arguments.of("", "future developments"),
+            Arguments.of("   ", "future developments"),
+            Arguments.of("-' - '", "future developments"),
+            Arguments.of("one two three four five six seven eight", "one two three four five six"));
+    }
+
+    @ParameterizedTest(name = "label \"{0}\" -> \"{1}\"")
+    @MethodSource("labels")
+    void theLabelForQueriesIsCleanedAndCapped(String raw, String expected) {
+        assertThat(QuerySupport.label(raw)).isEqualTo(expected);
+    }
+
+    // ---- exact templates (spec step 6 / ranges b) ---------------------------------------------------------------
+
+    @Test
+    void exactTemplatesOfTheAcceptanceWildcards() {
+        assertThat(templates(catalogue("New pandemic", 8), 9, 2)).containsExactly(
+            "New pandemic extreme scenario disaster", "New pandemic unprecedented scale catastrophe",
+            "New pandemic radical upheaval collapse");
+        assertThat(templates(catalogue("Humanoid robot boom", 6), 9, 2)).containsExactly(
+            "Humanoid robot boom serious disruption crisis", "Humanoid robot boom major escalation conflict",
+            "Humanoid robot boom growing concerns threat");
+        assertThat(templates(catalogue("New pandemic", 1), 2, 5)).containsExactly(
+            "New pandemic latest research progress", "New pandemic new developments breakthrough",
+            "New pandemic early studies innovation");
     }
 
     @Test
-    void everyCatalogueWildcardHasTemplatesStartingWithItsLowerCaseLabel() {
-        for (WildcardCategory c : ScenarioCatalogueData.catalogue().getCategories()) {
-            for (WildcardDefinition w : c.getWildcards()) {
-                List<String> list = PlanSupport.templates(intent("I01", QueryBucket.WILDCARD, w.getId(), null,
-                    "Current developments related to " + w.getLabel()));
-                assertWellFormed(w.getId(), list);
-                assertThat(list.get(0)).as(w.getId() + " first").isEqualTo(w.getLabel().toLowerCase(Locale.ROOT));
-            }
-        }
+    void exactTemplatesOfTheBandsWithoutADirectionWord() {
+        // Darkness 5 / Optimism 5: neither dark nor bright -> no direction word
+        assertThat(templates(catalogue("New pandemic", 2), 5, 5)).containsExactly(
+            "New pandemic latest research", "New pandemic new developments", "New pandemic early studies");
+        assertThat(templates(catalogue("New pandemic", 5), 5, 5)).containsExactly(
+            "New pandemic serious disruption", "New pandemic major escalation", "New pandemic growing concerns");
+        assertThat(templates(catalogue("New pandemic", 9), 5, 5)).containsExactly(
+            "New pandemic extreme scenario", "New pandemic unprecedented scale", "New pandemic radical upheaval");
     }
 
     @Test
-    void everyCatalogueCategoryHasAdjacentTemplates() {
-        for (WildcardCategory c : ScenarioCatalogueData.catalogue().getCategories()) {
-            assertWellFormed("category " + c.getId(), PlanSupport.templates(intent("I04", QueryBucket.ADJACENT, null, c.getId(),
-                "Adjacent developments in " + c.getLabel())));
-        }
+    void exactTemplatesOfTheGeneralPipeline() {
+        assertThat(templates(general(), 5, 5)).containsExactly("major world events today",
+            "global economy politics developments", "international science technology developments");
+        assertThat(templates(general(), 9, 2)).containsExactly("major world events today disaster",
+            "global economy politics developments catastrophe", "international science technology developments collapse");
+        assertThat(templates(general(), 5, 8)).containsExactly("major world events today progress",
+            "global economy politics developments breakthrough", "international science technology developments innovation");
     }
 
     @Test
-    void genericAdjacentMajorAndUnexpectedHaveTemplates() {
-        assertWellFormed("generic adjacent", PlanSupport.templates(intent("I02", QueryBucket.ADJACENT, null, null,
-            "Adjacent developments in science, technology and economy")));
-        assertWellFormed("major", PlanSupport.templates(intent("I03", QueryBucket.MAJOR, null, null, "Major current world events")));
-        assertWellFormed("unexpected", PlanSupport.templates(intent("I06", QueryBucket.UNEXPECTED, null, null,
-            "Unusual early signals and research")));
+    void optimismAddsTheProgressWordsWhenDarknessIsNeitherHighNorLow() {
+        // Darkness 5 / Optimism 8: each template gets progress / breakthrough / innovation
+        assertThat(templates(catalogue("New pandemic", 5), 5, 8)).containsExactly(
+            "New pandemic serious disruption progress", "New pandemic major escalation breakthrough",
+            "New pandemic growing concerns innovation");
     }
 
     @Test
-    void customTopicTemplatesStartWithTheTrimmedLabel() {
-        List<String> list = PlanSupport.templates(intent("I01", QueryBucket.WILDCARD, "custom-1", null,
-            "Current developments related to Solar sails"));
-        assertWellFormed("custom", list);
-        assertThat(list.get(0)).isEqualToIgnoringCase("Solar sails");
+    void darknessWinsOverOptimism() {
+        // Darkness 7 and Optimism 8 -> the negative direction words
+        assertThat(templates(catalogue("New pandemic", 5), 7, 8)).containsExactly(
+            "New pandemic serious disruption crisis", "New pandemic major escalation conflict",
+            "New pandemic growing concerns threat");
     }
 
-    private static final String SUFFIX = " — breakthroughs, recoveries and opportunities";
+    // ---- ranges: bands x Darkness x Optimism over several labels --------------------------------------------------
 
-    private static List<String> custom(String label, boolean withSuffix) {
-        return PlanSupport.templates(intent("I01", QueryBucket.WILDCARD, "custom-1", null,
-            "Current developments related to " + label + (withSuffix ? SUFFIX : "")));
-    }
-
-    private static int keywords(String q) {
-        return q.trim().split("\\s+").length;
-    }
-
-    private static void assertSafeKeywordQueries(String what, List<String> list) {
-        assertThat(list).as(what).isNotEmpty();
-        for (String q : list) {
-            String[] tokens = q.trim().split("\\s+");
-            assertThat(q).as(what + " no slash: " + q).doesNotContain("/");
-            assertThat(q).as(what + " no quotes: " + q).doesNotContain("\"").doesNotContain("\u201c").doesNotContain("\u201d");
-            assertThat(q).as(what + " no parentheses: " + q).doesNotContain("(").doesNotContain(")");
-            assertThat(q.length()).as(what + " <=120: " + q).isLessThanOrEqualTo(120);
-            assertThat(tokens.length).as(what + " 2..8 keywords: " + q).isBetween(2, 8);
-            for (String t : tokens) {
-                assertThat(t).as(what + " no leading dash: " + q).doesNotStartWith("-");
-                assertThat(t).as(what + " no operator word: " + q).isNotIn("OR", "AND", "NOT", "or", "and", "not");
-            }
-            assertThat(tokens[0].length() < 3 && tokens.length == 1).as(what + " bare short subject: " + q).isFalse();
-        }
-    }
-
-    // R9
-    @Test
-    void longCustomLabelAppearsInFullInEveryQuery() {
-        for (boolean suffix : new boolean[] {false, true}) {
-            List<String> list = custom("Collapse of the global internet", suffix);
-            assertWellFormed("long custom", list);
-            assertThat(list).as("full label in every query (suffix=" + suffix + ")")
-                .allMatch(q -> q.toLowerCase(Locale.ROOT).contains("collapse of the global internet"));
-        }
-    }
-
-    // R9
-    @Test
-    void customLabelContainingEmDashIsNotCutAtTheDash() {
-        for (boolean suffix : new boolean[] {false, true}) {
-            List<String> list = custom("Ocean — desalination boom", suffix);
-            assertWellFormed("dash custom", list);
-            assertThat(list).as("dash label kept (suffix=" + suffix + ")")
-                .allMatch(q -> q.toLowerCase(Locale.ROOT).contains("desalination boom"));
-        }
-    }
-
-    // R9 + R12: labels of <=6 words appear in full in every query; longer labels follow the shortened-subject rule.
-    @Test
-    void fortyCharacterCustomLabelStillYieldsQueriesWithinLimit() {
-        String label = "Rise of quantum battery startups in Asia";
-        assertThat(label).hasSize(40);
-        for (boolean suffix : new boolean[] {false, true}) {
-            List<String> list = custom(label, suffix);
-            assertWellFormed("40-char custom (suffix=" + suffix + ")", list);
-            assertThat(list).allMatch(q -> q.length() <= 120);
-            assertSafeKeywordQueries("40-char custom (suffix=" + suffix + ")", list);
-            // 7 words (<= 8): the first query is the full label
-            assertThat(list.get(0).toLowerCase(Locale.ROOT)).as("first query is the full label")
-                .contains(label.toLowerCase(Locale.ROOT));
-            // every other query keeps the first two non-stopword words
-            for (String q : list.subList(1, list.size())) {
-                String lower = q.toLowerCase(Locale.ROOT);
-                assertThat(lower).as("first two content words in: " + q).contains("quantum").contains("battery");
-            }
-        }
-    }
-
-    // R12: labels of up to six words keep the full label in every query.
-    @Test
-    void labelsOfUpToSixWordsAppearInFullInEveryQuery() {
-        for (String label : List.of("Fall of the big tech firms", "Collapse of the global shipping networks",
-            "Next generation battery storage", "Deep sea mining")) {
-            for (boolean suffix : new boolean[] {false, true}) {
-                List<String> list = custom(label, suffix);
-                assertWellFormed(label, list);
-                assertSafeKeywordQueries(label, list);
-                assertThat(list).as("full label in every query: " + label + " suffix=" + suffix)
-                    .allMatch(q -> q.toLowerCase(Locale.ROOT).contains(label.toLowerCase(Locale.ROOT)));
-            }
-        }
-    }
-
-    // R10
-    @Test
-    void everyCatalogueIntentYieldsSafePlainKeywordQueries() {
-        for (WildcardCategory c : ScenarioCatalogueData.catalogue().getCategories()) {
-            assertSafeKeywordQueries("category " + c.getId(), PlanSupport.templates(intent("I04", QueryBucket.ADJACENT, null,
-                c.getId(), "Adjacent developments in " + c.getLabel())));
-            for (WildcardDefinition w : c.getWildcards()) {
-                assertSafeKeywordQueries(w.getId(), PlanSupport.templates(intent("I01", QueryBucket.WILDCARD, w.getId(), null,
-                    "Current developments related to " + w.getLabel())));
-            }
-        }
-        assertSafeKeywordQueries("generic", PlanSupport.templates(intent("I02", QueryBucket.ADJACENT, null, null,
-            "Adjacent developments in science, technology and economy")));
-        assertSafeKeywordQueries("major", PlanSupport.templates(intent("I03", QueryBucket.MAJOR, null, null, "Major current world events")));
-        assertSafeKeywordQueries("unexpected", PlanSupport.templates(intent("I06", QueryBucket.UNEXPECTED, null, null,
-            "Unusual early signals and research")));
-    }
-
-    // R10
-    @Test
-    void aiCategoryDoesNotProduceTheBareQueryAi() {
-        List<String> list = PlanSupport.templates(intent("I04", QueryBucket.ADJACENT, null, "ai", "Adjacent developments in AI"));
-        assertThat(list).as("no bare 'ai'").noneMatch(q -> q.trim().equalsIgnoreCase("ai"));
-        assertThat(list.get(0).toLowerCase(Locale.ROOT)).as("first query expands ai").contains("artificial intelligence");
-    }
-
-    // R10
-    @Test
-    void categoryLabelWithSlashProducesNoSlash() {
-        List<String> list = PlanSupport.templates(intent("I05", QueryBucket.ADJACENT, null, "political",
-            "Adjacent developments in Political / institutional"));
-        assertThat(list).noneMatch(q -> q.contains("/"));
-    }
-
-    // R10
-    @Test
-    void hostileCustomLabelsNeverProduceOperatorSyntax() {
-        List<String> labels = List.of("\"Quantum\" computing race", "-leaked memo scandal", "Chip (export) controls",
-            "Rock OR roll revival", "Cats AND dogs merger", "NOT my problem crisis", "AI/ML regulation wave",
-            "Say \"no\" to (nuclear) power");
-        for (String label : labels) {
-            for (boolean suffix : new boolean[] {false, true}) {
-                List<String> list = custom(label, suffix);
-                assertWellFormed("hostile " + label, list);
-                assertSafeKeywordQueries("hostile " + label, list);
-            }
-        }
-    }
-
-    private static final java.util.Set<String> STOP = java.util.Set.of("a", "an", "the", "of", "in", "on", "to", "for", "at", "by", "with");
-
-    private static List<String> contentWords(String label) {
-        return java.util.Arrays.stream(label.toLowerCase(Locale.ROOT).split("\\s+")).filter(w -> !STOP.contains(w)).toList();
-    }
-
-    // R11
-    // @trace FR-12
-    @Test
-    void customLabelsOfEightToTenWordsYieldEnoughSafeQueriesKeepingTheTopicRecognisable() {
-        List<String> labels = List.of("Fall of the big US tech firms in the EU", "a new kind of fast AI chip for phones",
-            "Rise of the new solar fuel cell boom");
-        for (String label : labels) {
-            assertThat(label.length()).isLessThanOrEqualTo(40);
-            assertThat(label.split(" ").length).isBetween(8, 10);
-            List<String> words = contentWords(label);
-            for (boolean suffix : new boolean[] {false, true}) {
-                String what = label + " suffix=" + suffix;
-                List<String> list = custom(label, suffix);
-                assertThat(list.size()).as(what + " size").isGreaterThanOrEqualTo(20);
-                assertThat(list.stream().map(q -> q.toLowerCase(Locale.ROOT)).distinct().count()).as(what + " distinct").isEqualTo(list.size());
-                assertSafeKeywordQueries(what, list);
-                List<String> first = java.util.Arrays.asList(list.get(0).toLowerCase(Locale.ROOT).split("\\s+"));
-                int from = 0;
-                for (String w : words) {
-                    int idx = first.subList(from, first.size()).indexOf(w);
-                    assertThat(idx).as(what + " first query has '" + w + "' in order: " + list.get(0)).isGreaterThanOrEqualTo(0);
-                    from += idx + 1;
+    static Stream<Arguments> bandDarknessOptimism() {
+        List<Arguments> out = new ArrayList<>();
+        for (String label : List.of("New pandemic", "Mars", "Energy crisis", "Humanoid robot boom")) {
+            for (int level : new int[] {1, 3, 4, 7, 8, 10}) {
+                for (int darkness : new int[] {2, 3, 5, 7, 9}) {
+                    for (int optimism : new int[] {5, 8}) {
+                        out.add(Arguments.of(label, level, darkness, optimism));
+                    }
                 }
-                for (String q : list) {
-                    List<String> toks = java.util.Arrays.asList(q.toLowerCase(Locale.ROOT).split("\\s+"));
-                    assertThat(toks).as(what + " keeps first two topic words: " + q).contains(words.get(0), words.get(1));
+            }
+        }
+        return out.stream();
+    }
+
+    @ParameterizedTest(name = "{0} level {1} darkness {2} optimism {3}")
+    @MethodSource("bandDarknessOptimism")
+    void everyTemplateObeysRuleQAndTheDirectionRules(String label, int level, int darkness, int optimism) {
+        List<String> list = templates(catalogue(label, level), darkness, optimism);
+        assertThat(list).as("forPipeline always returns exactly 3 texts").hasSize(3);
+        assertThat(new HashSet<>(list.stream().map(s -> s.toLowerCase(Locale.ROOT)).toList())).as("3 distinct texts").hasSize(3);
+        String l = QuerySupport.label(label);
+        for (String t : list) {
+            assertThat(RuleQOracle.holds(t)).as(RuleQOracle.why(t)).isTrue();
+            assertThat(t).as("starts with the label").startsWith(l + " ");
+            List<String> words = added(t, l);
+            if (darkness >= 7) {
+                assertThat(count(words, N)).as("Darkness >= 7: exactly one N term added by '" + t + "'").isEqualTo(1);
+            } else if (darkness <= 3) {
+                assertThat(count(words, N)).as("Darkness <= 3: no N term added by '" + t + "'").isZero();
+                assertThat(count(words, P)).as("Darkness <= 3: a P term added by '" + t + "'").isGreaterThanOrEqualTo(1);
+            } else if (optimism >= 7) {
+                assertThat(count(words, N)).as("Optimism >= 7: no N term added by '" + t + "'").isZero();
+                assertThat(count(words, P)).as("Optimism >= 7: a P term added by '" + t + "'").isGreaterThanOrEqualTo(1);
+            } else {
+                assertThat(count(words, N)).as("Darkness 5 / Optimism 5: no N term added by '" + t + "'").isZero();
+            }
+        }
+    }
+
+    @ParameterizedTest(name = "{0} darkness {1} optimism {2}")
+    @MethodSource("labelDarknessOptimism")
+    void theThreeBandsHaveDisjointTemplateSetsAndAreUniformInsideABand(String label, int darkness, int optimism) {
+        List<String> low = templates(catalogue(label, 1), darkness, optimism);
+        List<String> mid = templates(catalogue(label, 4), darkness, optimism);
+        List<String> high = templates(catalogue(label, 8), darkness, optimism);
+        assertThat(low).doesNotContainAnyElementsOf(mid).doesNotContainAnyElementsOf(high);
+        assertThat(mid).doesNotContainAnyElementsOf(high);
+        for (int level = 1; level <= 10; level++) {
+            List<String> expected = level <= 3 ? low : level <= 7 ? mid : high;
+            assertThat(templates(catalogue(label, level), darkness, optimism)).as("level " + level).isEqualTo(expected);
+        }
+    }
+
+    static Stream<Arguments> labelDarknessOptimism() {
+        List<Arguments> out = new ArrayList<>();
+        for (String label : List.of("New pandemic", "Mars", "Energy crisis")) {
+            for (int darkness : new int[] {2, 3, 5, 7, 9}) {
+                for (int optimism : new int[] {5, 8}) {
+                    out.add(Arguments.of(label, darkness, optimism));
+                }
+            }
+        }
+        return out.stream();
+    }
+
+    @Test
+    void wordsOfTheLabelItselfNeverCountAsNegativeTerms() {
+        // "Energy crisis" contains the N term "crisis"; the template adds none of its own at Darkness 2
+        for (String t : templates(catalogue("Energy crisis", 5), 2, 5)) {
+            assertThat(count(added(t, "Energy crisis"), N)).as(t).isZero();
+            assertThat(count(added(t, "Energy crisis"), P)).as(t).isGreaterThanOrEqualTo(1);
+        }
+    }
+
+    @ParameterizedTest(name = "GENERAL darkness {0} optimism {1}")
+    @CsvSource({"2,5", "3,5", "5,5", "7,5", "9,5", "2,8", "5,8", "7,8", "9,8"})
+    void theGeneralPipelineObeysRuleQAndTheDirectionRules(int darkness, int optimism) {
+        List<String> list = templates(general(), darkness, optimism);
+        assertThat(list).hasSize(3);
+        for (String t : list) {
+            assertThat(RuleQOracle.holds(t)).as(RuleQOracle.why(t)).isTrue();
+            List<String> words = added(t, "major world events");
+            if (darkness >= 7) {
+                assertThat(count(words, N)).as(t).isEqualTo(1);
+            } else if (darkness <= 3 || optimism >= 7) {
+                assertThat(count(words, N)).as(t).isZero();
+                assertThat(count(words, P)).as(t).isGreaterThanOrEqualTo(1);
+            } else {
+                assertThat(count(words, N)).as(t).isZero();
+            }
+        }
+    }
+
+    static Stream<Arguments> hostileLabels() {
+        return Stream.of(
+            Arguments.of("\"Ocean\" (desalination) boom"), Arguments.of("OR"), Arguments.of("()"),
+            Arguments.of("war or peace"), Arguments.of("a b c d e f g h i j"), Arguments.of("x"), Arguments.of("when:7d site:example.org"),
+            Arguments.of("Fusion OR fission"), Arguments.of("AND NOT OR"), Arguments.of("abcd def ghi jkl mno pqr stu vwx yza bcd"));
+    }
+
+    @ParameterizedTest(name = "label \"{0}\"")
+    @MethodSource("hostileLabels")
+    void hostileLabelsStillGiveTemplatesThatObeyRuleQ(String label) {
+        for (int level : new int[] {1, 5, 9}) {
+            for (int darkness : new int[] {2, 5, 9}) {
+                for (String t : templates(catalogue(label, level), darkness, 5)) {
+                    assertThat(RuleQOracle.holds(t)).as("label '" + label + "' level " + level + " darkness " + darkness + ": "
+                        + RuleQOracle.why(t)).isTrue();
                 }
             }
         }

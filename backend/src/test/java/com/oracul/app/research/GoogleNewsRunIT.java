@@ -13,14 +13,13 @@ import org.springframework.test.context.TestPropertySource;
 
 /**
  * phase-02 news-search.md FR-48 + FR-46 through whole runs (phase-03 FR-49: Google is the only provider): Google News RSS
- * answers every query of fixture F240 (items with " - Reuters" title suffixes), the run keeps 30 of the 205 usable
+ * answers every query of fixture F240 (F240_BODY: 9 wildcards x 2 queries; items with " - Reuters" title suffixes), the run keeps 30 of the 205 usable
  * candidates, resolves their links through the article fetch and exposes publisherUrl; failing and empty feeds.
  */
-// @trace FR-46, FR-48, FR-49, FR-52
+// @trace FR-46, FR-48, FR-49, FR-50, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
-    "oracul.research.query-budget=18",
     "oracul.events.max-sources=1000",
 })
 class GoogleNewsRunIT extends AbstractEventIT {
@@ -32,7 +31,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
     void f240ThroughGoogleKeepsThirtyResolvedSourcesWithPublisherUrl() throws Exception {
         newsF240();
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, F240_BODY).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
@@ -43,16 +42,17 @@ class GoogleNewsRunIT extends AbstractEventIT {
         assertThat(news.requests.stream().map(r -> r.elements().size()).distinct().toList()).as("one text per request").containsExactly(1);
         assertThat(news.paths).as("no request to a former provider path").noneMatch(p -> p.startsWith("/api/v2/doc"));
 
-        Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) plan.get("queries");
-        Map<String, Map<String, Object>> intents = new HashMap<>();
-        for (Map<String, Object> in : (List<Map<String, Object>>) plan.get("intents")) intents.put((String) in.get("id"), in);
+        Map<String, Object> research = researchBody(sid, id);
+        assertThat(PlanJson.pipelines(research)).as("F240_BODY: nine pipelines of two queries").hasSize(9)
+            .allSatisfy(p -> assertThat(PlanJson.queriesOf(p)).hasSize(2));
         List<String> topicOfQuery = new ArrayList<>();
         int returned = 0;
-        for (Map<String, Object> q : queries) {
-            assertThat(q.get("status")).as("every query was answered").isEqualTo("OK");
-            returned += ((Number) q.get("articlesReturned")).intValue();
-            topicOfQuery.add(F240Support.topicOf(intents.get((String) q.get("intentId"))));
+        for (Map<String, Object> p : PlanJson.pipelines(research)) {
+            for (Map<String, Object> q : PlanJson.queriesOf(p)) {
+                assertThat(q.get("status")).as("every query was answered").isEqualTo("OK");
+                returned += ((Number) q.get("articlesReturned")).intValue();
+                topicOfQuery.add(F240Support.topicOf(p));
+            }
         }
         assertThat(returned).isEqualTo(240);
 
@@ -72,12 +72,14 @@ class GoogleNewsRunIT extends AbstractEventIT {
             assertThat(s.get("sourceType")).isEqualTo("NEWS");
             assertThat(s.get("sourceQuality")).isEqualTo(0.85);
             assertThat(s.get("topic")).isEqualTo(want.topic());
+            assertThat((List<?>) s.get("pipelineIds")).as("pipelineIds of " + s.get("id")).isNotEmpty();
             assertThat((String) s.get("title")).as("title without the source suffix").contains("Article r").doesNotContain(" - Reuters");
             assertThat(s.get("summary")).isEqualTo("Summary of " + want.name());
             assertThat((List<?>) s.get("queryIds")).isNotEmpty();
         }
         Map<String, Object> shared = sources.stream().filter(s -> (base + "/articles/shared").equals(s.get("url"))).findFirst().orElseThrow();
         assertThat((List<?>) shared.get("queryIds")).as("the shared article keeps all 18 queries").hasSize(18);
+        assertThat((List<?>) shared.get("pipelineIds")).as("and was found by all nine pipelines").hasSize(9);
         assertThat(news.articleRequests.stream().filter(n -> n.equals("shared")).count()).as("fetched once").isEqualTo(1);
         assertThat(news.articleRequests).as("only kept candidates are fetched").hasSize(30);
         // the same Google link is not kept twice: every url unique
@@ -89,7 +91,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
     void oneGoogleQueryFailingFailsOnlyThatQueryAndSendsNothingElse() throws Exception {
         news.responder = req -> req.number() == 2 ? StubNews.status(503) : f240(req);
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, F240_BODY).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(news.requests).as("one request per query, no fallback request, a 503 is not retried").hasSize(18);
@@ -98,7 +100,8 @@ class GoogleNewsRunIT extends AbstractEventIT {
         assertThat(counts.get("searches")).isEqualTo(18);
         assertThat(counts.get("articlesRetrieved")).as("240 minus the 14 items of the failed query (r2 has 14)").isEqualTo(226);
         assertThat(counts.get("articlesConsidered")).isEqualTo(30);
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
+        assertThat(queries).hasSize(18);
         for (int i = 0; i < queries.size(); i++) {
             Map<String, Object> q = queries.get(i);
             boolean failedQuery = i == 1; // request number 2 = Q02
@@ -117,13 +120,13 @@ class GoogleNewsRunIT extends AbstractEventIT {
     void anEmptyFeedEverywhereMakesEmptyQueriesAndASpeculativeRun() throws Exception {
         news.responder = req -> StubNews.rss();
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, F240_BODY).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(news.requests).as("one request per query").hasSize(18);
         assertThat(news.paths).noneMatch(p -> p.startsWith("/api/v2/doc"));
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
-        assertThat(queries).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("EMPTY"));
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
+        assertThat(queries).hasSize(18).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("EMPTY"));
         assertThat(sourceItems(sid, id)).isEmpty();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
     }
@@ -153,7 +156,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
     void googleDownFailsEveryQueryWithoutAnyFallbackAndTheRunGoesOn() throws Exception {
         news.responder = req -> StubNews.status(503);
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, F240_BODY).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(run.get("failure")).isNull();
@@ -163,8 +166,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("articlesRetrieved")).isEqualTo(0);
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
         assertThat(queries).hasSize(18).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("FAILED");
             assertThat(q.get("articlesReturned")).isEqualTo(0);

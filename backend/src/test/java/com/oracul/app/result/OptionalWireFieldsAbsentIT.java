@@ -12,9 +12,11 @@ import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * Wire format of api/openapi.yaml 0.7.0: an optional field that is unset is absent from the JSON, never null and never [].
- * Walks the raw body of every endpoint that carries one of the phase-03 optional fields.
+ * Walks the raw body of every endpoint that carries one of the phase-03 optional fields. Slice 04 (FR-50 change line):
+ * {@code SearchPlan.pipelines} and {@code Source.pipelineIds} are present on the wire for a new run, so they left the walked
+ * set and are asserted present instead; the other pipeline fields written by later slices stay absent.
  */
-// @trace FR-49
+// @trace FR-49, FR-50
 class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
 
     /** Optional 0.7.0 field name -> the schema property it belongs to. */
@@ -22,11 +24,9 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         Map.entry("wildcardsWithoutSources", "EvidenceNote.wildcardsWithoutSources"),
         Map.entry("sourcesKept", "ResearchCounts.sourcesKept"),
         Map.entry("sourcesWithContent", "ResearchCounts.sourcesWithContent"),
-        Map.entry("pipelines", "SearchPlan.pipelines"),
         Map.entry("publisherHost", "Source.publisherHost"),
         Map.entry("contentStatus", "Source.contentStatus"),
         Map.entry("excerpts", "Source.excerpts"),
-        Map.entry("pipelineIds", "Source.pipelineIds"),
         Map.entry("wildcardSections", "EvidencePack.wildcardSections"),
         Map.entry("wildcardGroups", "FutureResult.wildcardGroups"));
 
@@ -80,6 +80,16 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         assertThat(JsonPath.<Object>read(result, "$.research.counts")).isNotNull();
         assertThat(JsonPath.<List<Object>>read(result, "$.sources")).as("result sources").isNotEmpty();
         assertThat(JsonPath.<List<Object>>read(pack, "$.sources")).as("pack sources").isNotEmpty();
+
+        // FR-50: a new run carries its pipelines and every source its pipelineIds (never absent, never empty)
+        assertThat(JsonPath.<List<Object>>read(research, "$.searchPlan.pipelines")).as("pipelines of a new run").hasSize(2);
+        assertThat(JsonPath.<List<Object>>read(research, "$.searchPlan.pipelines[*].candidatesConsidered"))
+            .as("set by a later slice: absent").isEmpty();
+        assertThat(JsonPath.<List<Object>>read(research, "$.searchPlan.pipelines[*].sourceIds")).as("set by a later slice: absent").isEmpty();
+        List<Object> items = JsonPath.read(sources, "$.items");
+        List<Object> pipelineIds = JsonPath.read(sources, "$.items[*].pipelineIds");
+        assertThat(pipelineIds).as("every source of a new run carries pipelineIds").hasSize(items.size());
+        assertThat(pipelineIds).allSatisfy(ids -> assertThat((List<?>) ids).isNotEmpty());
 
         assertNoOptionalKeys("GET /api/runs/{id}", run);
         assertNoOptionalKeys("GET /api/runs/{id}/research", research);

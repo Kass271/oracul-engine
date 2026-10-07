@@ -19,7 +19,7 @@ import com.oracul.app.research.EvidenceSelector;
 import com.oracul.app.research.MinCoreThresholds;
 import com.oracul.app.research.EventNormalizer;
 import com.oracul.app.research.EventRepository;
-import com.oracul.app.research.QueryExpander;
+import com.oracul.app.research.QueryGenerator;
 import com.oracul.app.research.SearchPlanner;
 import com.oracul.app.research.SourceRepository;
 import com.oracul.app.research.SourceRetrieval;
@@ -47,7 +47,7 @@ public class ResearchPipeline {
     private final GenerationRunRepository runs;
     private final SourceRepository sources;
     private final SearchPlanner planner;
-    private final QueryExpander expander;
+    private final QueryGenerator generator;
     private final SourceRetrieval retrieval;
     private final EventNormalizer normalizer;
     private final EventClassifier classifier;
@@ -60,23 +60,18 @@ public class ResearchPipeline {
     private final RunGuard guard;
     private final TransactionTemplate tx;
     private final Clock clock;
-    private final int queryBudget;
     private final Duration minStageDuration;
 
     ResearchPipeline(GenerationRunRepository runs, SourceRepository sources, SearchPlanner planner,
-                     QueryExpander expander, SourceRetrieval retrieval, EventNormalizer normalizer,
+                     QueryGenerator generator, SourceRetrieval retrieval, EventNormalizer normalizer,
                      EventClassifier classifier, EventRepository events, EventRanker ranker, EvidenceSelector selector,
                      MinCoreThresholds minCore, EvidencePackService packService, EvidencePackRepository packs, RunGuard guard, TransactionTemplate tx,
                      Clock clock,
-                     @Value("${oracul.research.query-budget:20}") int queryBudget,
                      @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration) {
-        if (queryBudget < 4 || queryBudget > 100) {
-            throw new IllegalStateException("oracul.research.query-budget must be between 4 and 100");
-        }
         this.runs = runs;
         this.sources = sources;
         this.planner = planner;
-        this.expander = expander;
+        this.generator = generator;
         this.retrieval = retrieval;
         this.normalizer = normalizer;
         this.classifier = classifier;
@@ -89,7 +84,6 @@ public class ResearchPipeline {
         this.guard = guard;
         this.tx = tx;
         this.clock = clock;
-        this.queryBudget = queryBudget;
         this.minStageDuration = minStageDuration;
     }
 
@@ -105,8 +99,8 @@ public class ResearchPipeline {
         Instant deadlineAt = runs.deadlineAt(runId);
         SearchPlan plan;
         try {
-            SearchPlan template = planner.plan(profile, cfg, queryBudget);
-            plan = expander.expand(sessionId, profile, cfg, template);
+            plan = generator.generate(sessionId, cfg, planner.plan(profile, cfg), t0, deadlineAt,
+                () -> guard.check(runId));
         } catch (ChatGptCallException e) {
             runs.markFailed(runId, e.code(), e.getMessage(), e.providerCode(), now());
             return false;

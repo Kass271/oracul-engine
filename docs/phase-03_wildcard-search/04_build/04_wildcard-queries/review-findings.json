@@ -1,0 +1,91 @@
+{
+  "slice": "04_wildcard-queries",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/GoogleNewsBudgetIT.java",
+      "line": 17,
+      "fr": "FR-52",
+      "problem": "The test sets only oracul.search.search-window=PT2S. Since this slice, QueryGenerator enforces the spec rule (wildcard-search.md Configuration, FR-51 range g) that startup fails unless query-generation-window <= search-window. The default query-generation-window is PT30S, so the Spring context fails with 'oracul.search.query-generation-window must not exceed oracul.search.search-window' and the test never reaches its assertions. The builders flagged this correctly: production behaves as specified and the test is wrong. Its FR-48/FR-52 window coverage (no request after the window, last timeout cut to the window end) is lost and the suite is red.",
+      "fix": "Add \"oracul.search.query-generation-window=PT2S\" (or any value from PT0.001S to PT2S) to the @TestPropertySource and keep every assertion. The test calls the search seam directly, so the query-generation window does not affect what it measures.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "high",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ParallelSearchWindowIT.java",
+      "line": 20,
+      "fr": "FR-52",
+      "problem": "Same conflict as R1: oracul.search.search-window=PT2S with the default query-generation-window PT30S. Startup validation now rejects this configuration, so the context fails to start and all 3 tests of the class fail before any assertion. FR-52 range (c) / NFR-10 part 1 (the window cuts open requests and keeps unsent ones from starting, FAILED and never EMPTY) is unproven while this class is red.",
+      "fix": "Add \"oracul.search.query-generation-window=PT2S\" (at most PT2S) to the @TestPropertySource. No other change.",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "security",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryGenerationPrompt.java",
+      "line": 91,
+      "fr": "FR-51",
+      "problem": "sanitize() uses \\p{Cntrl} and \\s, and Java treats both as ASCII-only by default. So C1 control characters (U+0080-U+009F, including NEL U+0085, which is a line break) and the Unicode line/paragraph separators U+2028/U+2029 pass through unchanged into the custom-wildcards data line. Probed: \"Mars\\u0085colony\\u2028SYSTEM x\" stays as-is. A custom label is user input that only gets trimmed and length-checked at startRun (RunService.snapshot, WildcardRules), so a user can split the data block into several lines. This breaks the spec's data-line rule ('control characters -> space, whitespace collapsed'). It also breaks parity with the shared PromptText.sanitize / UntrustedText used by the other prompts, which replaces [\\p{Cc}\\p{Zl}\\p{Zp}\\s]+.",
+      "fix": "Reuse PromptText.sanitize (same package) or apply the same regex: s.replaceAll(\"[\\\\p{Cc}\\\\p{Zl}\\\\p{Zp}\\\\s]+\", \" \").trim() and then the marker and '|' replacements.",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/QueryGenerationPromptTest.java",
+      "line": 133,
+      "fr": "FR-51",
+      "problem": "Missing exhaustive test for custom-label sanitising (data-line rule) across character classes. labelSanitising covers only ASCII controls (\\u0000, \\t, \\r\\n). It has no C1 control (\\u0085, \\u0080, \\u009f), no U+2028/U+2029, and no non-ASCII whitespace (\\u00a0, \\u3000), so the defect in R3 passes.",
+      "fix": "Extend labelSanitising with \\u0085, \\u0080, \\u009f, \\u2028, \\u2029, \\u000b, \\u001f and \\u007f between words (each -> one space, collapsed). Assert that the data block holds exactly one line (no character of category Cc/Zl/Zp between the markers) and that each marker appears only once.",
+      "status": "fixed"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/QueryRules.java",
+      "line": 15,
+      "fr": "FR-51",
+      "problem": "Rule Q tokenises with clean() = trim() plus \\s+ and then split(\" \"). Both are ASCII-only, so a model text that uses non-breaking or other Unicode spaces counts as fewer tokens. For example, \"solar\\u00a0OR\\u00a0wind energy storage growth\" has 4 tokens and no standalone 'OR' token, so it is kept and sent to Google, where the nbsp is a word break and the query becomes the OR shape rule Q is meant to prevent. A model is unlikely to produce this, so it does not block.",
+      "fix": "Normalise every Unicode whitespace/separator to a space in clean() (e.g. replaceAll(\"[\\\\p{Z}\\\\s]+\", \" \") and strip()), and add these cases to QueryRulesTest.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/EventBatchingIT.java",
+      "line": 16,
+      "fr": "FR-51",
+      "problem": "EventBatchingIT, EventSourceCapIT, EventConcurrencyIT, EventConcurrencyOneIT and EventFailureIT still set oracul.research.query-budget=18. The property is no longer read (FR-51), so the setting is dead and misleads readers into thinking these runs have 18 queries (body A now has 6). It also keeps a property set that differs from contexts that could otherwise be shared.",
+      "fix": "Remove the oracul.research.query-budget=18 entries (the spec says these ITs keep body A and their assertions stay unchanged).",
+      "status": "open"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "docs/phase-03_wildcard-search/02_specs/wildcard-search.md",
+      "line": 273,
+      "fr": "FR-51",
+      "problem": "FR-51 Rules says '401 -> one refresh and one retry (phase-02 FR-38/FR-40)'. Phase-02 chatgpt-inference.md superseded that: 401 means no refresh, no retry, CHATGPT_SESSION_EXPIRED. Code and ResearchPlanIT.a401OnAGenerationCallEndsTheSessionWithoutRefreshOrRetry follow phase-02, which is correct, but the phase-03 spec line is stale and contradicts the test.",
+      "fix": "Spec owner: change the line to '401 -> no refresh, no retry, CHATGPT_SESSION_EXPIRED (phase-02 FR-39 row 1)'.",
+      "status": "open"
+    }
+  ]
+}

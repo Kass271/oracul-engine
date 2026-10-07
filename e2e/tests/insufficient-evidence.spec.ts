@@ -74,7 +74,7 @@ function purposeOf(request: any): string | undefined {
   return /ORACUL REQUEST ([A-Z_]+)/.exec(text)?.[1];
 }
 
-// @trace FR-47, FR-52
+// @trace FR-47, FR-50, FR-52
 test.describe('FR-47 Always generate, note insufficient evidence at the end', () => {
   test('FR-47 Realism 10 with 2 core items completes with the note and LOWER REALISM starts a Realism 8 run', async ({ page }) => {
     test.setTimeout(240_000);
@@ -158,9 +158,10 @@ test.describe('FR-47 Always generate, note insufficient evidence at the end', ()
     expect(JSON.stringify(generations[0])).toContain(
       'The Evidence Pack is empty: no current news could be used. Write a fully speculative scenario',
     );
-    // news never reached the run, yet Google News was asked once per planned query (a 503 is not retried) and nothing else was (no fallback provider)
-    expect(run.counts.searches).toBe(20);
-    expect((await (await page.request.get(`${STUB}/__control/requests?kind=rss`)).json()).requests).toHaveLength(20);
+    // news never reached the run, yet Google News was asked once per planned query (FR-50: two pipelines x 3 queries; a 503 is not retried)
+    // and nothing else was (no fallback provider)
+    expect(run.counts.searches).toBe(6);
+    expect((await (await page.request.get(`${STUB}/__control/requests?kind=rss`)).json()).requests).toHaveLength(6);
     const all = (await (await page.request.get(`${STUB}/__control/requests?kind=all`)).json()).requests;
     expect(all.filter((r: { path: string }) => r.path.startsWith('/api/v2/doc'))).toHaveLength(0);
   });

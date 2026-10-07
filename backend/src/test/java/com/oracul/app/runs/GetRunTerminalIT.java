@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** getRun row #2: pipeline without delay ends COMPLETED at WRITING_STORY. */
-// @trace FR-24, FR-47
-// slice 05: stage SEARCHING runs the 20 queries of the default budget (every one EMPTY), so counts.searches is 20.
+// @trace FR-24, FR-47, FR-50
+// slice 05 / FR-50: stage SEARCHING runs the 3 queries of body B's one GENERAL pipeline (every one EMPTY), so counts.searches is 3.
 @TestPropertySource(properties = "oracul.run.placeholder-stage-delay=PT0S")
 class GetRunTerminalIT extends AbstractRunIT {
 
@@ -27,7 +27,7 @@ class GetRunTerminalIT extends AbstractRunIT {
         // run-control.md FR-47: the empty-news run is speculative and ends COMPLETED with a headline and the NO_EVIDENCE note
         assertThat(run.get("headline")).isEqualTo("Stub headline from the future");
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":20")));
+        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":3")));
         assertThat(run.get("configuration")).isEqualTo(json(B));
     }
 }

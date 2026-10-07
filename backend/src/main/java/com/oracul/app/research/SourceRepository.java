@@ -30,8 +30,8 @@ public class SourceRepository {
 
     public void insertAll(UUID runId, List<Stored> sources) {
         jdbc.batchUpdate("insert into source (run_id, id, url, publisher, title, published_at, retrieved_at, summary, "
-                + "topic, entities, source_type, source_quality, metadata_fetched, language, query_ids, publisher_url) "
-                + "values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, cast(? as jsonb), ?)",
+                + "topic, entities, source_type, source_quality, metadata_fetched, language, query_ids, publisher_url, pipeline_ids) "
+                + "values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, cast(? as jsonb), ?, cast(? as jsonb))",
             sources, 100, (ps, st) -> {
                 Source s = st.source();
                 ps.setObject(1, runId);
@@ -50,6 +50,8 @@ public class SourceRepository {
                 ps.setString(14, st.language());
                 ps.setString(15, json.writeValueAsString(s.getQueryIds()));
                 ps.setString(16, s.getPublisherUrl() == null ? null : s.getPublisherUrl().toString());
+                ps.setString(17, s.getPipelineIds() == null || s.getPipelineIds().isEmpty() ? null
+                    : json.writeValueAsString(s.getPipelineIds()));
             });
     }
 
@@ -66,7 +68,7 @@ public class SourceRepository {
 
     public List<Source> list(UUID runId) {
         return jdbc.query("select id, url, publisher, title, published_at, retrieved_at, summary, topic, entities, "
-                + "source_type, source_quality, metadata_fetched, query_ids, publisher_url from source where run_id = ? "
+                + "source_type, source_quality, metadata_fetched, query_ids, publisher_url, pipeline_ids from source where run_id = ? "
                 + "order by length(id), id",
             (rs, i) -> {
                 Source s = new Source();
@@ -86,6 +88,10 @@ public class SourceRepository {
                 String publisherUrl = rs.getString("publisher_url");
                 if (publisherUrl != null) {
                     s.setPublisherUrl(URI.create(publisherUrl));
+                }
+                String pipelineIds = rs.getString("pipeline_ids");
+                if (pipelineIds != null) {
+                    s.setPipelineIds(json.readValue(pipelineIds, new TypeReference<List<String>>() { }));
                 }
                 return s;
             }, runId);

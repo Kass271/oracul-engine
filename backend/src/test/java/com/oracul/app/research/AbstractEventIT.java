@@ -75,7 +75,18 @@ public abstract class AbstractEventIT extends AbstractRunIT {
 
     public static final String NORMALIZATION = "EVENT_NORMALIZATION";
     public static final String CLASSIFICATION = "EVENT_CLASSIFICATION";
-    public static final String EXPANSION = "QUERY_EXPANSION";
+    /** Purpose of the per-pipeline query-generation calls (FR-51): one request per pipeline, body A has 2, body B 1. */
+    public static final String QUERY_GENERATION = "QUERY_GENERATION";
+
+    /**
+     * FR-50 change line: the F240 run tests start 9 catalogue wildcards (the first nine ids of {@code PlanSupport.TEN_WILDCARDS},
+     * intensity 5 each, realism 8 / darkness 9 / optimism 2 / horizon 5y as body A), so 9 x 2 = 18 queries keep F240's 240 items
+     * and 205 usable candidates; the topic of query r is the topicKey of pipeline W(ceil(r/2)).
+     */
+    public static final String F240_BODY = "{\"realism\":8,\"darkness\":9,\"optimism\":2,\"horizon\":\"5y\",\"wildcards\":["
+        + PlanSupport.TEN_WILDCARDS.subList(0, 9).stream().map(id -> "{\"wildcardId\":\"" + id + "\",\"intensity\":5}")
+            .collect(java.util.stream.Collectors.joining(","))
+        + "],\"customWildcards\":[],\"output\":{\"story\":true,\"illustration\":false}}";
 
     /** Scripted normalisation answer N-V4. */
     public static final String N_V4 = "{\"events\":[{\"sourceIds\":[\"S002\",\"S001\",\"S003\"],\"date\":\"2026-10-01\","
@@ -155,7 +166,7 @@ public abstract class AbstractEventIT extends AbstractRunIT {
 
     /**
      * Fixture F240 (205 usable candidates after filtering) as Google News items: per query (FR-52: one text per request, so the
-     * query number r = {@code req.firstElement()} = the request number at concurrency 1) the block of items r-a1 ... Every pubDate is {@code testNow - 1 day} except the
+     * query number r = {@code req.firstElement()} = the request number at concurrency 1; 18 queries = {@link #F240_BODY}'s 9 pipelines x 2) the block of items r-a1 ... Every pubDate is {@code testNow - 1 day} except the
      * deliberately old ones; "unusable link" entries (javascript:void(0)) and blank titles are filtered by the pipeline.
      */
     protected StubNews.Reply f240(StubNews.Request req) {

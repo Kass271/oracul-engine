@@ -1,12 +1,14 @@
 package com.oracul.app.research;
 
 import com.oracul.app.api.model.HorizonCode;
+import com.oracul.app.api.model.PipelineQuery;
 import com.oracul.app.api.model.QueryBucket;
 import com.oracul.app.api.model.SearchIntent;
 import com.oracul.app.api.model.SearchPlan;
 import com.oracul.app.api.model.SearchQuery;
 import com.oracul.app.api.model.SearchQueryStatus;
 import com.oracul.app.api.model.Source;
+import com.oracul.app.api.model.WildcardPipeline;
 import jakarta.annotation.PreDestroy;
 import java.net.URI;
 import java.time.Clock;
@@ -50,17 +52,38 @@ public class SourceRetrieval {
     public record SearchOutcome(SearchPlan plan, Map<String, List<NewsProvider.Article>> articles,
                                 List<Attributed> ordered) {
         public int searches() {
-            return plan.getQueries().size();
+            return flat(plan).size();
         }
 
         public int articlesRetrieved() {
-            return plan.getQueries().stream().mapToInt(SearchQuery::getArticlesReturned).sum();
+            return flat(plan).stream().mapToInt(QueryRef::articles).sum();
         }
 
         /** True when every planned query is FAILED: every group failed or could not be sent. */
         public boolean allFailed() {
-            return plan.getQueries().stream().allMatch(q -> q.getStatus() == SearchQueryStatus.FAILED);
+            return flat(plan).stream().allMatch(q -> q.status() == SearchQueryStatus.FAILED);
         }
+    }
+
+    /** One planned query, whichever plan shape holds it. */
+    record QueryRef(String id, String text, SearchQueryStatus status, int articles, WildcardPipeline pipeline) {
+    }
+
+    /** The planned queries: pipelines[].queries[] in pipeline order, else the phase-01 queries[]. */
+    static List<QueryRef> flat(SearchPlan plan) {
+        List<QueryRef> out = new ArrayList<>();
+        if (plan.getPipelines() != null && !plan.getPipelines().isEmpty()) {
+            for (WildcardPipeline p : plan.getPipelines()) {
+                for (PipelineQuery q : p.getQueries()) {
+                    out.add(new QueryRef(q.getId(), q.getText(), q.getStatus(), q.getArticlesReturned(), p));
+                }
+            }
+        } else {
+            for (SearchQuery q : plan.getQueries()) {
+                out.add(new QueryRef(q.getId(), q.getText(), q.getStatus(), q.getArticlesReturned(), null));
+            }
+        }
+        return out;
     }
 
     /** FR-46: the most sources a run keeps. */
@@ -110,29 +133,52 @@ public class SourceRetrieval {
      */
     public SearchOutcome search(SearchPlan plan, HorizonCode horizon, Instant t0, Instant deadlineAt,
                                 BooleanSupplier mayStart) throws InterruptedException {
-        List<SearchQuery> queries = plan.getQueries();
+        List<QueryRef> queries = flat(plan);
         List<String> texts = new ArrayList<>();
-        queries.forEach(q -> texts.add(q.getText()));
+        queries.forEach(q -> texts.add(q.text()));
         List<NewsSearchProvider.QueryResult> results = search.search(texts, horizon,
             SearchBudget.search(clock, t0, searchWindow, deadlineAt), mayStart);
         Map<String, List<NewsProvider.Article>> articles = new LinkedHashMap<>();
         List<Attributed> ordered = new ArrayList<>();
-        List<SearchQuery> updated = new ArrayList<>();
+        Map<String, NewsSearchProvider.QueryResult> byId = new HashMap<>();
         for (int i = 0; i < queries.size(); i++) {
-            SearchQuery q = queries.get(i);
+            QueryRef q = queries.get(i);
             NewsSearchProvider.QueryResult r = results.get(i);
             List<NewsProvider.Article> own = new ArrayList<>(r.articles());
-            articles.put(q.getId(), own);
-            own.forEach(a -> ordered.add(new Attributed(q.getId(), a)));
-            updated.add(new SearchQuery(q.getId(), q.getIntentId(), q.getBucket(), q.getText(), r.status(), own.size()));
+            articles.put(q.id(), own);
+            own.forEach(a -> ordered.add(new Attributed(q.id(), a)));
+            byId.put(q.id(), r);
         }
-        SearchPlan out = new SearchPlan(plan.getQueryBudget(), plan.getExpansionMode(), plan.getBuckets(),
-            plan.getIntents(), updated);
+        SearchPlan out;
+        if (plan.getPipelines() != null && !plan.getPipelines().isEmpty()) {
+            List<WildcardPipeline> pipelines = new ArrayList<>();
+            for (WildcardPipeline p : plan.getPipelines()) {
+                List<PipelineQuery> updated = new ArrayList<>();
+                for (PipelineQuery q : p.getQueries()) {
+                    NewsSearchProvider.QueryResult r = byId.get(q.getId());
+                    updated.add(new PipelineQuery(q.getId(), q.getText(), r.status(), articles.get(q.getId()).size()));
+                }
+                pipelines.add(new WildcardPipeline(p.getId(), p.getKind(), p.getLabel(), p.getHeading(),
+                    p.getQueryMode(), updated).level(p.getLevel()).topicKey(p.getTopicKey())
+                    .candidatesConsidered(p.getCandidatesConsidered()).sourceIds(p.getSourceIds()));
+            }
+            out = new SearchPlan(plan.getQueryBudget(), plan.getExpansionMode(), plan.getBuckets(), plan.getIntents(),
+                plan.getQueries()).pipelines(pipelines);
+        } else {
+            List<SearchQuery> updated = new ArrayList<>();
+            for (SearchQuery q : plan.getQueries()) {
+                NewsSearchProvider.QueryResult r = byId.get(q.getId());
+                updated.add(new SearchQuery(q.getId(), q.getIntentId(), q.getBucket(), q.getText(), r.status(),
+                    articles.get(q.getId()).size()));
+            }
+            out = new SearchPlan(plan.getQueryBudget(), plan.getExpansionMode(), plan.getBuckets(),
+                plan.getIntents(), updated);
+        }
         return new SearchOutcome(out, articles, ordered);
     }
 
     private record Candidate(NewsProvider.Article article, String url, List<String> queryIds, String topic,
-                             Instant seen) {
+                             Instant seen, java.util.SortedSet<String> pipelines) {
     }
 
     public List<SourceRepository.Stored> readSources(SearchOutcome outcome, HorizonCode horizon)
@@ -184,12 +230,14 @@ public class SourceRetrieval {
         Map<String, SearchIntent> intents = new HashMap<>();
         outcome.plan().getIntents().forEach(in -> intents.put(in.getId(), in));
         Instant cutoff = clock.instant().minus(GoogleNewsSearch.timespanDays(horizon), ChronoUnit.DAYS);
-        Map<String, SearchQuery> byId = new HashMap<>();
-        outcome.plan().getQueries().forEach(q -> byId.put(q.getId(), q));
+        Map<String, QueryRef> byId = new HashMap<>();
+        flat(outcome.plan()).forEach(q -> byId.put(q.id(), q));
+        Map<String, SearchQuery> legacy = new HashMap<>();
+        outcome.plan().getQueries().forEach(q -> legacy.put(q.getId(), q));
         Map<String, Candidate> byUrl = new LinkedHashMap<>();
         for (Attributed attributed : outcome.ordered()) {
             NewsProvider.Article a = attributed.article();
-            SearchQuery q = byId.get(attributed.queryId());
+            QueryRef q = byId.get(attributed.queryId());
             String url = UrlNormalizer.normalize(a.url());
             if (url == null || a.title() == null || a.title().isBlank()) {
                 continue;
@@ -200,15 +248,26 @@ public class SourceRetrieval {
             }
             Candidate existing = byUrl.get(url);
             if (existing != null) {
-                if (!existing.queryIds().contains(q.getId())) {
-                    existing.queryIds().add(q.getId());
+                if (!existing.queryIds().contains(q.id())) {
+                    existing.queryIds().add(q.id());
                     java.util.Collections.sort(existing.queryIds());
+                }
+                if (q.pipeline() != null) {
+                    existing.pipelines().add(q.pipeline().getId());
                 }
                 continue;
             }
             List<String> ids = new ArrayList<>();
-            ids.add(q.getId());
-            byUrl.put(url, new Candidate(a, url, ids, topicOf(intents.get(q.getIntentId())), seen));
+            ids.add(q.id());
+            java.util.SortedSet<String> pipelines = q.pipeline() == null ? null : new java.util.TreeSet<>();
+            String topic;
+            if (q.pipeline() != null) {
+                pipelines.add(q.pipeline().getId());
+                topic = q.pipeline().getTopicKey() == null ? "major" : q.pipeline().getTopicKey();
+            } else {
+                topic = topicOf(intents.get(legacy.get(q.id()).getIntentId()));
+            }
+            byUrl.put(url, new Candidate(a, url, ids, topic, seen, pipelines));
         }
         return new ArrayList<>(byUrl.values());
     }
@@ -308,6 +367,9 @@ public class SourceRetrieval {
         s.setSourceQuality(cls.quality());
         s.setMetadataFetched(meta.isPresent());
         s.setQueryIds(c.queryIds());
+        if (c.pipelines() != null) {
+            s.setPipelineIds(new ArrayList<>(c.pipelines()));
+        }
         if (publisherUrl != null) {
             s.setPublisherUrl(URI.create(publisherUrl));
         }

@@ -17,7 +17,8 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 
 /**
- * wildcard-search.md FR-52 through whole runs (concurrency 8): 20 queries go out as 20 parallel requests, the join keeps
+ * wildcard-search.md FR-52 through whole runs (concurrency 8): 15 queries (FIVE_BODY: five wildcards x 3, FR-50) go out as 15
+ * parallel requests, the join keeps
  * every selection / article request behind the last search request, every source belongs to the query that returned it,
  * and a STOP while eight requests are open ends the run for good — no further {@code /rss/search} arrives.
  */
@@ -29,6 +30,12 @@ import org.springframework.test.web.servlet.MvcResult;
     "oracul.news.google.concurrency=8",
 })
 class ParallelSearchRunIT extends AbstractEventIT {
+
+    /** Body A settings with the first five ids of TEN_WILDCARDS at intensity 5: 5 pipelines x 3 queries = 15 (needs >= 9 for 8 open). */
+    static final String FIVE_BODY = "{\"realism\":8,\"darkness\":9,\"optimism\":2,\"horizon\":\"5y\",\"wildcards\":["
+        + PlanSupport.TEN_WILDCARDS.subList(0, 5).stream().map(id -> "{\"wildcardId\":\"" + id + "\",\"intensity\":5}")
+            .collect(java.util.stream.Collectors.joining(","))
+        + "],\"customWildcards\":[],\"output\":{\"story\":true,\"illustration\":false}}";
 
     private String name(String q) {
         return "pq" + Integer.toHexString(q.hashCode());
@@ -45,7 +52,7 @@ class ParallelSearchRunIT extends AbstractEventIT {
 
     @SuppressWarnings("unchecked")
     @Test
-    void twentyQueriesRunInParallelJoinBeforeSelectionAndEverySourceBelongsToItsQuery() throws Exception {
+    void fifteenQueriesRunInParallelJoinBeforeSelectionAndEverySourceBelongsToItsQuery() throws Exception {
         // a q-keyed responder: 3 items per query, unique per query, each answered after 150 ms
         news.responder = StubNews.slow(150, req -> {
             List<String> items = new ArrayList<>();
@@ -55,22 +62,21 @@ class ParallelSearchRunIT extends AbstractEventIT {
             }
             return StubNews.rss(items.toArray(String[]::new));
         });
-        Ran r = run(A);
+        Ran r = run(FIVE_BODY);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
-        assertThat(news.requests).as("one request per planned query").hasSize(20);
-        assertThat(news.maxOpen()).as("20 queries, 8 permits, 150 ms answers: eight open at once").isEqualTo(8);
+        assertThat(news.requests).as("one request per planned query").hasSize(15);
+        assertThat(news.maxOpen()).as("15 queries, 8 permits, 150 ms answers: eight open at once").isEqualTo(8);
 
         // join: the first non-search request starts after the last search request ended
         long lastSearchEnd = news.finishedNanos.values().stream().mapToLong(Long::longValue).max().orElseThrow();
-        assertThat(news.finishedNanos).hasSize(20);
+        assertThat(news.finishedNanos).hasSize(15);
         List<StubNews.Arrival> others = news.arrivals.stream().filter(a -> !a.path().equals("/rss/search")).toList();
         assertThat(others).as("article requests of the kept sources happened").isNotEmpty();
         assertThat(others).as("no selection / article request starts before the last search ended")
             .allSatisfy(a -> assertThat(a.nanos()).isGreaterThan(lastSearchEnd));
 
-        Map<String, Object> plan = (Map<String, Object>) researchBody(r.sid(), r.id()).get("searchPlan");
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) plan.get("queries");
-        assertThat(queries).hasSize(20).allSatisfy(q -> {
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(r.sid(), r.id()));
+        assertThat(queries).hasSize(15).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("OK");
             assertThat(q.get("articlesReturned")).isEqualTo(3);
         });
@@ -79,10 +85,10 @@ class ParallelSearchRunIT extends AbstractEventIT {
             String sent = ParallelSearchSupport.text((String) q.get("text")) + " when:90d";
             idOfName.put(name(sent), (String) q.get("id"));
         }
-        assertThat(idOfName).as("the 20 sent q values are distinct").hasSize(20);
+        assertThat(idOfName).as("the 15 sent q values are distinct").hasSize(15);
         Map<String, Object> counts = (Map<String, Object>) r.run().get("counts");
-        assertThat(counts.get("searches")).isEqualTo(20);
-        assertThat(counts.get("articlesRetrieved")).isEqualTo(60);
+        assertThat(counts.get("searches")).isEqualTo(15);
+        assertThat(counts.get("articlesRetrieved")).isEqualTo(45);
         assertThat(counts.get("articlesConsidered")).isEqualTo(30);
         List<Map<String, Object>> sources = sourceItems(r.sid(), r.id());
         assertThat(sources).hasSize(30);
@@ -106,7 +112,7 @@ class ParallelSearchRunIT extends AbstractEventIT {
             return StubNews.rss();
         };
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, FIVE_BODY).get("id");
         try {
             assertThat(awaitTrue(() -> news.maxOpen() >= 8, 15_000)).as("eight requests are open").isTrue();
             MvcResult stop = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/runs/" + id + "/stop")

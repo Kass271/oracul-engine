@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** generation-runs.md "Slice 11_run-failures" RunDeadlineQueuedIT: a QUEUED run past its deadline is timed out. */
-// @trace FR-32
+// @trace FR-32, FR-51
 @TestPropertySource(properties = {
     "oracul.run.executor-threads=1",
     "oracul.run.deadline-check-interval=PT1H",
@@ -19,10 +19,10 @@ class RunDeadlineQueuedIT extends AbstractDeadlineIT {
 
     private Two xRunningYQueued() throws Exception {
         freshStubs();
-        responses.gate("QUERY_EXPANSION");
+        responses.gate("QUERY_GENERATION");
         String sx = connectedSid();
         String x = (String) startOk(sx, A).get("id");
-        assertThat(responses.awaitArrived("QUERY_EXPANSION", 1, Duration.ofSeconds(10))).isTrue();
+        assertThat(responses.awaitArrived("QUERY_GENERATION", 2, Duration.ofSeconds(10))).as("both pipelines' calls of run X arrived").isTrue();
         String sy = connectedSid();
         Map<String, Object> queued = startOk(sy, B);
         assertThat(queued.get("status")).isEqualTo("QUEUED");
@@ -46,9 +46,9 @@ class RunDeadlineQueuedIT extends AbstractDeadlineIT {
         assertThat(sweep(SCHEDULER)).isEqualTo(2);
         assertQueuedTimeout(runOf(t.sy(), t.y()));
 
-        responses.release("QUERY_EXPANSION");
+        responses.release("QUERY_GENERATION");
         Map<String, Object> before = row(t.y());
-        watchUnchanged(t.y(), before, 3000, () -> assertThat(requests("QUERY_EXPANSION")).hasSize(1));
+        watchUnchanged(t.y(), before, 3000, () -> assertThat(requests("QUERY_GENERATION")).hasSize(2));
         assertSlotReleased(t.sy());
     }
 
@@ -57,9 +57,9 @@ class RunDeadlineQueuedIT extends AbstractDeadlineIT {
     void theTaskStartCommitsTheTimeoutOfAStillQueuedRun() throws Exception {
         Two t = xRunningYQueued();
         clock.advance(d(180));
-        responses.release("QUERY_EXPANSION");
+        responses.release("QUERY_GENERATION");
         Map<String, Object> y = awaitRun(t.sy(), t.y(), 5000, m -> "FAILED".equals(m.get("status")));
         assertQueuedTimeout(y);
-        assertThat(requests("QUERY_EXPANSION")).hasSize(1);
+        assertThat(requests("QUERY_GENERATION")).as("only run X generated queries (2 pipelines)").hasSize(2);
     }
 }

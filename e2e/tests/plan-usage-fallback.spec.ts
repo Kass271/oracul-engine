@@ -13,7 +13,7 @@ test.beforeEach(async ({ request }) => {
   await post(request, '/__control/mode', { mode: 'ok' });
 });
 
-// @trace FR-38
+// @trace FR-38, FR-51
 test.describe('FR-38 text.format fallback', () => {
   test('FR-38 a text.format rejection is repeated once without text.format and the run completes', async ({ page, request }) => {
     test.setTimeout(120_000);
@@ -23,8 +23,16 @@ test.describe('FR-38 text.format fallback', () => {
     const requests = await recorded(page, 'responses');
     expect(requests.some((b) => b.text?.format)).toBe(true); // the rejected first attempt
     expect(requests.filter((b) => !b.text).length).toBeGreaterThan(0); // the fallback bodies
-    // after the first fallback no call carries text.format again: exactly one rejected round trip
-    expect(requests.filter((b) => b.text?.format)).toHaveLength(1);
-    for (const b of requests.filter((x) => !x.text)) expect(b.instructions).toContain('Answer with exactly one JSON object');
+    // FR-51: the QUERY_GENERATION calls started before the client has seen the rejection (body A: 1 or 2) carry text.format, each rejected
+    // one is repeated exactly once without text; every call started after the first rejection goes without text.format
+    const rejected = requests.filter((b) => b.text?.format);
+    expect(rejected.length).toBeGreaterThanOrEqual(1);
+    expect(rejected.length).toBeLessThanOrEqual(2);
+    for (const b of rejected) expect(JSON.stringify(b)).toContain('ORACUL REQUEST QUERY_GENERATION');
+    const repeats = requests.filter((x) => !x.text);
+    for (const b of rejected) {
+      expect(repeats.some((x) => JSON.stringify(x.input) === JSON.stringify(b.input)), 'a rejected call is repeated without text.format').toBe(true);
+    }
+    for (const b of repeats) expect(b.instructions).toContain('Answer with exactly one JSON object');
   });
 });

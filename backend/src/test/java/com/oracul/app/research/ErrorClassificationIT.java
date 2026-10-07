@@ -17,7 +17,7 @@ import org.springframework.test.context.TestPropertySource;
  * GET /models ends in the message of its table row; retries only for row 4 (2 retries, backoff 1x then 2x).
  * Exhaustive over the rows, the provider-code sanitizing classes and the three error channels of a stream.
  */
-// @trace FR-39, FR-47
+// @trace FR-39, FR-47, FR-51
 @TestPropertySource(properties = {"oracul.openai.retry-delay=PT0.1S", "oracul.openai.timeout=PT0.5S"})
 class ErrorClassificationIT extends AbstractPlanUsageIT {
 
@@ -276,7 +276,7 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
         assertNoTokenTraffic(tokenRequests);
     }
 
-    // ---- query expansion keeps its own rule ---------------------------------------------------------------------
+    // ---- query generation (one call per pipeline) keeps the former expansion rule ------------------------------------
 
     static Stream<Arguments> expansionFatal() {
         return Stream.of(
@@ -285,14 +285,16 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
             Arguments.of("not eligible", StubResponses.error(403, "subscription_sharing_user_not_eligible"), "CHATGPT_PLAN_NOT_ELIGIBLE", M_NOT_ELIGIBLE));
     }
 
-    @ParameterizedTest(name = "expansion {0} fails the run at RESEARCH_STRATEGY")
+    @ParameterizedTest(name = "generation {0} fails the run at RESEARCH_STRATEGY")
     @MethodSource("expansionFatal")
-    void sessionAndEligibilityFailuresOfTheExpansionFailTheRun(String name, StubResponses.Reply reply, String code, String message) throws Exception {
+    void sessionAndEligibilityFailuresOfTheGenerationFailTheRun(String name, StubResponses.Reply reply, String code, String message) throws Exception {
         responses.responder = req -> reply;
         Ran r = run(A);
         assertFailure(r.run(), code, message, null);
         assertThat(r.run().get("stage")).isEqualTo("RESEARCH_STRATEGY");
-        assertThat(responses.requests).as("one attempt").hasSize(1);
+        assertThat(r.run().get("stageIndex")).isEqualTo(2);
+        assertThat(responses.requests).as("one attempt per pipeline, no retry (body A has two pipelines)").hasSizeBetween(1, 2);
+        assertThat(requests(QUERY_GENERATION)).hasSameSizeAs(responses.requests);
         assertThat(news.requests).isEmpty();
     }
 
@@ -308,17 +310,17 @@ class ErrorClassificationIT extends AbstractPlanUsageIT {
             Arguments.of("response.failed with a code", StubResponses.sse(StubResponses.createdEvent(), StubResponses.failedEvent("weird_new_code"))));
     }
 
-    @ParameterizedTest(name = "expansion {0} falls back to templates")
+    @ParameterizedTest(name = "generation {0} falls back to templates")
     @MethodSource("expansionFallback")
-    void anyOtherFailureOfTheExpansionFallsBackToTemplatesWithOneAttempt(String name, StubResponses.Reply reply) throws Exception {
-        // run-control.md FR-47: the empty-news run goes on speculatively, so only the expansion gets the failure
+    void anyOtherFailureOfTheGenerationFallsBackToTemplatesWithOneAttemptPerPipeline(String name, StubResponses.Reply reply) throws Exception {
+        // run-control.md FR-47: the empty-news run goes on speculatively, so only the query generation gets the failure
         var fallback = responses.defaultResponder();
-        responses.responder = req -> EXPANSION.equals(StubResponses.purpose(req)) ? reply : fallback.apply(req);
+        responses.responder = req -> QUERY_GENERATION.equals(StubResponses.purpose(req)) ? reply : fallback.apply(req);
         Ran r = run(A);
         assertThat(r.run().get("status")).as(name + ": " + r.run()).isEqualTo("COMPLETED");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> plan = (Map<String, Object>) researchBody(r.sid(), r.id()).get("searchPlan");
-        assertThat(plan.get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
-        assertThat(requests(EXPANSION)).as("query expansion is never retried").hasSize(1);
+        Map<String, Object> research = researchBody(r.sid(), r.id());
+        assertThat(PlanJson.plan(research).get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
+        assertThat(PlanJson.pipelines(research)).hasSize(2).allSatisfy(p -> assertThat(p.get("queryMode")).isEqualTo("TEMPLATE_FALLBACK"));
+        assertThat(requests(QUERY_GENERATION)).as("query generation is never retried: one call per pipeline").hasSize(2);
     }
 }

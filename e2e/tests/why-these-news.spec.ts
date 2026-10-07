@@ -48,43 +48,34 @@ async function startAcceptanceRun(page: Page): Promise<string> {
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-// @trace FR-28
+// @trace FR-28, FR-50
 test.describe('FR-28 WHY THESE NEWS? and research summary', () => {
-  test('FR-28 panel lists intents with attributions and the six summary numbers', async ({ page }) => {
+  test('FR-28 a new run records no intents (FR-50): the panel says so and shows the six summary numbers', async ({ page }) => {
     test.setTimeout(120_000);
     const id = await startAcceptanceRun(page);
     await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 60_000 });
     const R = await (await page.request.get(`/api/runs/${id}/result`)).json();
     const G = await (await page.request.get(`/api/runs/${id}`)).json();
     const P = await (await page.request.get(`/api/runs/${id}/research`)).json();
-    const intents: any[] = P.searchPlan.intents;
-    expect(intents.length).toBe(6);
+    // FR-50: a new run has pipelines, not intents: research.intents is [] (the grouped panel comes with FR-60)
+    expect(P.searchPlan.intents).toEqual([]);
+    expect(P.searchPlan.pipelines).toHaveLength(2);
 
     await expect(page.getByTestId('why-news-panel')).toHaveCount(0);
     await page.getByTestId('open-why-news').click();
     await expect(page.getByTestId('why-news-panel')).toBeVisible();
 
+    // the legacy panel shows its empty line and no intent element
+    await expect(page.getByTestId('why-news-empty')).toHaveText('No research intents recorded');
     const itemIds = await page.evaluate(() =>
       Array.from(document.querySelectorAll('[data-testid]'))
         .map((n) => n.getAttribute('data-testid')!)
-        .filter((t) => /^why-news-intent-I\d+$/.test(t)),
+        .filter((t) => /^why-news-intent-/.test(t)),
     );
-    expect(itemIds).toEqual(intents.map((i) => `why-news-intent-${i.id}`));
-
-    for (const i of intents) {
-      await expect(page.getByTestId(`why-news-description-${i.id}`)).toHaveText(i.description);
-      for (let k = 0; k < i.drivenBy.length; k++) {
-        await expect(page.getByTestId(`why-news-driver-${i.id}-${k}`)).toHaveText(i.drivenBy[k]);
-      }
-      await expect(page.locator(`[data-testid^="why-news-driver-${i.id}-"]`)).toHaveCount(i.drivenBy.length);
-    }
-    const i01 = page.getByTestId('why-news-intent-I01');
-    await expect(i01).toContainText('New pandemic 8/10');
-    await expect(i01).toContainText('Darkness 9/10');
-    await expect(page.getByTestId('why-news-intent-I02')).toContainText('Humanoid robot boom 6/10');
+    expect(itemIds).toEqual([]);
 
     const c = G.counts;
-    expect(c.searches).toBe(20);
+    expect(c.searches).toBe(6);
     await expect(page.getByTestId('summary-searches')).toHaveText(plural(c.searches, 'search performed', 'searches performed'));
     await expect(page.getByTestId('summary-articles')).toHaveText(plural(c.articlesConsidered, 'article considered', 'articles considered'));
     await expect(page.getByTestId('summary-events')).toHaveText(plural(c.uniqueEvents, 'unique event identified', 'unique events identified'));

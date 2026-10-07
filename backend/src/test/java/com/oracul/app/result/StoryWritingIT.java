@@ -26,7 +26,7 @@ class StoryWritingIT extends AbstractStoryIT {
         assertStoryCompleted(r.run());
         String c = cutoffDate(r);
         String d = dayAfter(c);
-        assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, GEN, "SCENARIO_CRITIC", STORY);
+        assertThat(purposes()).containsExactly(QUERY_GENERATION, QUERY_GENERATION, NORMALIZATION, CLASSIFICATION, GEN, "SCENARIO_CRITIC", STORY);
         assertThat(requests(STORY)).hasSize(1);
         StubResponses.Request req = sreq(1);
         Map<String, Object> body = JsonPath.read(req.body(), "$");

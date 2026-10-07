@@ -11,7 +11,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** generation-runs.md "Slice 11_run-failures" RunDeadlineIT rows 1-7: scheduler sweep, boundary, no further work. */
-// @trace FR-32, FR-47
+// @trace FR-32, FR-47, FR-51
 // @trace NFR-2
 class RunDeadlineIT extends AbstractDeadlineIT {
 
@@ -20,7 +20,9 @@ class RunDeadlineIT extends AbstractDeadlineIT {
         responses.gate(purpose);
         String sid = connectedSid();
         idOut[0] = (String) startOk(sid, A).get("id");
-        assertThat(responses.awaitArrived(purpose, 1, Duration.ofSeconds(10))).as(purpose + " arrived").isTrue();
+        // a gate on QUERY_GENERATION holds every pipeline's call: body A has two
+        int arrivals = "QUERY_GENERATION".equals(purpose) ? 2 : 1;
+        assertThat(responses.awaitArrived(purpose, arrivals, Duration.ofSeconds(10))).as(purpose + " arrived").isTrue();
         return sid;
     }
 
@@ -86,9 +88,9 @@ class RunDeadlineIT extends AbstractDeadlineIT {
     @Test
     void thePipelineItselfCommitsTheTimeoutWhenNobodySweeps() throws Exception {
         String[] id = new String[1];
-        String sid = startGated("QUERY_EXPANSION", id);
+        String sid = startGated("QUERY_GENERATION", id);
         clock.advance(d(180));
-        responses.release("QUERY_EXPANSION");
+        responses.release("QUERY_GENERATION");
         Map<String, Object> run = awaitRun(sid, id[0], 5000, m -> "FAILED".equals(m.get("status")));
         assertTimedOut(run, "RESEARCH_STRATEGY", 2);
         assertThat(news.requests).as("the check before SEARCHING stops the task").isEmpty();
@@ -114,10 +116,10 @@ class RunDeadlineIT extends AbstractDeadlineIT {
         Map<String, Object> failedBefore = row((String) failed.get("id"));
 
         freshStubs();
-        responses.gate("QUERY_EXPANSION");
+        responses.gate("QUERY_GENERATION");
         String activeSid = connectedSid();
         String activeId = (String) startOk(activeSid, A).get("id");
-        assertThat(responses.awaitArrived("QUERY_EXPANSION", 1, Duration.ofSeconds(10))).isTrue();
+        assertThat(responses.awaitArrived("QUERY_GENERATION", 2, Duration.ofSeconds(10))).as("both pipelines' calls arrived").isTrue();
 
         clock.advance(d(180));
         assertThat(sweep(SCHEDULER)).isEqualTo(1);

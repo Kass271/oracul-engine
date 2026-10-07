@@ -13,7 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.node.ArrayNode;
 
 /** Rows #5-#7, #13, #16, #17 of scenario-reasoning.md "Slice 08_validated-scenario": structured output and getStructuredScenario. */
-// @trace FR-20, FR-38
+// @trace FR-20, FR-38, FR-51
 class StructuredScenarioIT extends AbstractReasoningIT {
 
     // #5
@@ -165,7 +165,7 @@ class StructuredScenarioIT extends AbstractReasoningIT {
     // #16 a run that fails before EXPLORING_FUTURES has no scenario
     @Test
     void aRunThatFailedBeforeScenarioGenerationHasNoScenario() throws Exception {
-        always(EXPANSION, StubResponses.error(401, "invalid_token"));
+        always(QUERY_GENERATION, StubResponses.error(401, "invalid_token"));
         Ran r = run(A);
         assertThat(r.run().get("status")).isEqualTo("FAILED");
         assertThat(requests(GEN)).isEmpty();

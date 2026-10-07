@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** phase-02 chatgpt-inference.md FR-38 step 3: a stream longer than oracul.openai.stream-timeout is CHATGPT_INCOMPLETE. */
-// @trace FR-38
+// @trace FR-38, FR-51
 @TestPropertySource(properties = {"oracul.openai.stream-timeout=PT1S", "oracul.openai.timeout=PT5S"})
 class StreamTimeoutIT extends AbstractPlanUsageIT {
 
@@ -43,13 +43,14 @@ class StreamTimeoutIT extends AbstractPlanUsageIT {
     }
 
     @Test
-    void aSlowStreamOfTheQueryExpansionFallsBackToTemplates() throws Exception {
-        responses.responder = req -> "QUERY_EXPANSION".equals(StubResponses.purpose(req))
-            ? slowCompleteStream("{\"queries\":[]}") : responses.defaultResponder().apply(req);
+    void aSlowStreamOfTheQueryGenerationFallsBackToTemplates() throws Exception {
+        responses.responder = req -> "QUERY_GENERATION".equals(StubResponses.purpose(req))
+            ? slowCompleteStream(StubResponses.defaultGeneration(req.inputText())) : responses.defaultResponder().apply(req);
         Ran r = runWithin(A, 20_000);
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> plan = (Map<String, Object>) researchBody(r.sid(), r.id()).get("searchPlan");
-        assertThat(plan.get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
+        Map<String, Object> research = researchBody(r.sid(), r.id());
+        assertThat(PlanJson.plan(research).get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
+        assertThat(PlanJson.pipelines(research)).hasSize(2).allSatisfy(p -> assertThat(p.get("queryMode")).isEqualTo("TEMPLATE_FALLBACK"));
+        assertThat(requests(QUERY_GENERATION)).as("one call per pipeline, no retry").hasSize(2);
     }
 }

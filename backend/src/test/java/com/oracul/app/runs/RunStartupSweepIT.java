@@ -11,7 +11,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /** generation-runs.md "Slice 11_run-failures" RunStartupSweepIT rows 1-3: active runs become RUN_INTERRUPTED. */
-// @trace FR-32
+// @trace FR-32, FR-51
 class RunStartupSweepIT extends AbstractDeadlineIT {
 
     private static final String INTERRUPTED = "{\"code\":\"RUN_INTERRUPTED\",\"message\":\"" + I + "\"}";
@@ -28,10 +28,10 @@ class RunStartupSweepIT extends AbstractDeadlineIT {
         String sz = connectedSid();
         String z = (String) runWith(sz, A).run().get("id");
         freshStubs();
-        responses.gate("QUERY_EXPANSION");
+        responses.gate("QUERY_GENERATION");
         String sx = connectedSid();
         String x = (String) startOk(sx, A).get("id");
-        assertThat(responses.awaitArrived("QUERY_EXPANSION", 1, Duration.ofSeconds(10))).isTrue();
+        assertThat(responses.awaitArrived("QUERY_GENERATION", 2, Duration.ofSeconds(10))).as("both pipelines' calls arrived").isTrue();
         return new Setup(sx, x, sy, y, sz, z, row(y), row(z));
     }
 
@@ -54,7 +54,7 @@ class RunStartupSweepIT extends AbstractDeadlineIT {
     void theInterruptedRunDoesNothingAfterTheGateIsReleased() throws Exception {
         Setup s = threeSessions();
         assertThat(sweep(STARTUP)).isEqualTo(1);
-        responses.release("QUERY_EXPANSION");
+        responses.release("QUERY_GENERATION");
         int newsBefore = news.requests.size();
         Map<String, Object> before = row(s.x());
         watchUnchanged(s.x(), before, 2500, () -> assertThat(news.requests).hasSize(newsBefore));

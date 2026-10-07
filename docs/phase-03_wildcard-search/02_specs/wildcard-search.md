@@ -183,7 +183,22 @@ Removed (no longer read; a value that is still set is ignored and the backend st
   query ids Q01…Qk contiguous; pipeline ids W01…Wm contiguous; every query belongs to exactly one pipeline;
   `buckets`, `intents`, `queries` empty for every new plan; pipeline order equals profile topic order (catalogue
   wildcards in configuration order — not catalogue order — then custom wildcards); heading = `<label> <level>/10`
-  for CATALOGUE/CUSTOM, `General` for GENERAL.
+  for CATALOGUE/CUSTOM, `General` for GENERAL. Slice 04 additions: (a) `level` = round(topic weight × 10) and equals
+  the request intensity for every level 1…10 (parameterized); `topicKey` = profile topic key (catalogue id /
+  `custom-<k>`), absent for GENERAL; `label` = topic label (custom: trimmed), `General` for GENERAL; (b) attribution:
+  for every source of a new run, `pipelineIds` = exactly the pipelines owning at least one query whose own answer
+  held the source's normalised link, ascending, never empty; `queryIds` ⊆ the queries of those pipelines and every
+  pipeline in `pipelineIds` owns ≥ 1 of its `queryIds`; `topic` = `topicKey` of `pipelineIds[0]` (GENERAL → `major`);
+  classes: link only in W01's answers → [W01]; only in W02's → [W02]; in both → [W01, W02] (one source, topic of
+  W01); in every pipeline's answer → all ids; (c) the plan is committed before the first Google request (all queries
+  PENDING, `articlesReturned` 0, no `candidatesConsidered` / `sourceIds`), and after SEARCHING every status lives in
+  `pipelines[].queries[]` while `searchPlan.queries` stays `[]`.
+- Changes earlier behaviour: FR-12 template plan (budget `oracul.research.query-budget` 20 split into buckets WILDCARD 8 / MAJOR 6 / ADJACENT 4 / UNEXPECTED 2, intents I01… with `drivenBy` and `description`, `searchPlan.queries` Q01–Q20 with `intentId` / `bucket`; body A → 6 intents, body B → 3 intents; `SearchPlanner.plan(profile, cfg, int budget)`, `QueryTemplates.forIntent(SearchIntent)`) → one `WildcardPipeline` per profile topic in `searchPlan.pipelines` (body A: W01 CATALOGUE `New pandemic` level 8 topicKey `biology-new-pandemic` heading `New pandemic 8/10` with Q01–Q03, W02 CATALOGUE `Humanoid robot boom` level 6 topicKey `robotics-humanoid-boom` heading `Humanoid robot boom 6/10` with Q04–Q06; body B: W01 GENERAL `General` with Q01–Q03), `buckets` / `intents` / `queries` are `[]`, `queryBudget` = Σ pipeline queries; `SearchPlanner.plan(ResearchProfile, ScenarioConfiguration)` and `QueryTemplates.forPipeline(WildcardPipeline, ScenarioConfiguration)` replace the old methods, `PlanSupport.plan(cfg, int)` / `PlanSupport.templates(SearchIntent)` give way to `PlanSupport.plan(cfg)` / `PlanSupport.templates(pipeline, cfg)` / `PlanSupport.legacyPlan(texts)`; the FR-12 bucket-split / skew tests are deleted, not rewritten (FR-50 supersedes FR-12) — removed tests: `research/SearchPlannerSkewTest.java` (under `backend/src/test/java/com/oracul/app/`) (tests: backend/src/test/java/com/oracul/app/research/SearchPlannerTest.java, backend/src/test/java/com/oracul/app/research/PlanSupport.java, backend/src/test/java/com/oracul/app/research/AbstractNewsSearchIT.java, backend/src/test/java/com/oracul/app/research/SourceCapIT.java, backend/src/test/java/com/oracul/app/runs/CustomWildcardRunIT.java, backend/src/test/java/com/oracul/app/research/ResearchPlanPendingIT.java)
+- Changes earlier behaviour: a run searched 20 planned queries (18 with `oracul.research.query-budget=18`), statuses in `searchPlan.queries` → a run searches Σ pipeline queries — body A 6 (Q01–Q06), body B 3, n = 1…8 wildcards 3n, n ≥ 9 2n — so `counts.searches`, the number of `/rss/search` requests (one per query, 429 retries extra) and the per-query statuses (now in `searchPlan.pipelines[].queries[]`) follow that count; e.g. body A with the first request 503 → Q01 FAILED + Q02–Q06 OK, all six 503 → 6 FAILED, `kind=rss` 6 entries, a 429 on request 1 → 7 requests; body B with every request slow → 3 FAILED; ParallelSearchRunIT needs ≥ 9 queries for its 8-open cases and runs a 5-wildcard body (15 queries); E2E body A → `counts.searches` 6 (tests: backend/src/test/java/com/oracul/app/research/SourceRetrievalIT.java, backend/src/test/java/com/oracul/app/research/SourceQueryTimeoutIT.java, backend/src/test/java/com/oracul/app/research/ParallelSearchRunIT.java, backend/src/test/java/com/oracul/app/research/RemovedNewsPropertiesIT.java, backend/src/test/java/com/oracul/app/runs/GetRunTerminalIT.java, backend/src/test/java/com/oracul/app/runs/StopQueuedRunIT.java, e2e/tests/search-sources.spec.ts, e2e/tests/alternative-future.spec.ts, e2e/tests/insufficient-evidence.spec.ts)
+- Changes earlier behaviour: F240 run tests got 18 queries from `oracul.research.query-budget=18` and took the topic of query r from its intent (`F240Support.topicOf(intent)`) → they start the 9-catalogue-wildcard body `AbstractEventIT.F240_BODY` (the first nine ids of `PlanSupport.TEN_WILDCARDS`, intensity 5 each, realism 8 / darkness 9 / optimism 2 / horizon 5y as body A), so 9 × 2 = 18 queries keep F240's 240 items and 205 usable candidates; the topic of query r is the `topicKey` of pipeline W⌈r/2⌉ (`F240Support.topicOf(pipeline)`); the event-stage F240 ITs (`EventBatchingIT`, `EventConcurrencyIT`, `EventConcurrencyOneIT`, `EventFailureIT`, `EventSourceCapIT`) keep body A — 6 queries give 73 usable candidates, still 30 kept — and need no change (tests: backend/src/test/java/com/oracul/app/research/GoogleNewsRunIT.java, backend/src/test/java/com/oracul/app/research/SourceFixtureIT.java, backend/src/test/java/com/oracul/app/research/F240Support.java, backend/src/test/java/com/oracul/app/research/AbstractEventIT.java)
+- Changes earlier behaviour: a source's `topic` = phase-01 mapping of its first query's intent (WILDCARD topicKey / ADJACENT category or `general` / MAJOR `major` / UNEXPECTED `unexpected`) and no `pipelineIds` → `topic` = `topicKey` of its first pipeline (GENERAL → `major`) and new `Source.pipelineIds` (ascending, always sent for new runs, column `source.pipeline_ids` of Flyway `V11__source_pipeline_ids.sql`); `searchPlan.pipelines` and `Source.pipelineIds` are now present on the wire for new runs (still absent for stored older runs); the E2E acceptance run's sources spread over 2 topics (`biology-new-pandemic` 13, `robotics-humanoid-boom` 12) instead of 6 × 5 (tests: backend/src/test/java/com/oracul/app/result/OptionalWireFieldsAbsentIT.java, backend/src/test/java/com/oracul/app/research/SourceRetrievalIT.java, e2e/tests/search-sources.spec.ts)
+- Changes earlier behaviour: E2E acceptance run (stub, body A): 20 queries × 5 items → 100 raw items, 30 kept sources, 15 events, mode evidence 10 core + 5 counter-signals (E001–E015) → 6 queries × 5 items → `articlesRetrieved` 30, 25 distinct usable candidates (the shared article + 6 × 4), all 25 kept in arrival order (S001 = `http://stub:4010/articles/shared` with `queryIds` Q01–Q06 and `pipelineIds` [W01, W02]; S002–S013 found by W01; S014–S025 by W02), `articlesConsidered` 25, 13 events (EV001 = [S001, S002] … EV013 = [S025]); mode evidence: EV n mod 3 = 1 dark (5), = 2 mid (4), = 0 bright (4) → by the unchanged FR-17 rules 9 core + 0 supporting + 4 counter-signals, Evidence IDs E001–E013 (`[E013] ` is the last item, `COUNTER-SIGNALS` present), `eventsSelected` 13, `counterSignals` 4; the default-classification case keeps 5 counter-signals; the malformed-classification case has 13 excluded events (tests: e2e/tests/events.spec.ts, e2e/tests/evidence-pack.spec.ts, e2e/tests/search-sources.spec.ts)
+- Changes earlier behaviour: WHY THESE NEWS? of a new run listed the 6 FR-28 intents of body A (`why-news-intent-I01` … with descriptions and driver chips) and "20 searches performed" → `research.intents` is `[]` for new runs, so the legacy panel shows `why-news-empty` "No research intents recorded" and no `why-news-intent-*` element (the grouped panel comes with FR-60 in 09) and `summary-searches` reads "6 searches performed"; the other summary lines keep their formulas (tests: e2e/tests/why-these-news.spec.ts)
 
 ### FR-51 — Wildcard level and scenario parameters shape the queries
 - Happy path (stage RESEARCH_STRATEGY, `QueryGenerator` + `QueryGenerationPrompt`, after FR-50 steps 1–3):
@@ -227,9 +242,11 @@ Removed (no longer read; a value that is still set is ignored and the backend st
      skipping templates equal (case-insensitive) to a kept text. `queryMode` = MODEL iff ≥ 1 model text was kept.
   6. **Template queries** (`QueryTemplates.forPipeline(pipeline, configuration)`, pure) — used for missing texts and
      for the whole pipeline when the call fails:
-     - L = the label for queries: label with every character other than a letter, digit, space, `-` or `'` replaced
-       by a space, standalone tokens `OR` / `AND` / `NOT` (upper case) removed, whitespace collapsed, at most the first
-       6 words; empty → `future developments`. GENERAL: L = `major world events`.
+     - L = the label for queries (`QueryTemplates.label(String)`, public static, pure): label with every character
+       other than a letter or digit (`Character.isLetterOrDigit`), space, `-` or `'` replaced by a space; whitespace
+       collapsed; tokens dropped that are `or` in any letter case (rule Q), upper-case `AND` / `NOT`, or consist only of
+       `-` / `'`; at most the first 6 remaining tokens; letter case kept; nothing left → `future developments`.
+       GENERAL: L = `major world events`.
      - Band by level (GENERAL uses its own base): 
        | Band | Vocabulary (current … / serious … / extreme …) | t1 | t2 | t3 |
        |---|---|---|---|---|
@@ -280,7 +297,166 @@ Removed (no longer read; a value that is still set is ignored and the backend st
   invariants for every QUERY_GENERATION request: no `tools` / `tool_choice` / `web_search*`; input text contains
   the wildcard label (catalogue: in SETTINGS; custom: only inside the data block), `Level: <level>/10`, `Realism: `,
   `Darkness: `, `Optimism: `, `Horizon: ` with the run's values; exactly one request per pipeline; never more than 4
-  open at once.
+  open at once. Slice 04 additions: (a) L classes also `war or peace` → `war peace`, `Fusion OR fission` → `Fusion
+  fission`, `A - B` → `A B`, `Earth's last ice` → `Earth's last ice`, `ocean: boom!` → `ocean boom`; (b) exact
+  templates (unit): `New pandemic` 8 with Darkness 9 → `New pandemic extreme scenario disaster`, `New pandemic
+  unprecedented scale catastrophe`, `New pandemic radical upheaval collapse`; `Humanoid robot boom` 6 with Darkness 9
+  → `Humanoid robot boom serious disruption crisis`, `… major escalation conflict`, `… growing concerns threat`;
+  `New pandemic` 1 with Darkness 2 → `New pandemic latest research progress`, `New pandemic new developments
+  breakthrough`, `New pandemic early studies innovation`; GENERAL with Darkness 5 / Optimism 5 → `major world events
+  today`, `global economy politics developments`, `international science technology developments`; Darkness 5 /
+  Optimism 8 → each gets `progress` / `breakthrough` / `innovation`; Darkness 7 and Optimism 8 → Darkness wins;
+  `forPipeline` always returns exactly 3 texts [t1, t2, t3], the planner takes the first q; (c) post-processing
+  classes (unit, `QueryGenerator.merge`, q = 3): 3 valid distinct → all kept, MODEL; 4 valid → first 3; 2 valid + 1
+  dropped by rule Q → 2 kept + t1 (or the first template not equal to a kept text), MODEL; 3 texts equal
+  case-insensitively → 1 kept + 2 templates; a model text equal to t1 → t1 skipped in the fill; `"  a   b  c "` →
+  kept as `a b c`; `[]` / all dropped → 3 templates, TEMPLATE_FALLBACK; q = 2 → at most 2 kept; for every input the
+  result has exactly q texts, all satisfying rule Q, pairwise distinct case-insensitively; (d) answer classes (IT,
+  one pipeline's call each): completed `{"queries":[3 valid]}` → MODEL; `not json`, `{}`, `{"queries":"x"}`,
+  `{"queries":[1,2,3]}`, `[]` (root not an object) → TEMPLATE_FALLBACK; HTTP 400 / 404 / 429 / 500 / 503, timeout
+  (`oracul.openai.timeout`), `response.incomplete`, `response.failed` → TEMPLATE_FALLBACK after exactly 1 request of
+  that pipeline, the other pipelines MODEL, run COMPLETED; 403 `subscription_sharing_user_not_eligible` / invalid
+  user / failed refresh → run FAILED at RESEARCH_STRATEGY (stageIndex 2) with its code, ≤ 1 request per pipeline,
+  `searchPlan` absent, 0 `/rss/search`; (e) parallelism (IT, `query-generation-concurrency` default 4): 9 wildcards
+  and every QUERY_GENERATION answer held → `maxInFlight(QUERY_GENERATION)` = 4 and exactly 9 requests in total;
+  concurrency 1 → 1 and the requests arrive in pipeline order (W01…W09); (f) window (IT, `query-generation-window`
+  PT1S and the other windows above it): every QUERY_GENERATION answer held → plan stored within ≈ 1 s (≤ 3 s) with
+  every pipeline TEMPLATE_FALLBACK, the run COMPLETED; an answer that arrives after the window is ignored; (g)
+  startup classes (`QueryGenerator` constructor, plain test): `query-generation-concurrency` 0, 9, -1 → fails naming
+  it, 1, 8 → starts; `query-generation-window` PT0S, -PT1S, PT61S (> search-window PT60S) → fails naming
+  `oracul.search.query-generation-window`, PT0.001S, PT60S → starts; `stage-budget` PT59S (< search-window PT60S),
+  PT0S → fails naming `oracul.search.stage-budget`, PT60S → starts.
+- Changes earlier behaviour: QUERY_EXPANSION (one tool-less call per run, `ORACUL REQUEST QUERY_EXPANSION`, TASK lines `- I01 | WILDCARD | 8 | …`, schema `query_expansion` with items {intentId, text}, 2–8 keywords per query, merged across intents) → QUERY_GENERATION: one call per pipeline (body A 2, body B 1, 9 wildcards 9), at most `oracul.search.query-generation-concurrency` (4) open, started in pipeline order, constant `QueryGenerationPrompt.INSTRUCTIONS`, input with `Pipeline: W0k`, `Wildcard: <label> | Level: <n>/10` (custom: label only in the data block; GENERAL: `General - major current world events | Level: none`), `Realism: … | Darkness: … | Optimism: … | Horizon: …`, `Queries: <q>`, strict schema `query_generation` {queries: string[]}, post-processing by rule Q / dedup / template fill; a failed or unusable call → templates for that pipeline only; `QueryExpander`, `QueryExpansionPrompt` and `QueryTemplates.forIntent` are deleted; the QUERY_EXPANSION input test class is deleted, not rewritten (FR-51 supersedes the FR-12 query expansion) — removed tests: `research/QueryExpansionPromptInputTest.java` (under `backend/src/test/java/com/oracul/app/`) (tests: backend/src/test/java/com/oracul/app/research/ResearchPlanIT.java, backend/src/test/java/com/oracul/app/research/ResearchPlanTimeoutIT.java, backend/src/test/java/com/oracul/app/research/StreamTimeoutIT.java, backend/src/test/java/com/oracul/app/research/ErrorClassificationIT.java, backend/src/test/java/com/oracul/app/research/QueryTemplatesTest.java, backend/src/test/java/com/oracul/app/research/StubResponses.java, e2e/tests/search-sources.spec.ts)
+- Changes earlier behaviour: every run's Responses sequence started with exactly one QUERY_EXPANSION request, and gates / holds / counts used the purpose `QUERY_EXPANSION` (`AbstractEventIT.EXPANSION`) → it starts with one QUERY_GENERATION request per pipeline (body A: `QUERY_GENERATION, QUERY_GENERATION, EVENT_NORMALIZATION, EVENT_CLASSIFICATION, SCENARIO_GENERATION, SCENARIO_CRITIC, STORY_WRITING`; without sources `QUERY_GENERATION ×2, SCENARIO_GENERATION, SCENARIO_CRITIC, STORY_WRITING`; body B one QUERY_GENERATION); the constant becomes `AbstractEventIT.QUERY_GENERATION = "QUERY_GENERATION"`; a gate on the purpose holds every pipeline's call, so a test awaits as many arrivals as the body has pipelines (body A: 2) and `requests(QUERY_GENERATION)` counts 2 where it counted 1; the STOP / deadline / startup-sweep cases hold QUERY_GENERATION instead (tests: backend/src/test/java/com/oracul/app/research/AbstractEventIT.java, backend/src/test/java/com/oracul/app/research/ModelResolutionIT.java, backend/src/test/java/com/oracul/app/research/PlanUsageTransportIT.java, backend/src/test/java/com/oracul/app/research/EventNormalizationIT.java, backend/src/test/java/com/oracul/app/research/EvidencePackIT.java, backend/src/test/java/com/oracul/app/result/StoryWritingIT.java, backend/src/test/java/com/oracul/app/reasoning/CriticIT.java, backend/src/test/java/com/oracul/app/reasoning/StructuredScenarioIT.java, backend/src/test/java/com/oracul/app/research/ErrorClassificationIT.java, backend/src/test/java/com/oracul/app/runs/AlternativeRunIT.java, backend/src/test/java/com/oracul/app/research/NewsSearchNoBudgetIT.java, backend/src/test/java/com/oracul/app/research/SourceRetrievalIT.java, backend/src/test/java/com/oracul/app/runs/StopRunIT.java, backend/src/test/java/com/oracul/app/runs/StopQueuedRunIT.java, backend/src/test/java/com/oracul/app/runs/RunDeadlineIT.java, backend/src/test/java/com/oracul/app/runs/RunDeadlineQueuedIT.java, backend/src/test/java/com/oracul/app/runs/RunStartupSweepIT.java, backend/src/test/java/com/oracul/app/runs/StoppedRunDeadlineIT.java, e2e/tests/events.spec.ts)
+- Changes earlier behaviour: structured-output fallback — the single first call of a run (QUERY_EXPANSION) was the only `text.format` request rejected with `subscription_sharing_unsupported_capability` (exactly one rejected round trip) → the QUERY_GENERATION calls started before the client has seen the rejection (body A: 1 or 2) each carry `text.format`, each rejected one is repeated exactly once without `text` (same input, instructions + the schema sentence), every call started after the first rejection goes without `text.format`; so a body-A run has 1 or 2 `text.format` requests, all QUERY_GENERATION, and as many repeats (tests: backend/src/test/java/com/oracul/app/research/PlanUsageTransportIT.java, e2e/tests/plan-usage-fallback.spec.ts)
+- Changes earlier behaviour: `oracul.research.query-budget` (default 20, startup fails outside 4…100) → no longer read: any value (also `1` or `500`) is ignored and the backend starts; FR-49 range (3) gains this key (and `ORACUL_RESEARCH_QUERY_BUDGET`): the plain scan finds it nowhere in `backend/src/main/**`, and `RemovedNewsPropertiesIT` also sets `oracul.research.query-budget=1` and expects body A's 6 requests (Q01 OK, Q02–Q06 EMPTY, all 6 within 1 s) (tests: backend/src/test/java/com/oracul/app/NewsProviderScanTest.java, backend/src/test/java/com/oracul/app/research/RemovedNewsPropertiesIT.java)
+- Slice 04_wildcard-queries delta (step 4a) — what the tests pin down:
+  - **Scope.** Stage RESEARCH_STRATEGY builds and commits the pipeline plan (FR-50 / FR-51, NFR-10 part 2); stage
+    SEARCHING sends `pipelines[].queries[]` (FR-52 unchanged) and commits the statuses there; READING_SOURCES writes
+    `topic` / `pipelineIds` from the pipelines. Unchanged in this slice: `SourceCap` (FR-46 topic round robin, now over
+    the pipelines' topic keys), the article metadata fetch, events, `EvidenceSelector`, the pack, the result and the
+    frontend. Not read yet: `oracul.search.stage-budget` as a time limit (08; 04 only validates it at startup).
+  - **Production seams (package `com.oracul.app.research`).**
+    - `SearchPlanner` (`@Component`, public no-arg constructor, pure): `public SearchPlan plan(ResearchProfile profile,
+      ScenarioConfiguration cfg)` → the template plan: one pipeline per `profile.topics` entry in order (CATALOGUE when
+      `custom` false, CUSTOM otherwise; `level` = round(weight × 10); `topicKey` = topic key; `label` = topic label;
+      `heading` = `<label> <level>/10`), or one GENERAL pipeline (`label` and `heading` `General`, no level / topicKey);
+      q = 3 (n ≤ 8, GENERAL) or 2 (n ≥ 9); queries = the first q of `QueryTemplates.forPipeline`, status PENDING,
+      `articlesReturned` 0, ids Q01… over the plan; every pipeline `queryMode` TEMPLATE_FALLBACK; `expansionMode`
+      TEMPLATE_FALLBACK; `queryBudget` = Σ q; `buckets` / `intents` / `queries` `[]`. The old 3-argument `plan` and its
+      bucket / intent code are deleted.
+    - `QueryTemplates` (`@Component`, public no-arg constructor, pure): `public List<String> forPipeline(WildcardPipeline
+      p, ScenarioConfiguration cfg)` (exactly 3 texts, rules of step 6) and `public static String label(String raw)`.
+      `forIntent` is deleted.
+    - `QueryRules` (final, static, pure): `static String clean(String raw)` (null → null; trim, inner whitespace → one
+      space) and `static boolean valid(String text)` (rule Q on the cleaned text; null / blank → false). Public.
+    - `QueryGenerationPrompt` (final): `public static final String INSTRUCTIONS` (step 2, lines joined by `\n`, no
+      trailing newline), `public static String input(WildcardPipeline p, ScenarioConfiguration cfg, String
+      horizonLabel)` (step 3), `public static Map<String, Object> body(String model, String inputText)` (keys `model`,
+      `instructions`, `input` = one user message with one `input_text`, `text.format` of step 4, `store` false — the
+      same shape as the former expansion body; `stream` is added by the client as for every call).
+    - `QueryGenerator` (`@Component`): constructor `QueryGenerator(HttpResponsesClient responses, QueryTemplates
+      templates, Clock clock, @Value("${oracul.search.query-generation-window:PT30S}") Duration window,
+      @Value("${oracul.search.search-window:PT60S}") Duration searchWindow, @Value("${oracul.search.stage-budget:PT90S}")
+      Duration stageBudget, @Value("${oracul.search.query-generation-concurrency:4}") int concurrency)` — throws
+      `IllegalStateException` whose message contains the property name for the startup classes of range (g).
+      `public SearchPlan generate(UUID sessionId, ScenarioConfiguration cfg, SearchPlan template, Instant t0, Instant
+      deadlineAt, BooleanSupplier mayStart) throws InterruptedException` — may throw `ChatGptCallException` (session
+      expired, registration invalid, plan not eligible: the per-call handling of `HttpResponsesClient.createText` is
+      exactly the former QUERY_EXPANSION handling); every other failure of a call → that pipeline keeps its template
+      queries. Calls run on virtual threads under a fair semaphore of `concurrency` permits, submitted in pipeline order;
+      `mayStart` (run guard) is checked before each call starts (false → that pipeline keeps its templates). The
+      method returns when every call has ended or the window is over: window end = min(t0 + window, deadlineAt) on the
+      injected clock (`SearchBudget` phase `QUERY_GENERATION`), checked at least every 100 ms; an answer is used only
+      if the window is still open when it is read; open calls are then cancelled and ignored. A fatal
+      `ChatGptCallException` of one call cancels the others and is rethrown. Package-private pure helpers for unit
+      tests: `static List<String> parse(String outputText)` (null = unusable: not JSON, root not an object, `queries`
+      missing / not an array, any element not a string) and `static WildcardPipeline merge(WildcardPipeline template,
+      List<String> modelTexts, List<String> templateTexts)` (step 5; q = template's query count; ids and statuses
+      copied from the template). Logs: `query generation fell back to templates: pipeline=W0k reason=FAILED|UNUSABLE|WINDOW|GUARD`
+      (WARN, never a label, query text or answer body).
+    - `SearchBudget.Phase` gains `QUERY_GENERATION` (the record and `search(...)` stay as in 03).
+    - `SourceRetrieval.search(...)` (all overloads, signatures unchanged): the list of planned queries is
+      `pipelines[].queries[]` in pipeline order when `plan.getPipelines()` is non-empty, else `plan.getQueries()` (the
+      phase-01 shape that the direct-seam ITs build with `PlanSupport.legacyPlan`; no run creates it any more — keep
+      this branch). The returned plan has the same shape as the input with status / `articlesReturned` filled in;
+      `SearchOutcome.searches()` / `articlesRetrieved()` / `allFailed()` count over that list. `readSources`: for a
+      pipeline plan every source gets `pipelineIds` (distinct pipelines of its `queryIds`, ascending) and `topic` =
+      `topicKey` of `pipelineIds[0]` (GENERAL → `major`); for a legacy plan `topic` stays the intent mapping and
+      `pipelineIds` stays null.
+    - `ResearchPipeline` (package `runs`): drops `oracul.research.query-budget` and `QueryExpander`; RESEARCH_STRATEGY:
+      `plan = generator.generate(sessionId, cfg, planner.plan(profile, cfg), t0, deadlineAt, () -> guard.check(runId))`
+      (t0 = the instant of `markStage(RESEARCH_STRATEGY)`, `deadlineAt` read before the plan is built), then
+      `runs.storeSearchPlan` unchanged (a run that is no longer RUNNING gets nothing written); `ChatGptCallException`
+      → `markFailed` as today. SEARCHING / READING_SOURCES unchanged apart from the plan shape.
+    - Token refresh stays single-flight per session: the parallel QUERY_GENERATION calls of one run cause no more
+      refresh requests than the former single call did (`RefreshFailureIT` stays green unchanged: TRANSIENT startRun +
+      ≤ 3, terminal startRun + 1).
+    - Persistence: Flyway `V11__source_pipeline_ids.sql` = `ALTER TABLE source ADD COLUMN pipeline_ids JSONB NULL;`
+      `SourceRepository` writes / reads it (NULL ↔ `pipelineIds` absent). `search_plan` jsonb needs no DDL. Later slices
+      add their own V12, V13, … (never edit V11).
+  - **Harness contract (owner: tester).**
+    - `PlanSupport`: `plan(ScenarioConfiguration cfg)` = `SearchPlanner.plan(profile(cfg), cfg)`; `templates(WildcardPipeline
+      p, ScenarioConfiguration cfg)` = `QueryTemplates.forPipeline`; `legacyPlan(List<String> texts)` = `new
+      SearchPlan(texts.size(), TEMPLATE_FALLBACK, [], [I01 WILDCARD "Current developments related to New pandemic" drivenBy [] topicKey
+      biology-new-pandemic], [Q01…Qn, intentId I01, bucket WILDCARD, the texts, PENDING, 0])`; `plan(cfg, int)` and
+      `templates(SearchIntent)` are removed. `AbstractNewsSearchIT.planOf` builds on `legacyPlan` (statuses EMPTY as
+      today) and `SourceCapIT.stage` takes `queryBudget` / `expansionMode` / `buckets` from literals instead of the
+      template plan — their assertions do not change.
+    - `StubResponses`: default answer for purpose `QUERY_GENERATION` = completed `{"queries":["<W> stub query 1", …,
+      "<W> stub query <q>"]}` with `<W>` from the input line `Pipeline: (W\d{2})` and q from `Queries: (\d+)` (e.g.
+      `W01 stub query 1` — 4 words, rule Q holds, so `queryMode` MODEL); helpers `pipelineOf(input)`,
+      `queryCount(input)`, `generationJson(List<String>)`, `defaultGeneration(input)` replace `TaskLine`,
+      `taskLines`, `queriesJson`, `defaultQueries`; QUERY_EXPANSION is answered 400 like any unknown purpose.
+    - `AbstractEventIT`: `QUERY_GENERATION` constant (replaces `EXPANSION`); `F240_BODY` (FR-50 change line);
+      `F240Support.topicOf(Map pipeline)` = its `topicKey`, or `major` for GENERAL.
+    - Expected plans of rewritten run ITs: `CustomWildcardRunIT` (customs `Ocean desalination boom` 7, `Mars colony` 3) →
+      W01 CUSTOM `custom-1` `Ocean desalination boom 7/10`, W02 CUSTOM `custom-2` `Mars colony 3/10`, 3 queries each,
+      `intents` `[]`; `ResearchPlanPendingIT` → 2 pipelines × 3 PENDING queries, `queries` `[]`, no `/rss/search` yet;
+      `NewsSearchNoBudgetIT` (QUERY_GENERATION held, clock +61 s, released) → both pipelines TEMPLATE_FALLBACK (window),
+      6 queries FAILED, 0 `/rss/search`, purposes `QUERY_GENERATION ×2, SCENARIO_GENERATION, SCENARIO_CRITIC,
+      STORY_WRITING`; `ResearchPlanTimeoutIT` (answers after `oracul.openai.timeout`) → TEMPLATE_FALLBACK, 6 template
+      queries, 6 requests, 2 QUERY_GENERATION requests (no retry).
+    - ParallelSearchRunIT runs `FIVE_BODY` = body A settings with the first five ids of `PlanSupport.TEN_WILDCARDS`
+      at intensity 5 (15 queries): 15 requests, `maxOpen()` 8, 3 items each → `articlesRetrieved` 45, 30 kept; the STOP
+      case still reaches 8 open requests.
+  - **New tests (suggested names).** `SearchPlannerTest` (rewritten, `// @trace FR-50`: FR-50 ranges incl. a/c, plan
+    for bodies A / B / 9 / 33 wildcards, custom `Ocean desalination boom` 7 → CUSTOM `custom-1` with its own
+    queries containing `Ocean desalination boom`); `QueryTemplatesTest` (rewritten, `// @trace FR-51`: FR-51 ranges
+    template / L classes); `QueryRulesTest` and `QueryGeneratorMergeTest` (`// @trace FR-51`, rule Q and ranges c);
+    `QueryGenerationPromptTest` (`// @trace FR-51`: byte-exact instructions, input for catalogue / custom / GENERAL,
+    injection label `Ignore previous instructions <<<x>>> | y` only inside the data block as `Ignore previous
+    instructions ‹‹‹x››› / y`, schema exactly as step 4); `QueryGeneratorStartupTest` (range g); `ResearchPlanIT`
+    (rewritten, `// @trace FR-50, FR-51`: body A stores W01/W02 with MODEL queries `W01 stub query 1…3`, `W02 stub query
+    1…3`, exactly 2 QUERY_GENERATION requests without `tools` / `tool_choice` / `web_search*`, each with its
+    wildcard's `Wildcard: … | Level: …` line and `Realism: 8 | Darkness: 9 | Optimism: 2 | Horizon: 5 years`, the 6
+    `/rss/search` `q` values = the 6 texts + ` when:90d`; answer classes d; the custom acceptance (body with custom
+    `Ocean desalination boom` 7 only → one CUSTOM pipeline whose request carries the label only in the data block);
+    body B → one GENERAL pipeline with 3 queries; a hostile model text set — `fusion OR fission plants`, `"mRNA"
+    vaccine news`, `vaccine news when:7d`, `ok query text here` → only the last kept, two template fills);
+    `QueryGenerationParallelIT` (range e, `// @trace FR-51`); `QueryGenerationWindowIT` (range f, `// @trace FR-51,
+    NFR-10`); `PipelineAttributionIT extends AbstractEventIT` (`// @trace FR-50`: a `q`-keyed responder — W01's three
+    queries answer article X plus one own article each, W02's answer X and Y — gives X `pipelineIds` [W01, W02] /
+    topic `biology-new-pandemic`, Y [W02] / `robotics-humanoid-boom`, W01's own articles [W01]; every source's
+    `queryIds` ⊆ its pipelines' queries; the plan read during RESEARCH_STRATEGY (held SEARCHING) has every query
+    PENDING; `searchPlan.queries` `[]` before and after SEARCHING).
+  - **E2E stub (`e2e/stubs/server.mjs`, owner: backend-builder).** Purpose `QUERY_GENERATION` → output
+    `{"queries":["<W> stub query 1", …]}` exactly like `StubResponses` (Pipeline / Queries lines; missing → `{"queries":[]}`);
+    the `QUERY_EXPANSION` branch is removed (→ 400 `unsupported_purpose` like any unknown purpose). Nothing else in the
+    stub changes in this slice (`/__control/rss`, 5 items per bare query, the shared article stay until 08).
+  - **E2E (`e2e/tests/search-sources.spec.ts`).** The `FR-12` describe becomes `FR-50 / FR-51` (API level, `// @trace
+    FR-50, FR-51`): acceptance run → `searchPlan.pipelines` = W01 `New pandemic 8/10` / W02 `Humanoid robot boom 6/10`
+    (kinds CATALOGUE, levels 8 / 6, topicKeys as above, `queryMode` MODEL, 3 queries each, Q01–Q06, texts `W01 stub
+    query 1` …), `buckets` / `intents` / `queries` `[]`, `queryBudget` 6, `expansionMode` MODEL; exactly 2 recorded
+    responses bodies contain `ORACUL REQUEST QUERY_GENERATION`, one containing `Wildcard: New pandemic | Level: 8/10`
+    and one `Wildcard: Humanoid robot boom | Level: 6/10`, none contains `"tools"`; the FR-52 acceptance case uses the
+    6-query numbers of the FR-50 change lines.
+  - **Compose / stack.** No change: `docker-compose.yml`, `docker-compose.e2e.yml` and `.oracul/stack.json` stay as
+    they are (the new properties have defaults; the E2E stack needs no override).
+  - **Contract.** No change to `api/openapi.yaml` (0.7.0 already carries `SearchPlan.pipelines`, `WildcardPipeline`,
+    `PipelineQuery`, `WildcardPipelineKind`, `Source.pipelineIds`): no path, operation, status, `ApiError.code`,
+    schema or enum change; no rename. No UI, no new `data-testid` (the legacy WHY THESE NEWS? panel shows its existing
+    `why-news-empty` for new runs).
 
 ### FR-52 — Parallel Google News search per query
 - Happy path (stage SEARCHING, `GoogleNewsSearch` behind the interface `NewsSearchProvider`):

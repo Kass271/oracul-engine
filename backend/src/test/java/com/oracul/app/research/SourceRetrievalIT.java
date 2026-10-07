@@ -10,7 +10,6 @@ import com.oracul.app.runs.AbstractRunIT;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -29,9 +28,10 @@ import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * Rows 8, 11-14 of research-pipeline.md "Slice 05_search-sources" integration tests (search stage, Google News RSS), as
- * changed by FR-52: one request per planned query, a 429 retried once (after a short rate-limit-wait here).
+ * changed by FR-52 and FR-50: one request per planned query (body A: two pipelines x 3 queries = 6, body B: one GENERAL pipeline x 3),
+ * the statuses live in {@code searchPlan.pipelines[].queries[]}, a 429 retried once (after a short rate-limit-wait here).
  */
-// @trace FR-13, FR-44, FR-47, FR-49, FR-52
+// @trace FR-13, FR-44, FR-47, FR-49, FR-50, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=10",
@@ -40,16 +40,6 @@ import org.springframework.test.web.servlet.ResultActions;
 class SourceRetrievalIT extends AbstractRunIT {
 
     static final String NEWS_DOWN = "ORACUL could not reach its news sources — try again later";
-
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> list(Object o) {
-        return (List<Map<String, Object>>) o;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> plan(Map<String, Object> research) {
-        return (Map<String, Object>) research.get("searchPlan");
-    }
 
     private Map<String, Object> runToTerminal(String sid, String body) throws Exception {
         String id = (String) startOk(sid, body).get("id");
@@ -62,15 +52,15 @@ class SourceRetrievalIT extends AbstractRunIT {
             StubNews.pubDate(Instant.now().minus(1, ChronoUnit.DAYS)), "Reuters", "https://www.reuters.com");
     }
 
-    // #8 (FR-52: 20 queries go out as 20 bare requests)
+    // #8 (FR-52: 6 queries of body A go out as 6 bare requests)
     @Test
     void theQueriesAreSentToGoogleNewsOnePerQueryWithExactlyTheSpecifiedParameters() throws Exception {
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
-        assertThat(news.requests).as("one request per planned query").hasSize(20);
-        List<String> planTexts = new ArrayList<>();
-        for (Map<String, Object> q : list(plan(researchBody(sid, id)).get("queries"))) planTexts.add((String) q.get("text"));
+        assertThat(news.requests).as("one request per planned query").hasSize(6);
+        List<String> planTexts = new ArrayList<>(PlanJson.queryTexts(researchBody(sid, id)));
+        assertThat(planTexts).as("the queries of both pipelines").hasSize(6);
         List<String> sent = new ArrayList<>();
         for (StubNews.Request r : news.requests) {
             assertThat(r.params().keySet()).containsExactlyInAnyOrder("q", "hl", "gl", "ceid");
@@ -94,48 +84,62 @@ class SourceRetrievalIT extends AbstractRunIT {
         String sid = connectedSid();
         Map<String, Object> run = runToTerminal(sid, withHorizon(B, horizon));
         assertThat(run.get("status")).isEqualTo("COMPLETED");
-        assertThat(news.requests).as("one request per planned query").hasSize(20);
+        assertThat(news.requests).as("one request per planned query (body B: 3)").hasSize(3);
         assertThat(news.requests).allSatisfy(r -> assertThat(r.q()).endsWith(" when:" + days + "d"));
     }
 
-    // #8 + FR-13 rules + FR-52: every source keeps the topic of the query whose request returned it, in plan order
+    // #8 + FR-13 rules + FR-52 + FR-50 acceptance 5: every source carries the pipeline and the topic of the query whose
+    // request returned it, in plan order
     @Test
-    void sourcesCarryTheTopicOfTheQueryThatReturnedThemInPlanOrder() throws Exception {
+    void sourcesCarryThePipelineAndTopicOfTheQueryThatReturnedThemInPlanOrder() throws Exception {
         news.responder = req -> StubNews.rss(item("t" + req.number()));
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
-        assertThat(news.requests).hasSize(20);
-        Map<String, Object> plan = plan(researchBody(sid, id));
-        Map<String, Map<String, Object>> intents = new HashMap<>();
-        for (Map<String, Object> i : list(plan.get("intents"))) intents.put((String) i.get("id"), i);
-        List<Map<String, Object>> queries = list(plan.get("queries"));
-        for (int i = 0; i < 20; i++) {
+        assertThat(news.requests).hasSize(6);
+        Map<String, Object> research = researchBody(sid, id);
+        List<Map<String, Object>> pipelines = PlanJson.pipelines(research);
+        assertThat(pipelines).hasSize(2);
+        List<Map<String, Object>> queries = PlanJson.queries(research);
+        assertThat(queries).hasSize(6);
+        for (int i = 0; i < 6; i++) {
             assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo("OK");
             assertThat(queries.get(i).get("articlesReturned")).as("Q" + (i + 1)).isEqualTo(1);
         }
         List<Map<String, Object>> sources = sourceItems(sid, id);
-        assertThat(sources).hasSize(20);
-        for (int g = 0; g < 20; g++) {
+        assertThat(sources).hasSize(6);
+        for (int g = 0; g < 6; g++) {
             Map<String, Object> s = sources.get(g);
+            Map<String, Object> pipeline = pipelines.get(g / 3);
             assertThat(s.get("id")).isEqualTo(String.format("S%03d", g + 1));
             assertThat(s.get("queryIds")).as(s.get("id") + " queryIds").isEqualTo(List.of(String.format("Q%02d", g + 1)));
-            Map<String, Object> intent = intents.get((String) queries.get(g).get("intentId"));
-            String expected = switch ((String) intent.get("bucket")) {
-                case "WILDCARD" -> (String) intent.get("topicKey");
-                case "ADJACENT" -> intent.get("category") == null ? "general" : (String) intent.get("category");
-                case "MAJOR" -> "major";
-                default -> "unexpected";
-            };
-            assertThat(s.get("topic")).as(s.get("id") + " topic").isEqualTo(expected);
+            assertThat(s.get("pipelineIds")).as(s.get("id") + " pipelineIds").isEqualTo(List.of(pipeline.get("id")));
+            assertThat(s.get("topic")).as(s.get("id") + " topic = topicKey of its pipeline").isEqualTo(pipeline.get("topicKey"));
         }
+        assertThat(sources.subList(0, 3)).allSatisfy(s -> assertThat(s.get("topic")).isEqualTo("biology-new-pandemic"));
+        assertThat(sources.subList(3, 6)).allSatisfy(s -> assertThat(s.get("topic")).isEqualTo("robotics-humanoid-boom"));
         Map<String, Object> run = json(getRun(sid, id));
         Map<String, Object> counts = castMap((Map<?, ?>) run.get("counts"));
-        assertThat(counts.get("searches")).isEqualTo(20);
-        assertThat(counts.get("articlesRetrieved")).as("20 answered queries x 1 article").isEqualTo(20);
-        assertThat(counts.get("articlesConsidered")).isEqualTo(20);
-        assertThat(counts.get("uniqueEvents")).isEqualTo(20);
+        assertThat(counts.get("searches")).isEqualTo(6);
+        assertThat(counts.get("articlesRetrieved")).as("6 answered queries x 1 article").isEqualTo(6);
+        assertThat(counts.get("articlesConsidered")).isEqualTo(6);
+        assertThat(counts.get("uniqueEvents")).isEqualTo(6);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
+    }
+
+    // FR-50 acceptance 5 (GENERAL): the single pipeline's sources have pipelineIds [W01] and the topic "major"
+    @Test
+    void aGeneralRunsSourcesBelongToW01AndHaveTheTopicMajor() throws Exception {
+        news.responder = req -> StubNews.rss(item("g" + req.number()));
+        String sid = connectedSid();
+        String id = (String) startOk(sid, B).get("id");
+        assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
+        List<Map<String, Object>> sources = sourceItems(sid, id);
+        assertThat(sources).hasSize(3);
+        assertThat(sources).allSatisfy(s -> {
+            assertThat(s.get("pipelineIds")).isEqualTo(List.of("W01"));
+            assertThat(s.get("topic")).isEqualTo("major");
+        });
     }
 
     @SuppressWarnings("unchecked")
@@ -146,7 +150,7 @@ class SourceRetrievalIT extends AbstractRunIT {
     // #11 (FR-52: a failing request fails one query, not a group)
     @Test
     void failedQueriesDoNotStopTheRun() throws Exception {
-        news.responder = req -> req.number() <= 2 ? StubNews.status(503)
+        news.responder = req -> req.number() == 1 ? StubNews.status(503)
             : StubNews.rss(item("n" + req.number()));
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
@@ -155,17 +159,18 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(absent(run, "failure")).isTrue();
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
-        assertThat(counts.get("searches")).isEqualTo(20);
-        assertThat(counts.get("articlesRetrieved")).isEqualTo(18);
-        assertThat(counts.get("articlesConsidered")).isEqualTo(18);
-        assertThat(news.requests).as("a 503 is never retried: one request per query").hasSize(20);
-        List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
-        for (int i = 0; i < 20; i++) {
-            String expected = i < 2 ? "FAILED" : "OK";
+        assertThat(counts.get("searches")).isEqualTo(6);
+        assertThat(counts.get("articlesRetrieved")).isEqualTo(5);
+        assertThat(counts.get("articlesConsidered")).isEqualTo(5);
+        assertThat(news.requests).as("a 503 is never retried: one request per query").hasSize(6);
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
+        assertThat(queries).hasSize(6);
+        for (int i = 0; i < 6; i++) {
+            String expected = i < 1 ? "FAILED" : "OK";
             assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo(expected);
             assertThat(queries.get(i).get("articlesReturned")).as("Q" + (i + 1)).isEqualTo(expected.equals("OK") ? 1 : 0);
         }
-        assertThat(sourceItems(sid, id)).hasSize(18);
+        assertThat(sourceItems(sid, id)).hasSize(5);
     }
 
     static Stream<Arguments> unavailableProviders() {
@@ -194,19 +199,19 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
-        assertThat(counts.get("searches")).isEqualTo(20);
+        assertThat(counts.get("searches")).isEqualTo(6);
         assertThat(counts.get("articlesRetrieved")).isEqualTo(0);
         assertThat(counts.get("articlesConsidered")).isEqualTo(0);
-        assertThat(news.requests).as("one request per query, none of these answers is retried, no fallback").hasSize(20);
-        List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
-        assertThat(queries).hasSize(20).allSatisfy(q -> {
+        assertThat(news.requests).as("one request per query, none of these answers is retried, no fallback").hasSize(6);
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
+        assertThat(queries).hasSize(6).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("FAILED");
             assertThat(q.get("articlesReturned")).isEqualTo(0);
         });
         assertThat(json(getSources(sid, id))).isEqualTo(json("{\"items\":[]}"));
         assertThat(responses.requests.stream().map(StubResponses::purpose).toList())
             .as("no event stages, but the speculative scenario, its critic and the story")
-            .containsExactly("QUERY_EXPANSION", "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
+            .containsExactly("QUERY_GENERATION", "QUERY_GENERATION", "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
         MvcResult second = startRun(sid, B).andReturn();
         assertThat(second.getResponse().getStatus()).as("slot released").isEqualTo(202);
         // let the follow-up run finish so its requests cannot leak into the next test/invocation
@@ -223,19 +228,20 @@ class SourceRetrievalIT extends AbstractRunIT {
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
-        assertThat(news.requests).as("20 queries + 1 retry").hasSize(21);
+        assertThat(news.requests).as("6 queries + 1 retry").hasSize(7);
         // the retry comes after rate-limit-wait and a fresh permit, so not necessarily right after the 429: find it by content
         String limited = news.requests.get(0).rawQuery();
         assertThat(news.requests.stream().filter(r -> r.rawQuery().equals(limited)).count())
             .as("the 429'd request plus exactly one identical retry").isEqualTo(2);
         assertThat(news.requests.stream().map(StubNews.Request::rawQuery).distinct().count())
-            .as("every other request is sent once").isEqualTo(20);
-        assertThat(news.paths.stream().filter(p -> p.equals("/rss/search")).count()).isEqualTo(21);
-        List<Map<String, Object>> queries = list(plan(researchBody(sid, id)).get("queries"));
-        for (int i = 0; i < 20; i++) {
+            .as("every other request is sent once").isEqualTo(6);
+        assertThat(news.paths.stream().filter(p -> p.equals("/rss/search")).count()).isEqualTo(7);
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
+        assertThat(queries).hasSize(6);
+        for (int i = 0; i < 6; i++) {
             assertThat(queries.get(i).get("status")).as("Q" + (i + 1)).isEqualTo("OK");
         }
-        assertThat(sourceItems(sid, id)).hasSize(20);
+        assertThat(sourceItems(sid, id)).hasSize(6);
     }
 
     // a second 429 fails the query after exactly 2 requests, never the run (run-control.md FR-47)
@@ -248,8 +254,8 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         assertThat(absent(run, "failure")).isTrue();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        assertThat(news.requests).as("20 queries, two requests each").hasSize(40);
-        assertThat(list(plan(researchBody(sid, id)).get("queries"))).hasSize(20)
+        assertThat(news.requests).as("6 queries, two requests each").hasSize(12);
+        assertThat(PlanJson.queries(researchBody(sid, id))).hasSize(6)
             .allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
     }
 
@@ -260,9 +266,9 @@ class SourceRetrievalIT extends AbstractRunIT {
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
-        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":20")));
-        assertThat(news.requests).as("one request per planned query").hasSize(20);
-        assertThat(list(plan(researchBody(sid, id)).get("queries"))).hasSize(20).allSatisfy(q -> {
+        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":6")));
+        assertThat(news.requests).as("one request per planned query").hasSize(6);
+        assertThat(PlanJson.queries(researchBody(sid, id))).hasSize(6).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("EMPTY");
             assertThat(q.get("articlesReturned")).isEqualTo(0);
         });
@@ -285,7 +291,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         String id = (String) startOk(sid, B).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as(name).isEqualTo("COMPLETED");
-        assertThat(list(plan(researchBody(sid, id)).get("queries"))).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("EMPTY"));
+        assertThat(PlanJson.queries(researchBody(sid, id))).hasSize(3).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("EMPTY"));
     }
 
     // #14

@@ -7,8 +7,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
-/** Row 3 of the FR-12 integration table, timeout variant: the call outlives oracul.openai.timeout. */
-// @trace FR-12, FR-44, FR-47, FR-52
+/** FR-51 (d), timeout variant: the QUERY_GENERATION calls outlive oracul.openai.timeout, every pipeline falls back to templates. */
+// @trace FR-12, FR-44, FR-47, FR-51, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=7",
@@ -17,23 +17,26 @@ import org.springframework.test.context.TestPropertySource;
 class ResearchPlanTimeoutIT extends AbstractRunIT {
 
     @Test
-    void expansionBeyondTheTimeoutFallsBackToTemplates() throws Exception {
-        // run-control.md FR-47: the empty-news run goes on speculatively, so only the expansion is slow
+    void generationBeyondTheTimeoutFallsBackToTemplates() throws Exception {
+        // run-control.md FR-47: the empty-news run goes on speculatively, so only the query generation is slow
         var fallback = responses.defaultResponder();
-        responses.responder = req -> "QUERY_EXPANSION".equals(StubResponses.purpose(req))
-            ? StubResponses.delayed(StubResponses.completed("{\"queries\":[]}"), 3000)
+        responses.responder = req -> "QUERY_GENERATION".equals(StubResponses.purpose(req))
+            ? StubResponses.delayed(StubResponses.completed(StubResponses.defaultGeneration(req.inputText())), 3000)
             : fallback.apply(req);
         String sid = connectedSid();
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         assertThat(absent(run, "failure")).isTrue();
-        @SuppressWarnings("unchecked")
-        Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
-        assertThat(plan.get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
-        assertThat((java.util.List<?>) plan.get("queries")).hasSize(20);
-        assertThat(news.requests).as("20 template queries as 20 requests").hasSize(20);
-        assertThat(responses.requests.stream().filter(r -> "QUERY_EXPANSION".equals(StubResponses.purpose(r))).count())
-            .as("no retry").isEqualTo(1);
+        Map<String, Object> research = researchBody(sid, id);
+        assertThat(PlanJson.plan(research).get("expansionMode")).isEqualTo("TEMPLATE_FALLBACK");
+        assertThat(PlanJson.pipelines(research)).hasSize(2).allSatisfy(p -> assertThat(p.get("queryMode")).isEqualTo("TEMPLATE_FALLBACK"));
+        assertThat(PlanJson.queryTexts(research)).as("6 template queries").containsExactly(
+            "New pandemic extreme scenario disaster", "New pandemic unprecedented scale catastrophe", "New pandemic radical upheaval collapse",
+            "Humanoid robot boom serious disruption crisis", "Humanoid robot boom major escalation conflict",
+            "Humanoid robot boom growing concerns threat");
+        assertThat(news.requests).as("6 template queries as 6 requests").hasSize(6);
+        assertThat(responses.requests.stream().filter(r -> "QUERY_GENERATION".equals(StubResponses.purpose(r))).count())
+            .as("one call per pipeline, no retry").isEqualTo(2);
     }
 }

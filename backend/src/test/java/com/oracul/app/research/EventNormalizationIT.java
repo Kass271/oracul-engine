@@ -75,7 +75,7 @@ class EventNormalizationIT extends AbstractEventIT {
         }
         assertThat(source(r, "S004").get("entities")).isEqualTo(List.of("Dock workers"));
         // slice 10: the critic request sits between the scenario generation and the story writing request
-        assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
+        assertThat(purposes()).containsExactly(QUERY_GENERATION, QUERY_GENERATION, NORMALIZATION, CLASSIFICATION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
     }
 
     // #1 persistence
@@ -302,7 +302,7 @@ class EventNormalizationIT extends AbstractEventIT {
         Ran r = run(A);
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
         // run-control.md FR-47: no sources -> no event requests, but the empty pack is written up speculatively
-        assertThat(purposes()).containsExactly(EXPANSION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
+        assertThat(purposes()).containsExactly(QUERY_GENERATION, QUERY_GENERATION, "SCENARIO_GENERATION", "SCENARIO_CRITIC", "STORY_WRITING");
         assertThat(requests(NORMALIZATION)).isEmpty();
         assertThat(requests(CLASSIFICATION)).isEmpty();
         assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(0);

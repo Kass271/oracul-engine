@@ -9,12 +9,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** Provider timeout (oracul.news.google.timeout, the only per-request timeout) counts as FAILED, like any other provider error. */
-// @trace FR-13, FR-44, FR-47, FR-52
+// @trace FR-13, FR-44, FR-47, FR-50, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=14",
     "oracul.news.google.timeout=PT0.5S",
-    "oracul.news.google.concurrency=8", // FR-52: 20 slow requests, 8 at a time (the assertions are counts only)
+    "oracul.news.google.concurrency=8", // FR-52: slow requests, 8 at a time (the assertions are counts only)
 })
 class SourceQueryTimeoutIT extends AbstractRunIT {
 
@@ -33,12 +33,11 @@ class SourceQueryTimeoutIT extends AbstractRunIT {
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
-        List<Map<String, Object>> queries =
-            (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
-        // the query of the first request timed out; the other 19 answer one article each (FR-52: one request per query)
-        assertThat(news.requests).as("a timeout is not retried: one request per query").hasSize(20);
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
+        // the query of the first request timed out; the other 5 of body A's 6 queries answer one article each (FR-52: one request per query)
+        assertThat(news.requests).as("a timeout is not retried: one request per query").hasSize(6);
         assertThat(queries.stream().filter(q -> "FAILED".equals(q.get("status"))).count()).isEqualTo(1);
-        assertThat(queries.stream().filter(q -> "OK".equals(q.get("status"))).count()).isEqualTo(19);
+        assertThat(queries.stream().filter(q -> "OK".equals(q.get("status"))).count()).isEqualTo(5);
         assertThat(queries.stream().filter(q -> "EMPTY".equals(q.get("status"))).count()).isEqualTo(0);
     }
 
@@ -53,9 +52,8 @@ class SourceQueryTimeoutIT extends AbstractRunIT {
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         assertThat(run.get("failure")).isNull();
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        List<Map<String, Object>> queries =
-            (List<Map<String, Object>>) ((Map<String, Object>) researchBody(sid, id).get("searchPlan")).get("queries");
-        assertThat(queries).isNotEmpty().allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
+        List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
+        assertThat(queries).as("body B: one GENERAL pipeline with 3 queries").hasSize(3).allSatisfy(q -> assertThat(q.get("status")).isEqualTo("FAILED"));
         assertThat(news.requests).as("one request per planned query, none retried").hasSize(queries.size());
     }
 }

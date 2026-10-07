@@ -52,11 +52,13 @@ None. Every new failure mode of this phase (a wildcard without sources, decode /
 cut-offs) ends as data (query status, `contentStatus`, evidence note), never as an HTTP error or a run failure.
 
 ## Database
-Flyway `V11__wildcard_search.sql`:
-- `ALTER TABLE source ADD COLUMN content_status VARCHAR(32) NULL, ADD COLUMN excerpts JSONB NULL, ADD COLUMN
-  publisher_host TEXT NULL, ADD COLUMN pipeline_ids JSONB NULL`
-- `ALTER TABLE evidence_pack ADD COLUMN sections JSONB NULL`
-- `ALTER TABLE generation_run ADD COLUMN evidence_note_wildcards JSONB NULL`
+The DDL lands in four slices, so each of them adds its own Flyway file and never edits one already applied
+(plan.md "One Flyway file per slice"):
+- 04_wildcard-queries — `V11__source_pipeline_ids.sql`: `ALTER TABLE source ADD COLUMN pipeline_ids JSONB NULL`
+- 06_wildcard-pack — next free version: `ALTER TABLE evidence_pack ADD COLUMN sections JSONB NULL`
+- 08_article-text — next free version: `ALTER TABLE source ADD COLUMN content_status VARCHAR(32) NULL, ADD COLUMN
+  excerpts JSONB NULL, ADD COLUMN publisher_host TEXT NULL`
+- 09_wildcard-results — next free version: `ALTER TABLE generation_run ADD COLUMN evidence_note_wildcards JSONB NULL`
 `search_plan` (jsonb) and `counts` (jsonb) need no DDL. No credential column (NFR-1 scan still applies). Older
 migrations keep their GDELT history (FR-49 excludes `db/migration/**`).
 

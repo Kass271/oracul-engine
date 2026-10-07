@@ -37,7 +37,7 @@ import org.springframework.test.web.servlet.ResultActions;
  * and runId class (seeded rows), and the stop during every kind of outbound request of the pipeline (the stub holds the
  * request, the run is stopped, the stub releases it: nothing more may be sent or written for the run).
  */
-// @trace FR-45
+// @trace FR-45, FR-51
 class StopRunIT extends AbstractStoryIT {
 
     private static final String PROFILE = "{\"darkness\":0.5,\"optimism\":0.5,\"realism\":0.8,\"horizon\":\"1y\",\"topics\":[]}";
@@ -295,6 +295,8 @@ class StopRunIT extends AbstractStoryIT {
                 case "MODELS", "GOOGLE" -> arrived.await(15, TimeUnit.SECONDS);
                 // fetch concurrency is 8: wait until all permits are taken, the other fetches of the 12 articles are queued
                 case "ARTICLE" -> awaitTrue(() -> news.articleRequests.size() >= 8, 15_000);
+                // FR-51: the gate holds the call of every pipeline of body A (2), all started before the stop
+                case "QUERY_GENERATION" -> responses.awaitArrived(kind, 2, Duration.ofSeconds(15));
                 default -> responses.awaitArrived(kind, 1, Duration.ofSeconds(15));
             };
         }
@@ -342,7 +344,7 @@ class StopRunIT extends AbstractStoryIT {
     static Stream<Arguments> outboundKinds() {
         // kind, EvidencePack readable after the stop, a parsed scenario attempt exists after the stop
         return Stream.of(
-            Arguments.of("QUERY_EXPANSION", false, false),
+            Arguments.of("QUERY_GENERATION", false, false),
             Arguments.of("MODELS", false, false),
             Arguments.of("GOOGLE", false, false),
             Arguments.of("ARTICLE", false, false),

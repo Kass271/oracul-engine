@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** Integration row of scenario-panel.md "Slice 18_custom-wildcards-output". */
-// @trace FR-5
+// @trace FR-5, FR-50
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=6",
@@ -47,18 +47,26 @@ class CustomWildcardRunIT extends AbstractRunIT {
             + "{\"key\":\"custom-1\",\"label\":\"Ocean desalination boom\",\"category\":\"custom\",\"weight\":0.7,\"custom\":true},"
             + "{\"key\":\"custom-2\",\"label\":\"Mars colony\",\"category\":\"custom\",\"weight\":0.3,\"custom\":true}]}").get("t"));
 
-        List<Map<String, Object>> intents = list(((Map<String, Object>) research.get("searchPlan")).get("intents"));
-        assertThat(intents.get(0).get("bucket")).isEqualTo("WILDCARD");
-        assertThat(intents.get(0).get("topicKey")).isEqualTo("custom-1");
-        assertThat(intents.get(0).get("description")).isEqualTo("Current developments related to Ocean desalination boom");
-        assertThat(intents.get(0).get("drivenBy")).asList().first().isEqualTo("Ocean desalination boom 7/10");
-        assertThat(intents.get(1).get("bucket")).isEqualTo("WILDCARD");
-        assertThat(intents.get(1).get("topicKey")).isEqualTo("custom-2");
-        assertThat(intents.get(1).get("description")).isEqualTo("Current developments related to Mars colony");
-        assertThat(intents.get(1).get("drivenBy")).asList().first().isEqualTo("Mars colony 3/10");
-        for (Map<String, Object> i : intents) {
-            if ("ADJACENT".equals(i.get("bucket"))) assertThat(i.get("category")).isNull();
-        }
+        // FR-50 change line: one CUSTOM pipeline per custom wildcard instead of WILDCARD intents; intents are [] for a new run
+        Map<String, Object> plan = (Map<String, Object>) research.get("searchPlan");
+        assertThat(plan.get("intents")).isEqualTo(List.of());
+        assertThat(plan.get("queries")).isEqualTo(List.of());
+        List<Map<String, Object>> pipelines = list(plan.get("pipelines"));
+        assertThat(pipelines).hasSize(2);
+        assertThat(pipelines.get(0).get("id")).isEqualTo("W01");
+        assertThat(pipelines.get(0).get("kind")).isEqualTo("CUSTOM");
+        assertThat(pipelines.get(0).get("topicKey")).isEqualTo("custom-1");
+        assertThat(pipelines.get(0).get("label")).isEqualTo("Ocean desalination boom");
+        assertThat(pipelines.get(0).get("level")).isEqualTo(7);
+        assertThat(pipelines.get(0).get("heading")).isEqualTo("Ocean desalination boom 7/10");
+        assertThat(list(pipelines.get(0).get("queries"))).hasSize(3);
+        assertThat(pipelines.get(1).get("id")).isEqualTo("W02");
+        assertThat(pipelines.get(1).get("kind")).isEqualTo("CUSTOM");
+        assertThat(pipelines.get(1).get("topicKey")).isEqualTo("custom-2");
+        assertThat(pipelines.get(1).get("label")).isEqualTo("Mars colony");
+        assertThat(pipelines.get(1).get("level")).isEqualTo(3);
+        assertThat(pipelines.get(1).get("heading")).isEqualTo("Mars colony 3/10");
+        assertThat(list(pipelines.get(1).get("queries"))).hasSize(3);
     }
 
     // @trace FR-5

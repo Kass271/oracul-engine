@@ -69,9 +69,9 @@ async function recorded(page: Page, kind: 'responses' | 'rss' | 'all'): Promise<
   return Array.isArray(body) ? body : body.requests;
 }
 
-// @trace FR-12
-test.describe('FR-12 Search plan and query generation', () => {
-  test('the acceptance run stores a plan with 8/6/4/2 queries and one tool-less expansion request', async ({ page }) => {
+// @trace FR-50, FR-51
+test.describe('FR-50 / FR-51 Pipeline plan and query generation per wildcard', () => {
+  test('the acceptance run stores one pipeline per wildcard with 3 generated queries each and sends one tool-less generation request per pipeline', async ({ page }) => {
     test.setTimeout(90_000);
     const id = await startAcceptanceRun(page);
     await awaitStatus(page, id, 'COMPLETED', 40_000);
@@ -79,19 +79,32 @@ test.describe('FR-12 Search plan and query generation', () => {
     const res = await page.request.get(`/api/runs/${id}/research`);
     expect(res.status()).toBe(200);
     const plan = (await res.json()).searchPlan;
-    expect(plan.queryBudget).toBe(20);
+    expect(plan.queryBudget).toBe(6);
     expect(plan.expansionMode).toBe('MODEL');
-    expect(plan.buckets.map((b: any) => b.queries)).toEqual([8, 6, 4, 2]);
-    expect(plan.buckets.map((b: any) => b.bucket)).toEqual(['WILDCARD', 'MAJOR', 'ADJACENT', 'UNEXPECTED']);
-    const i01 = plan.intents[0];
-    expect(i01.id).toBe('I01');
-    expect(i01.topicKey).toBe('biology-new-pandemic');
-    expect(i01.drivenBy).toEqual(expect.arrayContaining(['New pandemic 8/10', 'Darkness 9/10']));
-    expect(plan.queries).toHaveLength(20);
+    expect(plan.buckets).toEqual([]);
+    expect(plan.intents).toEqual([]);
+    expect(plan.queries).toEqual([]);
+    expect(plan.pipelines).toHaveLength(2);
+    const [w1, w2] = plan.pipelines;
+    expect(w1).toMatchObject({
+      id: 'W01', kind: 'CATALOGUE', label: 'New pandemic', level: 8, topicKey: 'biology-new-pandemic',
+      heading: 'New pandemic 8/10', queryMode: 'MODEL',
+    });
+    expect(w2).toMatchObject({
+      id: 'W02', kind: 'CATALOGUE', label: 'Humanoid robot boom', level: 6, topicKey: 'robotics-humanoid-boom',
+      heading: 'Humanoid robot boom 6/10', queryMode: 'MODEL',
+    });
+    expect(w1.queries.map((q: any) => q.id)).toEqual(['Q01', 'Q02', 'Q03']);
+    expect(w2.queries.map((q: any) => q.id)).toEqual(['Q04', 'Q05', 'Q06']);
+    expect(w1.queries.map((q: any) => q.text)).toEqual(['W01 stub query 1', 'W01 stub query 2', 'W01 stub query 3']);
+    expect(w2.queries.map((q: any) => q.text)).toEqual(['W02 stub query 1', 'W02 stub query 2', 'W02 stub query 3']);
 
     const requests = await recorded(page, 'responses');
-    const expansions = requests.filter((r) => JSON.stringify(r).includes('ORACUL REQUEST QUERY_EXPANSION'));
-    expect(expansions).toHaveLength(1);
+    const generations = requests.filter((r) => JSON.stringify(r).includes('ORACUL REQUEST QUERY_GENERATION'));
+    expect(generations, 'exactly one generation request per pipeline').toHaveLength(2);
+    expect(generations.filter((r) => JSON.stringify(r).includes('Wildcard: New pandemic | Level: 8/10'))).toHaveLength(1);
+    expect(generations.filter((r) => JSON.stringify(r).includes('Wildcard: Humanoid robot boom | Level: 6/10'))).toHaveLength(1);
+    expect(requests.some((r) => JSON.stringify(r).includes('ORACUL REQUEST QUERY_EXPANSION')), 'no QUERY_EXPANSION any more').toBe(false);
     expect(requests.some((r) => JSON.stringify(r).includes('"tools"'))).toBe(false);
   });
 
@@ -112,7 +125,7 @@ function sentText(text: string): string {
     .join(' ');
 }
 
-// @trace FR-46, FR-47, FR-48, FR-52
+// @trace FR-46, FR-47, FR-48, FR-50, FR-52
 test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 sources', () => {
   async function rssMode(page: Page, mode: string): Promise<void> {
     const r = await page.request.post(`${STUB}/__control/rss`, { data: { mode } });
@@ -126,15 +139,17 @@ test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 
     expect(all.filter((r) => String(r.path).startsWith('/api/v2/doc'))).toHaveLength(0);
   }
 
-  test('the acceptance run searches 20 queries as 20 bare Google News RSS requests and keeps 30 sources', async ({ page }) => {
+  test('the acceptance run searches its 6 queries as 6 bare Google News RSS requests and keeps 25 sources', async ({ page }) => {
     test.setTimeout(90_000);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    expect(run.counts.searches).toBe(20);
-    expect(run.counts.articlesRetrieved).toBe(100);
-    expect(run.counts.articlesConsidered).toBe(30);
+    expect(run.counts.searches).toBe(6);
+    expect(run.counts.articlesRetrieved).toBe(30);
+    expect(run.counts.articlesConsidered).toBe(25);
 
     const plan0 = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
+    const planQueries: any[] = plan0.pipelines.flatMap((p: any) => p.queries);
+    expect(planQueries.map((q) => q.id)).toEqual(['Q01', 'Q02', 'Q03', 'Q04', 'Q05', 'Q06']);
     const rss = await recorded(page, 'rss');
     expect(rss, 'one request per planned query (counts.searches)').toHaveLength(run.counts.searches);
     for (const r of rss) {
@@ -148,8 +163,8 @@ test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 
     expect(
       rss.map((r) => r.q).sort(),
       'every planned query once, cleaned, plus the window',
-    ).toEqual(plan0.queries.map((q: any) => `${sentText(q.text)} when:90d`).sort());
-    // no spacing: all 20 requests arrive within 1.5 s
+    ).toEqual(planQueries.map((q: any) => `${sentText(q.text)} when:90d`).sort());
+    // no spacing: all 6 requests arrive within 1.5 s
     const arrivals = rss.map((r) => r.at);
     expect(Math.max(...arrivals) - Math.min(...arrivals)).toBeLessThan(1500);
     await expectNoFormerProviderRequest(page);
@@ -157,8 +172,8 @@ test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 
     const res = await page.request.get(`/api/runs/${id}/sources`);
     expect(res.status()).toBe(200);
     const items = (await res.json()).items;
-    expect(items).toHaveLength(30);
-    expect(items.map((s: any) => s.id)).toEqual(Array.from({ length: 30 }, (_, n) => `S${String(n + 1).padStart(3, '0')}`));
+    expect(items, 'the shared article + 6 x 4 own articles, all kept').toHaveLength(25);
+    expect(items.map((s: any) => s.id)).toEqual(Array.from({ length: 25 }, (_, n) => `S${String(n + 1).padStart(3, '0')}`));
     for (const s of items) {
       expect(s.url).toMatch(/^http:\/\/stub:4010\/articles\//);
       expect(s.publisherUrl).toBe('https://www.reuters.com');
@@ -169,20 +184,41 @@ test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 
       expect(s.retrievedAt).toBeTruthy();
       expect(s.metadataFetched).toBe(true);
     }
-    expect(new Set(items.map((s: any) => s.url)).size).toBe(30);
-    // the first candidate is the article every query's own answer holds: it lists all 20 plan ids (FR-52: a source belongs to
-    // the queries whose request returned it)
+    expect(new Set(items.map((s: any) => s.url)).size).toBe(25);
+    // the first candidate is the article every query's own answer holds: it lists all 6 plan ids and both pipelines (FR-52 / FR-50:
+    // a source belongs to the queries whose request returned it and to the pipelines owning them)
     expect(items[0].url).toBe('http://stub:4010/articles/shared');
-    expect(items[0].queryIds).toEqual(plan0.queries.map((q: any) => q.id));
-    // topic round robin: 6 topics, all with at least 5 candidates -> exactly 5 each
+    expect(items[0].queryIds).toEqual(['Q01', 'Q02', 'Q03', 'Q04', 'Q05', 'Q06']);
+    expect(items[0].pipelineIds).toEqual(['W01', 'W02']);
+    expect(items[0].topic).toBe('biology-new-pandemic');
+    // S002-S013 were found by W01's queries only, S014-S025 by W02's only
+    for (const s of items.slice(1, 13)) {
+      expect(s.pipelineIds, `${s.id} pipelineIds`).toEqual(['W01']);
+      expect(s.topic).toBe('biology-new-pandemic');
+      expect(s.queryIds).toHaveLength(1);
+      expect(['Q01', 'Q02', 'Q03']).toContain(s.queryIds[0]);
+    }
+    for (const s of items.slice(13)) {
+      expect(s.pipelineIds, `${s.id} pipelineIds`).toEqual(['W02']);
+      expect(s.topic).toBe('robotics-humanoid-boom');
+      expect(s.queryIds).toHaveLength(1);
+      expect(['Q04', 'Q05', 'Q06']).toContain(s.queryIds[0]);
+    }
+    // the topic of a source is the topicKey of its first pipeline: two topics, 13 + 12
     const perTopic = new Map<string, number>();
     for (const s of items) perTopic.set(s.topic, (perTopic.get(s.topic) ?? 0) + 1);
-    expect([...perTopic.keys()].sort()).toEqual(['biology', 'biology-new-pandemic', 'major', 'robotics', 'robotics-humanoid-boom', 'unexpected']);
-    for (const n of perTopic.values()) expect(n).toBe(5);
+    expect([...perTopic.keys()].sort()).toEqual(['biology-new-pandemic', 'robotics-humanoid-boom']);
+    expect(perTopic.get('biology-new-pandemic')).toBe(13);
+    expect(perTopic.get('robotics-humanoid-boom')).toBe(12);
 
     const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
-    expect(plan.queries).toHaveLength(20);
-    for (const q of plan.queries) expect(q.status).toBe('OK');
+    expect(plan.queries, 'the statuses live in the pipelines').toEqual([]);
+    const queries: any[] = plan.pipelines.flatMap((p: any) => p.queries);
+    expect(queries).toHaveLength(6);
+    for (const q of queries) {
+      expect(q.status).toBe('OK');
+      expect(q.articlesReturned).toBe(5);
+    }
   });
 
   test('Google down: there is no fallback, every query is FAILED and the run still completes with the NO_EVIDENCE note', async ({ page }) => {
@@ -190,14 +226,15 @@ test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 
     await rssMode(page, 'down');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(await recorded(page, 'rss'), 'one request per query, a 503 is not retried').toHaveLength(20);
+    expect(await recorded(page, 'rss'), 'one request per query, a 503 is not retried').toHaveLength(6);
     await expectNoFormerProviderRequest(page);
-    expect(run.counts.searches).toBe(20);
+    expect(run.counts.searches).toBe(6);
     expect(run.counts.articlesRetrieved).toBe(0);
     expect(run.counts.articlesConsidered).toBe(0);
     const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
-    expect(plan.queries).toHaveLength(20);
-    for (const q of plan.queries) expect(q.status).toBe('FAILED');
+    const queries: any[] = plan.pipelines.flatMap((p: any) => p.queries);
+    expect(queries).toHaveLength(6);
+    for (const q of queries) expect(q.status).toBe('FAILED');
     expect(run.failure ?? null).toBeNull();
     expect(run.evidenceNote.kind).toBe('NO_EVIDENCE');
     expect((await (await page.request.get(`/api/runs/${id}/sources`)).json()).items).toEqual([]);
@@ -208,10 +245,12 @@ test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 
     await rssMode(page, 'empty');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(await recorded(page, 'rss')).toHaveLength(20);
+    expect(await recorded(page, 'rss')).toHaveLength(6);
     await expectNoFormerProviderRequest(page);
     const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
-    for (const q of plan.queries) expect(q.status).toBe('EMPTY');
+    const queries: any[] = plan.pipelines.flatMap((p: any) => p.queries);
+    expect(queries).toHaveLength(6);
+    for (const q of queries) expect(q.status).toBe('EMPTY');
     expect(run.counts.articlesRetrieved).toBe(0);
     expect(run.evidenceNote.kind).toBe('NO_EVIDENCE');
     expect((await (await page.request.get(`/api/runs/${id}/sources`)).json()).items).toEqual([]);
@@ -222,14 +261,15 @@ test.describe('FR-52 / FR-46 Google News RSS, one request per query, at most 30 
     await rssMode(page, 'malformed');
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 60_000);
-    expect(await recorded(page, 'rss')).toHaveLength(20);
+    expect(await recorded(page, 'rss')).toHaveLength(6);
     await expectNoFormerProviderRequest(page);
-    expect(run.counts.searches).toBe(20);
+    expect(run.counts.searches).toBe(6);
     expect(run.counts.articlesRetrieved).toBe(0);
     expect(run.counts.articlesConsidered).toBe(0);
     const plan = (await (await page.request.get(`/api/runs/${id}/research`)).json()).searchPlan;
-    expect(plan.queries).toHaveLength(20);
-    for (const q of plan.queries) {
+    const queries: any[] = plan.pipelines.flatMap((p: any) => p.queries);
+    expect(queries).toHaveLength(6);
+    for (const q of queries) {
       expect(q.status).toBe('FAILED');
       expect(q.articlesReturned).toBe(0);
     }
@@ -284,7 +324,7 @@ test.describe('FR-49 The former news provider is gone (E2E stub)', () => {
     await awaitStatus(page, id, 'COMPLETED', 40_000);
     const all = await recorded(page, 'all');
     expect(all.length).toBeGreaterThan(20);
-    expect(all.filter((r) => r.path === '/rss/search')).toHaveLength(20);
+    expect(all.filter((r) => r.path === '/rss/search')).toHaveLength(6);
     for (const r of all) {
       expect(String(r.path).startsWith('/__control/')).toBe(false);
       expect(typeof r.method).toBe('string');

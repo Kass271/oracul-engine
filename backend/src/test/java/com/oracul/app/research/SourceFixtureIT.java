@@ -11,12 +11,14 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
-/** Row 9: fixture F240 (budget 18) end to end - filtering, de-duplication and the source fields (one request per query, FR-52). */
-// @trace FR-13, FR-44, FR-46, FR-52
+/**
+ * Row 9: fixture F240 (F240_BODY: 9 wildcards x 2 queries = 18) end to end - filtering, de-duplication and the source fields
+ * (one request per query, FR-52; topic = topicKey of the query's pipeline, FR-50).
+ */
+// @trace FR-13, FR-44, FR-46, FR-50, FR-52
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
-    "oracul.research.query-budget=18",
     "oracul.events.max-sources=1000",
 })
 class SourceFixtureIT extends AbstractEventIT {
@@ -26,7 +28,7 @@ class SourceFixtureIT extends AbstractEventIT {
     void f240KeepsThirtySourcesSpreadOverTheTopicsAndCountsEveryEntry() throws Exception {
         newsF240();
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, F240_BODY).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("run: " + run).isEqualTo("COMPLETED");
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
@@ -36,12 +38,14 @@ class SourceFixtureIT extends AbstractEventIT {
         assertThat(news.requests).as("18 queries go out as 18 requests").hasSize(18);
         assertThat(news.requests.stream().map(r -> r.elements().size()).distinct().toList()).as("one text per request").containsExactly(1);
 
-        Map<String, Object> plan = (Map<String, Object>) researchBody(sid, id).get("searchPlan");
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) plan.get("queries");
-        Map<String, Map<String, Object>> intents = new java.util.HashMap<>();
-        for (Map<String, Object> in : (List<Map<String, Object>>) plan.get("intents")) intents.put((String) in.get("id"), in);
+        Map<String, Object> research = researchBody(sid, id);
+        List<Map<String, Object>> queries = PlanJson.queries(research);
         assertThat(queries).hasSize(18);
+        assertThat(PlanJson.pipelines(research)).as("nine pipelines of two queries").hasSize(9);
         List<String> topicOfQuery = new ArrayList<>();
+        for (Map<String, Object> p : PlanJson.pipelines(research)) {
+            for (int k = 0; k < PlanJson.queriesOf(p).size(); k++) topicOfQuery.add(F240Support.topicOf(p));
+        }
         int returned = 0;
         for (int i = 0; i < queries.size(); i++) {
             Map<String, Object> q = queries.get(i);
@@ -51,7 +55,6 @@ class SourceFixtureIT extends AbstractEventIT {
             int expected = (i + 1) <= 6 ? 14 : 13;
             assertThat(n).as("articlesReturned of query " + (i + 1)).isEqualTo(expected);
             returned += n;
-            topicOfQuery.add(F240Support.topicOf(intents.get((String) q.get("intentId"))));
         }
         assertThat(returned).isEqualTo(240);
 
@@ -75,6 +78,7 @@ class SourceFixtureIT extends AbstractEventIT {
             assertThat(url).doesNotContain("utm_").doesNotContain("#");
             assertThat(urls.add(url)).as("unique url " + url).isTrue();
             assertThat(s.get("topic")).isEqualTo(want.topic());
+            assertThat((List<?>) s.get("pipelineIds")).as("pipelineIds of " + s.get("id")).isNotEmpty();
             assertThat(s.get("publisher")).isEqualTo("Stub Site");
             assertThat((String) s.get("title")).isNotBlank().contains("Article r");
             assertThat(OffsetDateTime.parse((String) s.get("publishedAt")).toInstant())

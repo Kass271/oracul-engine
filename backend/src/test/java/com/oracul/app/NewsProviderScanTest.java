@@ -22,7 +22,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * {@code relative/path:line} that holds the search word in any letter case; plus the removed-property check over
  * {@code backend/src/main/**}. This file is excluded from the scan by its own path (it holds the search word).
  */
-// @trace FR-49, FR-52
+// @trace FR-49, FR-51, FR-52
 class NewsProviderScanTest {
 
     /** The search word, matched case-insensitively. */
@@ -115,13 +115,15 @@ class NewsProviderScanTest {
         assertThat(hits).as("every file:line that matches (FR-49 scan scope, case-insensitive)").isEmpty();
     }
 
-    // ---- range (3): the removed properties of slice 01 are not read by production code ------------------------------
+    // ---- range (3): the removed properties (the seven of slice 01 and oracul.research.query-budget, FR-51) are not read by production code
 
     static Stream<String> removedKeys() {
         return Stream.of(
             "oracul.news.gdelt.base-url", "oracul.news.request-spacing", "oracul.news.query-timeout",
             "oracul.news.rate-limit-wait", "oracul.news.max-requests", "oracul.news.max-records-per-query",
-            "oracul.news.provider");
+            "oracul.news.provider",
+            // slice 04 (FR-51 change line): the phase-01 query budget is no longer read - one pipeline per wildcard decides the count
+            "oracul.research.query-budget");
     }
 
     private static String envName(String key) {

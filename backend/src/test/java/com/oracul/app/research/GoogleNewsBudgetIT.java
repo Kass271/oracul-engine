@@ -18,6 +18,7 @@ import org.springframework.test.context.TestPropertySource;
     "oracul.news.google.concurrency=1",
     "oracul.news.google.timeout=PT10S",
     "oracul.search.search-window=PT2S",
+    "oracul.search.query-generation-window=PT2S",
 })
 class GoogleNewsBudgetIT extends AbstractNewsSearchIT {
 

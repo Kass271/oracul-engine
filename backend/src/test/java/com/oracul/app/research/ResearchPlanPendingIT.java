@@ -8,8 +8,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
-/** Row 7: the plan is stored before searching, observable while the stage stays RESEARCH_STRATEGY. */
-// @trace FR-12
+/** FR-50 step 5: the pipeline plan is committed before any Google request, observable while the stage stays RESEARCH_STRATEGY. */
+// @trace FR-12, FR-50
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT1H",
     "oracul.run.min-stage-duration=PT1H",
@@ -32,11 +32,19 @@ class ResearchPlanPendingIT extends AbstractRunIT {
         assertThat(run.get("stage")).isEqualTo("RESEARCH_STRATEGY");
         assertThat(run.get("status")).isEqualTo("RUNNING");
         Map<String, Object> plan = (Map<String, Object>) research.get("searchPlan");
-        List<Map<String, Object>> queries = (List<Map<String, Object>>) plan.get("queries");
-        assertThat(queries).hasSize(20);
-        for (Map<String, Object> q : queries) {
-            assertThat(q.get("status")).isEqualTo("PENDING");
-            assertThat(q.get("articlesReturned")).isEqualTo(0);
+        assertThat(plan.get("queries")).as("the queries live in the pipelines").isEqualTo(List.of());
+        assertThat(plan.get("intents")).isEqualTo(List.of());
+        assertThat(plan.get("buckets")).isEqualTo(List.of());
+        assertThat(plan.get("queryBudget")).isEqualTo(6);
+        List<Map<String, Object>> pipelines = PlanJson.pipelines(research);
+        assertThat(pipelines).as("body A: two pipelines").hasSize(2);
+        for (Map<String, Object> p : pipelines) {
+            assertThat(PlanJson.queriesOf(p)).as("3 queries per pipeline").hasSize(3);
+            for (Map<String, Object> q : PlanJson.queriesOf(p)) {
+                assertThat(q.get("status")).isEqualTo("PENDING");
+                assertThat(q.get("articlesReturned")).isEqualTo(0);
+            }
+            assertThat(p).doesNotContainKey("candidatesConsidered").doesNotContainKey("sourceIds");
         }
         assertThat(json(getSources(sid, id))).isEqualTo(json("{\"items\":[]}"));
         assertThat(news.requests).as("searching has not started").isEmpty();

@@ -3,7 +3,6 @@ package com.oracul.app.research;
 import com.oracul.app.TestcontainersConfiguration;
 import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.SearchPlan;
-import com.oracul.app.api.model.SearchQuery;
 import com.oracul.app.api.model.SearchQueryStatus;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,16 +61,14 @@ abstract class AbstractNewsSearchIT {
         news.reset();
     }
 
-    /** A plan with one planned query per text: Q01...Qn, all in the first intent of the template plan. */
+    /**
+     * A plan with one planned query per text: Q01...Qn, all in the first intent of the phase-01 plan shape
+     * ({@code PlanSupport.legacyPlan}, no pipelines - {@code SourceRetrieval.search} keeps reading it), statuses EMPTY.
+     */
     protected static SearchPlan planOf(List<String> texts) {
-        SearchPlan template = PlanSupport.plan(PlanSupport.cfgA(), 20);
-        SearchQuery first = template.getQueries().get(0);
-        List<SearchQuery> queries = new ArrayList<>();
-        for (int i = 0; i < texts.size(); i++) {
-            queries.add(new SearchQuery(String.format("Q%02d", i + 1), first.getIntentId(), first.getBucket(), texts.get(i),
-                SearchQueryStatus.EMPTY, 0));
-        }
-        return new SearchPlan(template.getQueryBudget(), template.getExpansionMode(), template.getBuckets(), template.getIntents(), queries);
+        SearchPlan plan = PlanSupport.legacyPlan(texts);
+        plan.getQueries().forEach(q -> q.setStatus(SearchQueryStatus.EMPTY));
+        return plan;
     }
 
     /** n plan queries whose texts are two-word phrases "alpha<i> beta<i>" (so every element is a quoted phrase). */

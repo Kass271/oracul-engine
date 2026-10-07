@@ -25,7 +25,7 @@ link reach internal addresses or flood memory.
 ## Data
 | Entity | Field | Type | Rules |
 |---|---|---|---|
-| `source` (Flyway `V11`) | `content_status` | VARCHAR(32) NULL | `ArticleContentStatus` (below); NULL for stored older runs |
+| `source` (Flyway, migrations of slices 04 and 08) | `content_status` | VARCHAR(32) NULL | `ArticleContentStatus` (below); NULL for stored older runs |
 | `source` | `excerpts` | JSONB NULL | `[{"pipelineId":"W01","fragments":["…"]}]` — per pipeline that lists the source and got ≥ 1 fragment, in pipeline order |
 | `source` | `publisher_host` | TEXT NULL | host of `url` when it is the publisher URL (lower-case, leading `www.` removed); NULL when `url` is still the Google link |
 | `source` | `pipeline_ids` | JSONB NULL | pipelines that found the source (FR-50 attribution), ascending |

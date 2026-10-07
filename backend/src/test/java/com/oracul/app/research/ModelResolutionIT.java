@@ -98,14 +98,14 @@ class ModelResolutionIT extends AbstractPlanUsageIT {
         assertThat(models.headers().get("authorization")).startsWith("Bearer at-STUBSECRET-");
         assertThat(models.headers().get("authorization")).isEqualTo(responses.requests.get(0).headers().get("authorization"));
         assertThat(models.arrivedNanos()).as("GET /models comes first").isLessThan(responses.exchanges.get(0).arrivedNanos);
-        assertThat(responses.exchanges.get(0).purpose).isEqualTo("QUERY_EXPANSION");
+        assertThat(responses.exchanges.get(0).purpose).isEqualTo(QUERY_GENERATION);
     }
 
     @Test
     void theModelRequestIsNotCountedAsAResponsesRequest() throws Exception {
         Ran r = runV4(A);
         assertStoryCompleted(r.run());
-        assertThat(purposes()).containsExactly(EXPANSION, NORMALIZATION, CLASSIFICATION, GEN, "SCENARIO_CRITIC", STORY);
+        assertThat(purposes()).containsExactly(QUERY_GENERATION, QUERY_GENERATION, NORMALIZATION, CLASSIFICATION, GEN, "SCENARIO_CRITIC", STORY);
     }
 
     @Test
@@ -146,7 +146,7 @@ class ModelResolutionIT extends AbstractPlanUsageIT {
 
     @Test
     void aRunWithoutSourcesStillStoresItsResolvedModel() throws Exception {
-        Ran r = run(A); // default empty news feed: the run completes after the query expansion
+        Ran r = run(A); // default empty news feed: the run completes after the query generation
         assertThat(r.run().get("status")).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("select model from generation_run where id = cast(? as uuid)", String.class, r.id()))
             .isEqualTo(P);
