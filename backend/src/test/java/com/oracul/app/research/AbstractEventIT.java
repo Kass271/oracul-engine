@@ -79,14 +79,22 @@ public abstract class AbstractEventIT extends AbstractRunIT {
     public static final String QUERY_GENERATION = "QUERY_GENERATION";
 
     /**
-     * FR-50 change line: the F240 run tests start 9 catalogue wildcards (the first nine ids of {@code PlanSupport.TEN_WILDCARDS},
-     * intensity 5 each, realism 8 / darkness 9 / optimism 2 / horizon 5y as body A), so 9 x 2 = 18 queries keep F240's 240 items
-     * and 205 usable candidates; the topic of query r is the topicKey of pipeline W(ceil(r/2)).
+     * FR-53 harness (n = 1...10): the first n ids of {@code PlanSupport.TEN_WILDCARDS} at intensity 5 each, realism 8 / darkness 9 /
+     * optimism 2 / horizon 5y, story on, illustration off. Up to 8 wildcards give 3 queries each (pipeline j: Q(3j-2)...Q(3j)), 9 or more
+     * give 2 each (Q(2j-1), Q(2j)); the stub query texts are "W&lt;nn&gt; stub query &lt;i&gt;".
      */
-    public static final String F240_BODY = "{\"realism\":8,\"darkness\":9,\"optimism\":2,\"horizon\":\"5y\",\"wildcards\":["
-        + PlanSupport.TEN_WILDCARDS.subList(0, 9).stream().map(id -> "{\"wildcardId\":\"" + id + "\",\"intensity\":5}")
-            .collect(java.util.stream.Collectors.joining(","))
-        + "],\"customWildcards\":[],\"output\":{\"story\":true,\"illustration\":false}}";
+    public static String wildcardsBody(int n) {
+        return "{\"realism\":8,\"darkness\":9,\"optimism\":2,\"horizon\":\"5y\",\"wildcards\":["
+            + PlanSupport.TEN_WILDCARDS.subList(0, n).stream().map(id -> "{\"wildcardId\":\"" + id + "\",\"intensity\":5}")
+                .collect(java.util.stream.Collectors.joining(","))
+            + "],\"customWildcards\":[],\"output\":{\"story\":true,\"illustration\":false}}";
+    }
+
+    /** F240 run body: nine catalogue wildcards, 9 x 2 = 18 queries, 240 raw items, 205 usable candidates (text as before FR-53). */
+    public static final String F240_BODY = wildcardsBody(9);
+
+    /** F240 with all ten wildcards: 20 queries, 266 raw items, 227 usable candidates, 30 kept sources (FR-53 cap). */
+    public static final String F240_BODY_TEN = wildcardsBody(10);
 
     /** Scripted normalisation answer N-V4. */
     public static final String N_V4 = "{\"events\":[{\"sourceIds\":[\"S002\",\"S001\",\"S003\"],\"date\":\"2026-10-01\","
@@ -160,6 +168,28 @@ public abstract class AbstractEventIT extends AbstractRunIT {
         }
         StubNews.Reply first = StubNews.rss(items.toArray(String[]::new));
         news.responder = req -> req.number() == 1 ? first : StubNews.rss();
+    }
+
+    /** The RSS item of an {@link Art} (same shape as {@link #newsArticles}). */
+    protected String itemOf(Art a) {
+        return StubNews.rssItem(a.title(), news.baseUrl() + "/rss/articles/" + a.name(), StubNews.pubDate(testNow.minus(a.age())),
+            a.domain(), "https://" + a.domain());
+    }
+
+    /**
+     * FR-53 fixture shape: the first query of pipeline j (W01 stub query 1, ...) answers the next {@code sizes[j-1]} articles of the
+     * list in order, every other query answers the empty feed. A body with at least {@code sizes.length} wildcards is needed
+     * ({@link #wildcardsBody(int)}); keep every size at most 4 so that nothing is cut by the per-pipeline selection.
+     */
+    protected void newsArticlesPerPipeline(List<Art> arts, int... sizes) {
+        List<List<String>> perPipeline = new ArrayList<>();
+        int at = 0;
+        for (int size : sizes) {
+            List<String> items = new ArrayList<>();
+            for (int i = 0; i < size; i++) items.add(itemOf(arts.get(at++)));
+            perPipeline.add(items);
+        }
+        news.responder = StubNews.firstQueryItems(perPipeline);
     }
 
     private static final String F240_PUBLISHER_URL = "https://www.reuters.com";

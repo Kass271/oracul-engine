@@ -137,6 +137,27 @@ public final class StubNews {
         return maxOpen.get();
     }
 
+    private static final java.util.regex.Pattern STUB_QUERY = java.util.regex.Pattern.compile("^W(\\d+) stub query (\\d+)$");
+
+    /** {pipeline number, query number within the pipeline} of the stub query text "W&lt;nn&gt; stub query &lt;i&gt;" the request carries, else null. */
+    public static int[] stubQuery(Request req) {
+        if (req.elements().size() != 1) return null;
+        java.util.regex.Matcher m = STUB_QUERY.matcher(req.elements().get(0));
+        return m.matches() ? new int[] {Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2))} : null;
+    }
+
+    /**
+     * FR-53 fixture shape: the FIRST query of pipeline j ("W&lt;jj&gt; stub query 1") answers {@code itemsPerPipeline.get(j-1)} (RSS item
+     * XML), every other query answers an empty feed. So every pipeline holds exactly the items given for it.
+     */
+    public static Function<Request, Reply> firstQueryItems(List<List<String>> itemsPerPipeline) {
+        return req -> {
+            int[] q = stubQuery(req);
+            if (q == null || q[1] != 1 || q[0] > itemsPerPipeline.size()) return rss();
+            return rss(itemsPerPipeline.get(q[0] - 1).toArray(String[]::new));
+        };
+    }
+
     /** A Google answer of HTTP 429 (text/plain "Too Many Requests"). */
     public static Reply tooMany() {
         return new Reply(429, "text/plain", "Too Many Requests", 0);
@@ -197,6 +218,13 @@ public final class StubNews {
                 .append(source == null ? "" : xml(source)).append("</source>");
         }
         return sb.append("</item>").toString();
+    }
+
+    /** Like {@link #rssItem(String, String, String, String, String)} plus a {@code <description>} (HTML text, escaped as XML text; null: no element). */
+    public static String rssItem(String title, String link, String pubDate, String source, String sourceUrl, String description) {
+        String base = rssItem(title, link, pubDate, source, sourceUrl);
+        if (description == null) return base;
+        return base.substring(0, base.length() - "</item>".length()) + "<description>" + xml(description) + "</description></item>";
     }
 
     /** RFC 1123 pubDate of an instant, e.g. "Sat, 03 Oct 2026 10:00:00 GMT". */

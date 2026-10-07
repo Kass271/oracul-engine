@@ -13,10 +13,10 @@ import org.springframework.test.context.TestPropertySource;
 
 /**
  * phase-02 news-search.md FR-48 + FR-46 through whole runs (phase-03 FR-49: Google is the only provider): Google News RSS
- * answers every query of fixture F240 (F240_BODY: 9 wildcards x 2 queries; items with " - Reuters" title suffixes), the run keeps 30 of the 205 usable
- * candidates, resolves their links through the article fetch and exposes publisherUrl; failing and empty feeds.
+ * answers every query of fixture F240 (F240_BODY: 9 wildcards x 2 queries; items with " - Reuters" title suffixes), the run keeps 28 of the 205 usable
+ * candidates (FR-53: shared + 3 per pipeline), resolves their links through the article fetch and exposes publisherUrl; failing and empty feeds.
  */
-// @trace FR-46, FR-48, FR-49, FR-50, FR-52
+// @trace FR-46, FR-48, FR-49, FR-50, FR-52, FR-53
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
@@ -28,7 +28,7 @@ class GoogleNewsRunIT extends AbstractEventIT {
 
     @SuppressWarnings("unchecked")
     @Test
-    void f240ThroughGoogleKeepsThirtyResolvedSourcesWithPublisherUrl() throws Exception {
+    void f240ThroughGoogleKeepsTwentyEightResolvedSourcesWithPublisherUrl() throws Exception {
         newsF240();
         String sid = connectedSid();
         String id = (String) startOk(sid, F240_BODY).get("id");
@@ -37,53 +37,59 @@ class GoogleNewsRunIT extends AbstractEventIT {
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("searches")).isEqualTo(18);
         assertThat(counts.get("articlesRetrieved")).as("every item of the answered queries").isEqualTo(240);
-        assertThat(counts.get("articlesConsidered")).isEqualTo(30);
+        assertThat(counts.get("articlesConsidered")).as("FR-53: distinct usable candidates of all pipelines").isEqualTo(205);
+        assertThat(counts.get("sourcesKept")).as("FR-53: shared + 3 x 9 own, the 4th round is not cut (28 < 30)").isEqualTo(28);
         assertThat(news.requests).as("18 queries go out as 18 requests").hasSize(18);
         assertThat(news.requests.stream().map(r -> r.elements().size()).distinct().toList()).as("one text per request").containsExactly(1);
         assertThat(news.paths).as("no request to a former provider path").noneMatch(p -> p.startsWith("/api/v2/doc"));
 
         Map<String, Object> research = researchBody(sid, id);
-        assertThat(PlanJson.pipelines(research)).as("F240_BODY: nine pipelines of two queries").hasSize(9)
+        List<Map<String, Object>> pipelines = PlanJson.pipelines(research);
+        assertThat(pipelines).as("F240_BODY: nine pipelines of two queries").hasSize(9)
             .allSatisfy(p -> assertThat(PlanJson.queriesOf(p)).hasSize(2));
-        List<String> topicOfQuery = new ArrayList<>();
         int returned = 0;
-        for (Map<String, Object> p : PlanJson.pipelines(research)) {
+        for (Map<String, Object> p : pipelines) {
             for (Map<String, Object> q : PlanJson.queriesOf(p)) {
                 assertThat(q.get("status")).as("every query was answered").isEqualTo("OK");
                 returned += ((Number) q.get("articlesReturned")).intValue();
-                topicOfQuery.add(F240Support.topicOf(p));
             }
         }
         assertThat(returned).isEqualTo(240);
 
-        List<CapOracle.Cand> usable = F240Support.usableCandidates(topicOfQuery);
-        List<Integer> keptIdx = CapOracle.select(usable);
+        List<String> kept = F240Support.keptNames(9, false);
+        assertThat(kept).hasSize(28);
         List<Map<String, Object>> sources = sourceItems(sid, id);
-        assertThat(sources).hasSize(30);
+        assertThat(sources).hasSize(28);
         String base = news.baseUrl();
         for (int i = 0; i < sources.size(); i++) {
             Map<String, Object> s = sources.get(i);
-            CapOracle.Cand want = usable.get(keptIdx.get(i));
-            assertThat(s.get("id")).isEqualTo(String.format("S%03d", i + 1));
-            assertThat(s.get("url")).as("the Google link resolved to the article page").isEqualTo(base + "/articles/" + want.name());
+            String want = kept.get(i);
+            assertThat(s.get("id")).as("Evidence order numbering").isEqualTo(String.format("S%03d", i + 1));
+            assertThat(s.get("url")).as("the Google link resolved to the article page").isEqualTo(base + "/articles/" + want);
             assertThat(s.get("metadataFetched")).isEqualTo(true);
             assertThat(s.get("publisher")).as("og:site_name of the page").isEqualTo("Stub Site");
             assertThat(s.get("publisherUrl")).isEqualTo(REUTERS);
             assertThat(s.get("sourceType")).isEqualTo("NEWS");
             assertThat(s.get("sourceQuality")).isEqualTo(0.85);
-            assertThat(s.get("topic")).isEqualTo(want.topic());
-            assertThat((List<?>) s.get("pipelineIds")).as("pipelineIds of " + s.get("id")).isNotEmpty();
             assertThat((String) s.get("title")).as("title without the source suffix").contains("Article r").doesNotContain(" - Reuters");
-            assertThat(s.get("summary")).isEqualTo("Summary of " + want.name());
-            assertThat((List<?>) s.get("queryIds")).isNotEmpty();
+            assertThat(s.get("summary")).isEqualTo("Summary of " + want);
+            if ("shared".equals(want)) {
+                assertThat(s.get("topic")).as("topic of the first pipeline").isEqualTo(PlanSupport.TEN_WILDCARDS.get(0));
+            } else {
+                int r = Integer.parseInt(want.substring(1, want.indexOf('-')));
+                int k = (r + 1) / 2;
+                assertThat(s.get("queryIds")).as("exactly its own query").isEqualTo(List.of(String.format("Q%02d", r)));
+                assertThat(s.get("pipelineIds")).isEqualTo(List.of(String.format("W%02d", k)));
+                assertThat(s.get("topic")).isEqualTo(PlanSupport.TEN_WILDCARDS.get(k - 1));
+            }
         }
-        Map<String, Object> shared = sources.stream().filter(s -> (base + "/articles/shared").equals(s.get("url"))).findFirst().orElseThrow();
+        Map<String, Object> shared = sources.get(0);
+        assertThat(shared.get("url")).isEqualTo(base + "/articles/shared");
         assertThat((List<?>) shared.get("queryIds")).as("the shared article keeps all 18 queries").hasSize(18);
         assertThat((List<?>) shared.get("pipelineIds")).as("and was found by all nine pipelines").hasSize(9);
         assertThat(news.articleRequests.stream().filter(n -> n.equals("shared")).count()).as("fetched once").isEqualTo(1);
-        assertThat(news.articleRequests).as("only kept candidates are fetched").hasSize(30);
-        // the same Google link is not kept twice: every url unique
-        assertThat(sources.stream().map(s -> s.get("url")).distinct().count()).isEqualTo(30);
+        assertThat(news.articleRequests).as("only kept sources are fetched").hasSize(28);
+        assertThat(sources.stream().map(s -> s.get("url")).distinct().count()).isEqualTo(28);
     }
 
     @SuppressWarnings("unchecked")
@@ -99,7 +105,8 @@ class GoogleNewsRunIT extends AbstractEventIT {
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("searches")).isEqualTo(18);
         assertThat(counts.get("articlesRetrieved")).as("240 minus the 14 items of the failed query (r2 has 14)").isEqualTo(226);
-        assertThat(counts.get("articlesConsidered")).isEqualTo(30);
+        assertThat(counts.get("articlesConsidered")).as("205 minus the 12 own candidates of Q02").isEqualTo(193);
+        assertThat(counts.get("sourcesKept")).isEqualTo(28);
         List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
         assertThat(queries).hasSize(18);
         for (int i = 0; i < queries.size(); i++) {
@@ -109,7 +116,9 @@ class GoogleNewsRunIT extends AbstractEventIT {
             if (failedQuery) assertThat(q.get("articlesReturned")).isEqualTo(0);
         }
         List<Map<String, Object>> sources = sourceItems(sid, id);
-        assertThat(sources).hasSize(30);
+        assertThat(sources).hasSize(28);
+        assertThat(sources.stream().map(s -> ((String) s.get("url")).substring(((String) s.get("url")).lastIndexOf('/') + 1)).toList())
+            .as("Q02 failed: W01 selects shared, r1-a3, r1-a4, r1-a5").containsExactlyElementsOf(F240Support.keptNames(9, true));
         assertThat(sources).allSatisfy(s -> assertThat(s.get("publisherUrl")).as("every source comes from a Google item").isEqualTo(REUTERS));
         assertThat(sources.stream().flatMap(s -> ((List<String>) s.get("queryIds")).stream()).filter(q -> q.equals("Q02")))
             .as("no source belongs to the failed query").isEmpty();

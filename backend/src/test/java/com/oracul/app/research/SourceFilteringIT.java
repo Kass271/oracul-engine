@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** FR-13 filtering and URL normalization edge cases (Google News items: no language, age by pubDate), end to end through listRunSources (UrlNormalizer, SourceFilter). */
-// @trace FR-13
+// @trace FR-13, FR-53
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=11",
@@ -34,36 +34,43 @@ class SourceFilteringIT extends AbstractRunIT {
     void filtersDropTheRightArticlesAndNormalizeTheKeptUrls() throws Exception {
         String base = news.baseUrl();
         int port = news.port();
-        List<String> first = new ArrayList<>(List.of(
+        // FR-53: at most 4 candidates survive per pipeline, so the 16 items are spread over three pipelines (3 queries each):
+        // W01 = Q01, W02 = Q04 (their first queries), W03 = Q07 + Q08 (the duplicate comes from its second query)
+        List<String> w1 = List.of(
             art("HTTP://127.0.0.1:80/Path/A?utm_source=x&b=1#f", "Default port", seen(1)),
             art("http://LocalHost:" + port + "/articles/host-case?utm_campaign=c", "Host case", seen(1)),
             art(base + "/articles/utm-only?UTM_source=a&utm_medium=b", "Only utm", seen(1)),
             art(base + "/articles/no-lang", "No language", seen(1)),
+            art("", "Blank url", seen(1)),
+            art("ftp://127.0.0.1/file", "Not http", seen(1)));
+        List<String> w2 = List.of(
             art(base + "/articles/lower-lang", "Lower language", seen(1)),
             art(base + "/articles/bad-date", "Bad date", "garbage"),
             art(base + "/articles/no-date", "No date", null),
             art(base + "/articles/recent", "Recent", seen(80)),
+            art("javascript:alert(1)", "Script url", seen(1)),
+            art(base + "/articles/blank-title", "   ", seen(1)));
+        List<String> w3 = List.of(
             art(base + "/articles/spaces", "  Many   spaces \t here ", seen(1)),
             art(base + "/articles/dup", "Duplicate", seen(1)),
-            art("", "Blank url", seen(1)),
-            art("ftp://127.0.0.1/file", "Not http", seen(1)),
-            art("javascript:alert(1)", "Script url", seen(1)),
-            art(base + "/articles/blank-title", "   ", seen(1)),
-            art(base + "/articles/old", "Too old", seen(100))));
-        StubNews.Reply firstAnswer = StubNews.rss(first.toArray(String[]::new));
-        StubNews.Reply secondAnswer = StubNews.rss(art(base + "/articles/dup?utm_x=1", "Duplicate again", seen(1)));
-        news.responder = req -> switch (req.number()) {
-            case 1 -> firstAnswer;
-            case 2 -> secondAnswer;
-            default -> StubNews.rss();
+            art(base + "/articles/old", "Too old", seen(100)));
+        StubNews.Reply second = StubNews.rss(art(base + "/articles/dup?utm_x=1", "Duplicate again", seen(1)));
+        var firstQueries = StubNews.firstQueryItems(List.of(w1, w2, w3));
+        news.responder = req -> {
+            int[] q = StubNews.stubQuery(req);
+            return q != null && q[0] == 3 && q[1] == 2 ? second : firstQueries.apply(req);
         };
         String sid = connectedSid();
-        String id = (String) startOk(sid, B).get("id");
+        String id = (String) startOk(sid, AbstractEventIT.wildcardsBody(3)).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         Map<String, Object> counts = (Map<String, Object>) run.get("counts");
         assertThat(counts.get("articlesRetrieved")).isEqualTo(16);
         assertThat(counts.get("articlesConsidered")).isEqualTo(10);
+        assertThat(counts.get("sourcesKept")).as("every pipeline has at most 4 usable candidates: all are kept").isEqualTo(10);
+        List<Map<String, Object>> pipelines = PlanJson.pipelines(researchBody(sid, id));
+        assertThat(pipelines.stream().map(p -> p.get("candidatesConsidered")).toList())
+            .as("articlesConsidered 10 = sum of candidatesConsidered").containsExactly(4, 4, 2);
 
         Map<String, Map<String, Object>> byUrl = new HashMap<>();
         List<Map<String, Object>> sources = sourceItems(sid, id);

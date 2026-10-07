@@ -18,6 +18,7 @@ import org.springframework.test.context.TestPropertySource;
 /** Row 10 and the ArticleMetadataFetcher rules: og/meta extraction, fallbacks, failure cases; safe fetching (FR-56). */
 // @trace FR-13
 // @trace FR-56
+// @trace FR-53
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=9",
@@ -33,10 +34,13 @@ class SourceMetadataIT extends AbstractRunIT {
     }
 
     private Map<String, Map<String, Object>> runWith(List<String> articles) throws Exception {
-        StubNews.Reply answer = StubNews.rss(articles.toArray(String[]::new));
-        news.responder = req -> req.number() == 1 ? answer : StubNews.rss();
+        // FR-53: at most 4 sources per pipeline, so the articles are spread over three pipelines (the first query of each, <= 12 items)
+        assertThat(articles.size()).isLessThanOrEqualTo(12);
+        List<List<String>> perPipeline = new ArrayList<>();
+        for (int from = 0; from < articles.size(); from += 4) perPipeline.add(articles.subList(from, Math.min(from + 4, articles.size())));
+        news.responder = StubNews.firstQueryItems(perPipeline);
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, AbstractEventIT.wildcardsBody(3)).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).as("fetch failures never fail the run: " + run).isEqualTo("COMPLETED");
         Map<String, Map<String, Object>> byUrl = new HashMap<>();

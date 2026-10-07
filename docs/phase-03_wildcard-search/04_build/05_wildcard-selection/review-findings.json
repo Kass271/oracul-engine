@@ -1,0 +1,68 @@
+{
+  "slice": "05_wildcard-selection",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/WildcardSelectionIT.java",
+      "line": 1,
+      "fr": "FR-53",
+      "problem": "No test checks how SourceRetrieval.read maps a GENERAL pipeline. The spec says the GENERAL pipeline gets labelText = GENERAL_SUBJECT (\"major current world events\") and so scores the tokens {major, current, world, events} x 3. WildcardSelectorTest.generalPipelineScoresTheTokensOfTheSubject passes that labelText to the selector directly, and no run-level or seam test ranks GENERAL (body B) candidates. The other GENERAL runs (GetRunTerminalIT, SourceRetrievalIT #13) have empty feeds or at most 4 candidates, so their relevance order is never checked. If SourceRetrieval passed p.getLabel() (\"General\", token {general}) the GENERAL selection would be wrong and every test would still pass.",
+      "fix": "Add one run (body B, or a SourceReadSeamIT case with a GENERAL pipeline plan) where the GENERAL pipeline gets more than 4 candidates. Give 'world'/'events'/'major' titles positions later in the feed than plain titles, so the 4 kept only come out right when the subject tokens are scored. Assert the kept titles/order and candidatesConsidered.",
+      "status": "fixed",
+      "verification": "Round 2: WildcardSelectionIT.theGeneralPipelineScoresTheTokensOfTheSubjectNotItsLabel runs body B (one GENERAL pipeline W01) with 12 candidates. The subject-token titles sit at feed positions 7-12, and the decoy \"General overview of g2\" would be kept if the label were scored. The test asserts candidatesConsidered 12, sourcesKept 4, the exact kept titles and order, topic major and the article fetches, so it pins labelText = GENERAL_SUBJECT in SourceRetrieval.read."
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/WildcardSelectorTest.java",
+      "line": 532,
+      "fr": "FR-53",
+      "problem": "The '|selected(P)| <= 4' check in theInvariantsHoldForEveryInput is a tautology: assertThat(Math.min(4, ranked.size())).isLessThanOrEqualTo(4) never touches the production result. The invariant is only covered indirectly, through kept ⊆ union of each pipeline's top 4.",
+      "fix": "Assert on the result, e.g. for each P the number of kept urls in P's first-4 ranked candidates that P actually contributed in its rounds is <= 4, or drop the line.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/SelectorApi.java",
+      "line": 12,
+      "fr": "FR-53",
+      "problem": "WildcardSelector, NewsProvider.Article.snippet and SourceRetrieval.read now exist, but WildcardSelectorTest, GoogleNewsProviderLocalTest and SourceReadSeamIT still reach them by reflection. A signature change then shows up as an AssertionError at run time instead of a compile error, and the tests are harder to read.",
+      "fix": "Once the slice is closed, replace the reflective plumbing with direct calls (same package, package-private access is available).",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/F240Support.java",
+      "line": 60,
+      "fr": "FR-53",
+      "problem": "F240Support.group(k) builds the group from P's own selections. The spec defines the group as every kept source among P's candidates, which can include sources P did not select. This matches only because in F240 the shared link is the sole cross-pipeline candidate. Also, selected() has two identical branches (k >= 9 and the default).",
+      "fix": "Note the restriction in the Javadoc, or build the group from all of Wk's candidates. Merge the duplicate branches.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/SourceRetrieval.java",
+      "line": 280,
+      "fr": "FR-53",
+      "problem": "Dead or unused code left after the SourceCap removal: the 'legacy' map in read() is never read; itemsOf(..., status) ignores its status parameter (the spec says the caller passes List.of() for a query that is not OK, which today only holds because FAILED/EMPTY results carry no articles); qualityDomain(...) is no longer called. In WildcardSelector.select the 'round >= PER_PIPELINE' test inside the loop can never be true.",
+      "fix": "Use the status (status == OK ? items : List.of()) or drop the parameter; remove the unused map/helper and the redundant condition.",
+      "status": "open"
+    }
+  ]
+}

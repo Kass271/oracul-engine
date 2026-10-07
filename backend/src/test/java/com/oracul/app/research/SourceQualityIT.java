@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** SourceQualityTable.classify examples of research-pipeline.md, observed through source.sourceType / sourceQuality. */
-// @trace FR-13
+// @trace FR-13, FR-53
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=12",
@@ -49,10 +49,13 @@ class SourceQualityIT extends AbstractRunIT {
             articles.add(StubNews.rssItem("Title q" + i, base + "/rss/articles/q" + i, seen,
                 domain.isEmpty() ? null : domain, domain.isEmpty() ? null : "https://" + domain));
         }
-        StubNews.Reply all = StubNews.rss(articles.toArray(String[]::new));
-        news.responder = req -> req.number() == 1 ? all : StubNews.rss();
+        // FR-53: at most 4 sources per pipeline, so the 23 articles are spread over six pipelines (the first query of each)
+        List<List<String>> perPipeline = new ArrayList<>();
+        for (int from = 0; from < articles.size(); from += 4) perPipeline.add(articles.subList(from, Math.min(from + 4, articles.size())));
+        assertThat(perPipeline).hasSize(6);
+        news.responder = StubNews.firstQueryItems(perPipeline);
         String sid = connectedSid();
-        String id = (String) startOk(sid, B).get("id");
+        String id = (String) startOk(sid, AbstractEventIT.wildcardsBody(6)).get("id");
         assertThat(awaitDone(sid, id).get("status")).isEqualTo("COMPLETED");
         List<Map<String, Object>> sources = sourceItems(sid, id);
         assertThat(sources).hasSize(ROWS.length);

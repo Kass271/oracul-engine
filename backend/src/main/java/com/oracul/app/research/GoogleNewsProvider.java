@@ -117,7 +117,8 @@ public class GoogleNewsProvider implements NewsProvider {
                 String sourceUrl = source == null || !source.hasAttribute("url") ? null : source.getAttribute("url");
                 String title = cleanTitle(text(item, "title"), sourceText);
                 out.add(new NewsProvider.Article(text(item, "link"), title,
-                    parseDate(text(item, "pubDate")), sourceText == null ? null : sourceText.trim(), sourceUrl));
+                    parseDate(text(item, "pubDate")), sourceText == null ? null : sourceText.trim(), sourceUrl,
+                    snippet(text(item, "description"))));
             }
             return out.isEmpty() ? new NewsProvider.Result(SearchQueryStatus.EMPTY, List.of())
                 : new NewsProvider.Result(SearchQueryStatus.OK, out);
@@ -125,6 +126,49 @@ public class GoogleNewsProvider implements NewsProvider {
             log.warn("google news answer is not RSS");
             return NewsProvider.Result.failed();
         }
+    }
+
+    private static final java.util.regex.Pattern ENTITY = java.util.regex.Pattern
+        .compile("&(amp|lt|gt|quot|apos|nbsp|#[0-9]+|#[xX][0-9a-fA-F]+);");
+
+    /** Description text: tags removed, entities decoded, whitespace collapsed; blank gives null. */
+    static String snippet(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.replaceAll("<[^>]*>", "");
+        s = decode(s);
+        s = s.replaceAll("\\s+", " ").trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    private static String decode(String s) {
+        java.util.regex.Matcher m = ENTITY.matcher(s);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String e = m.group(1);
+            String r;
+            switch (e) {
+                case "amp" -> r = "&";
+                case "lt" -> r = "<";
+                case "gt" -> r = ">";
+                case "quot" -> r = "\"";
+                case "apos" -> r = "'";
+                case "nbsp" -> r = " ";
+                default -> {
+                    try {
+                        int cp = e.charAt(1) == 'x' || e.charAt(1) == 'X' ? Integer.parseInt(e.substring(2), 16)
+                            : Integer.parseInt(e.substring(1));
+                        r = new String(Character.toChars(cp));
+                    } catch (RuntimeException ex) {
+                        r = m.group();
+                    }
+                }
+            }
+            m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(r));
+        }
+        m.appendTail(out);
+        return out.toString();
     }
 
     static Instant parseDate(String raw) {

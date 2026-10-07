@@ -25,7 +25,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * (defaults 5 / 3 / 1), continues, and ends COMPLETED with a story. Fixture K(c, s) = c CORE items plus s counter-signal
  * candidates under the dark body.
  */
-// @trace FR-31, FR-47
+// @trace FR-31, FR-47, FR-53
 @TestPropertySource(properties = {
     "oracul.evidence.min-core.high=5",
     "oracul.evidence.min-core.medium=3",
@@ -48,8 +48,12 @@ class InsufficientEvidenceIT extends AbstractStoryIT {
             + " (needs " + needed + "). This future is less grounded.";
     }
 
+    /**
+     * FR-53: at most 4 sources per pipeline, and K(c, s) needs up to 9 sources in K order (S00i = k-i), so the run configures three
+     * wildcards (3 queries each) and K articles 1-4 come from W01, 5-8 from W02, 9 from W03 (see {@link #runK}).
+     */
     private static String bodyA(int realism) {
-        return A.replace("\"realism\":8", "\"realism\":" + realism);
+        return wildcardsBody(3).replace("\"realism\":8", "\"realism\":" + realism);
     }
 
     /** Fixture K(c, s): first /rss/search request answers c + s articles, risky for EV001..EV<c>, opportunity for the rest. */
@@ -60,7 +64,7 @@ class InsufficientEvidenceIT extends AbstractStoryIT {
             arts.add(new Art("k-" + i, "reuters.com", "K article " + i));
             news.site("k-" + i, "Publisher " + i);
         }
-        newsArticles(arts);
+        newsArticlesPerPipeline(arts, Math.min(4, arts.size()), Math.max(0, Math.min(4, arts.size() - 4)), Math.max(0, arts.size() - 8));
         always(CLASSIFICATION, req -> {
             List<String> entries = new ArrayList<>();
             for (String id : StubResponses.eventIds(req.inputText())) {

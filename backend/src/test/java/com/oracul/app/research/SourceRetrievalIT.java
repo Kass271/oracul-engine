@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.ResultActions;
  * changed by FR-52 and FR-50: one request per planned query (body A: two pipelines x 3 queries = 6, body B: one GENERAL pipeline x 3),
  * the statuses live in {@code searchPlan.pipelines[].queries[]}, a 429 retried once (after a short rate-limit-wait here).
  */
-// @trace FR-13, FR-44, FR-47, FR-49, FR-50, FR-52
+// @trace FR-13, FR-44, FR-47, FR-49, FR-50, FR-52, FR-53
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=10",
@@ -124,6 +124,11 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(counts.get("articlesRetrieved")).as("6 answered queries x 1 article").isEqualTo(6);
         assertThat(counts.get("articlesConsidered")).isEqualTo(6);
         assertThat(counts.get("uniqueEvents")).isEqualTo(6);
+        assertThat(counts.get("sourcesKept")).as("FR-53: one source per answered query, 3 per pipeline (<= 4)").isEqualTo(6);
+        assertThat(pipelines.get(0).get("candidatesConsidered")).isEqualTo(3);
+        assertThat(pipelines.get(0).get("sourceIds")).isEqualTo(List.of("S001", "S002", "S003"));
+        assertThat(pipelines.get(1).get("candidatesConsidered")).isEqualTo(3);
+        assertThat(pipelines.get(1).get("sourceIds")).isEqualTo(List.of("S004", "S005", "S006"));
         assertThat(run.get("status")).isEqualTo("COMPLETED");
     }
 
@@ -162,6 +167,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(counts.get("searches")).isEqualTo(6);
         assertThat(counts.get("articlesRetrieved")).isEqualTo(5);
         assertThat(counts.get("articlesConsidered")).isEqualTo(5);
+        assertThat(counts.get("sourcesKept")).isEqualTo(5);
         assertThat(news.requests).as("a 503 is never retried: one request per query").hasSize(6);
         List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
         assertThat(queries).hasSize(6);
@@ -171,6 +177,12 @@ class SourceRetrievalIT extends AbstractRunIT {
             assertThat(queries.get(i).get("articlesReturned")).as("Q" + (i + 1)).isEqualTo(expected.equals("OK") ? 1 : 0);
         }
         assertThat(sourceItems(sid, id)).hasSize(5);
+        // FR-53: a FAILED query contributes no candidates; W01 keeps the 2 of Q02 / Q03, W02 all 3
+        List<Map<String, Object>> pipelines = PlanJson.pipelines(researchBody(sid, id));
+        assertThat(pipelines.get(0).get("candidatesConsidered")).isEqualTo(2);
+        assertThat(pipelines.get(0).get("sourceIds")).isEqualTo(List.of("S001", "S002"));
+        assertThat(pipelines.get(1).get("candidatesConsidered")).isEqualTo(3);
+        assertThat(pipelines.get(1).get("sourceIds")).isEqualTo(List.of("S003", "S004", "S005"));
     }
 
     static Stream<Arguments> unavailableProviders() {
@@ -202,6 +214,7 @@ class SourceRetrievalIT extends AbstractRunIT {
         assertThat(counts.get("searches")).isEqualTo(6);
         assertThat(counts.get("articlesRetrieved")).isEqualTo(0);
         assertThat(counts.get("articlesConsidered")).isEqualTo(0);
+        assertThat(counts.get("sourcesKept")).as("FR-53: also 0 is committed").isEqualTo(0);
         assertThat(news.requests).as("one request per query, none of these answers is retried, no fallback").hasSize(6);
         List<Map<String, Object>> queries = PlanJson.queries(researchBody(sid, id));
         assertThat(queries).hasSize(6).allSatisfy(q -> {
@@ -266,7 +279,12 @@ class SourceRetrievalIT extends AbstractRunIT {
         String id = (String) startOk(sid, A).get("id");
         Map<String, Object> run = awaitDone(sid, id);
         assertThat(run.get("status")).isEqualTo("COMPLETED");
-        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":6")));
+        // FR-53: a run whose search found nothing still commits sourcesKept 0, every candidatesConsidered 0 and every sourceIds []
+        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":6").replace("}", ",\"sourcesKept\":0}")));
+        assertThat(PlanJson.pipelines(researchBody(sid, id))).hasSize(2).allSatisfy(p -> {
+            assertThat(p.get("candidatesConsidered")).isEqualTo(0);
+            assertThat(p.get("sourceIds")).isEqualTo(List.of());
+        });
         assertThat(news.requests).as("one request per planned query").hasSize(6);
         assertThat(PlanJson.queries(researchBody(sid, id))).hasSize(6).allSatisfy(q -> {
             assertThat(q.get("status")).isEqualTo("EMPTY");

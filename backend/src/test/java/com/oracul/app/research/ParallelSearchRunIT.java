@@ -22,7 +22,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * every selection / article request behind the last search request, every source belongs to the query that returned it,
  * and a STOP while eight requests are open ends the run for good — no further {@code /rss/search} arrives.
  */
-// @trace FR-52
+// @trace FR-52, FR-53
 @TestPropertySource(properties = {
     "oracul.run.placeholder-stage-delay=PT0S",
     "oracul.run.executor-threads=8",
@@ -89,9 +89,10 @@ class ParallelSearchRunIT extends AbstractEventIT {
         Map<String, Object> counts = (Map<String, Object>) r.run().get("counts");
         assertThat(counts.get("searches")).isEqualTo(15);
         assertThat(counts.get("articlesRetrieved")).isEqualTo(45);
-        assertThat(counts.get("articlesConsidered")).isEqualTo(30);
+        assertThat(counts.get("articlesConsidered")).as("FR-53: 45 distinct usable candidates over the five pipelines").isEqualTo(45);
+        assertThat(counts.get("sourcesKept")).as("FR-53: 4 per pipeline, 5 pipelines").isEqualTo(20);
         List<Map<String, Object>> sources = sourceItems(r.sid(), r.id());
-        assertThat(sources).hasSize(30);
+        assertThat(sources).hasSize(20);
         for (Map<String, Object> s : sources) {
             String url = (String) s.get("url");
             String file = url.substring(url.lastIndexOf('/') + 1);

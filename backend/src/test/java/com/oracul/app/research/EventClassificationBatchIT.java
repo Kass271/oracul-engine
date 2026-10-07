@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** research-pipeline.md pipeline step 4: classification batches and the single follow-up pass in id order. */
-// @trace FR-15
+// @trace FR-15, FR-53
 @TestPropertySource(properties = "oracul.events.classification-batch-size=2")
 class EventClassificationBatchIT extends AbstractEventIT {
 
@@ -19,7 +19,8 @@ class EventClassificationBatchIT extends AbstractEventIT {
     void badEventsOfAllBatchesAreRetriedTogetherInIdOrderInBatchesOfTheSameSize() throws Exception {
         List<Art> five = new ArrayList<>();
         for (int i = 1; i <= 5; i++) five.add(new Art("a" + i, "reuters.com", "Distinct headline number" + " " + "x".repeat(i)));
-        newsArticles(five);
+        // FR-53: at most 4 sources per pipeline, so the articles are spread over two pipelines: a1-a3 in Q01 (W01), a4-a5 in Q04 (W02)
+        newsArticlesPerPipeline(five, 3, 2);
         // answers are keyed by the event ids of the request, not by arrival order (batches run in parallel):
         // an event asked for the first time is answered only when its number is even; asked again, always
         Set<String> asked = ConcurrentHashMap.newKeySet();
@@ -31,7 +32,7 @@ class EventClassificationBatchIT extends AbstractEventIT {
             }
             return StubResponses.completed(classifications(entries.toArray(new String[0])));
         });
-        Ran r = run(B);
+        Ran r = run(A);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         List<StubResponses.Request> calls = requests(CLASSIFICATION);
         assertThat(calls).hasSize(5);

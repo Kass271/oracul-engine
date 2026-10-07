@@ -69,28 +69,30 @@ function allItems(pack: any): any[] {
 // @trace FR-18
 // @trace FR-46
 // @trace FR-50
+// @trace FR-53
 test.describe('FR-16 / FR-17 / FR-18 Ranking, evidence selection and the Evidence Pack', () => {
-  test('mode evidence: 13 events from the 25 kept sources give 9 core + 4 counter-signal items with diversity caps and the exact prompt text', async ({ page }) => {
+  test('mode evidence: 4 events from the 7 kept sources give 3 core + 1 counter-signal item with diversity caps and the exact prompt text', async ({ page }) => {
     test.setTimeout(90_000);
     const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'evidence' } });
     expect(mode.status()).toBe(204);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    // FR-50: 25 kept sources -> 13 events; EV n mod 3 = 1 dark (5), = 2 mid (4), = 0 bright (4). Darkness 9 / optimism 2: the
-    // bright ones are the counter-signal candidates, the other 9 fill the core (limit 10), nothing is left for SUPPORTING.
+    // FR-53: 7 kept sources -> 4 events (EV004 = [S007]); EV n mod 3 = 1 dark (EV001, EV004), = 2 mid (EV002), = 0 bright (EV003).
+    // Darkness 9 / optimism 2: the bright one is the counter-signal candidate, the other 3 fill the core, nothing is left for SUPPORTING.
     expect(run.counts.articlesConsidered).toBe(25);
-    expect(run.counts.uniqueEvents).toBe(13);
-    expect(run.counts.eventsSelected).toBe(13);
-    expect(run.counts.counterSignals).toBe(4);
+    expect(run.counts.sourcesKept).toBe(7);
+    expect(run.counts.uniqueEvents).toBe(4);
+    expect(run.counts.eventsSelected).toBe(4);
+    expect(run.counts.counterSignals).toBe(1);
     expect(run.evidencePackId).toBeTruthy();
 
     const pack = await getPack(page, id);
     expect(pack.id).toBe(run.evidencePackId);
-    expect(pack.core).toHaveLength(9);
+    expect(pack.core).toHaveLength(3);
     expect(pack.supporting).toHaveLength(0);
-    expect(pack.counterSignals).toHaveLength(4);
+    expect(pack.counterSignals).toHaveLength(1);
     const items = allItems(pack);
-    expect(items.map((i) => i.evidenceId)).toEqual(Array.from({ length: 13 }, (_, n) => `E${String(n + 1).padStart(3, '0')}`));
+    expect(items.map((i) => i.evidenceId)).toEqual(['E001', 'E002', 'E003', 'E004']);
     expect(pack.core.every((i: any) => i.section === 'CORE')).toBe(true);
     expect(pack.supporting.every((i: any) => i.section === 'SUPPORTING')).toBe(true);
     expect(pack.counterSignals.every((i: any) => i.section === 'COUNTER_SIGNAL')).toBe(true);
@@ -98,7 +100,7 @@ test.describe('FR-16 / FR-17 / FR-18 Ranking, evidence selection and the Evidenc
     const events = await listEvents(page, id);
     const byId = new Map<string, any>(events.map((e) => [e.id, e]));
     for (const item of pack.core) expect([1.0, 0.5]).toContain(byId.get(item.eventId).classification.risk);
-    expect(pack.core.filter((i: any) => byId.get(i.eventId).classification.risk === 1.0)).toHaveLength(5);
+    expect(pack.core.filter((i: any) => byId.get(i.eventId).classification.risk === 1.0)).toHaveLength(2);
     for (const item of pack.counterSignals) expect(byId.get(item.eventId).classification.opportunity).toBe(0.8);
 
     // diversity: at most 2 per primary entity, at most 3 per publisher
@@ -123,29 +125,29 @@ test.describe('FR-16 / FR-17 / FR-18 Ranking, evidence selection and the Evidenc
       'Realism: 8 | Darkness: 9 | Optimism: 2 | Horizon: 5 years',
       'New pandemic: 8 | Humanoid robot boom: 6',
       '[E001] ',
-      '[E013] ',
+      '[E004] ',
       'COUNTER-SIGNALS',
     ]) {
       expect(pack.promptText).toContain(part);
     }
 
     const selected = events.filter((e) => e.selection);
-    expect(selected).toHaveLength(13);
+    expect(selected).toHaveLength(4);
     expect(new Map(selected.map((e) => [e.id, e.selection.evidenceId]))).toEqual(
       new Map(items.map((i) => [i.eventId, i.evidenceId])),
     );
   });
 
-  test('default classification: every event is bright, so only counter-signals are selected', async ({ page }) => {
+  test('default classification: every one of the 4 events is bright, so only counter-signals are selected', async ({ page }) => {
     test.setTimeout(90_000);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
     const pack = await getPack(page, id);
     expect(pack.core).toHaveLength(0);
     expect(pack.supporting).toHaveLength(0);
-    expect(pack.counterSignals).toHaveLength(5);
-    expect(run.counts.counterSignals).toBe(5);
-    expect(run.counts.eventsSelected).toBe(5);
+    expect(pack.counterSignals).toHaveLength(4);
+    expect(run.counts.counterSignals).toBe(4);
+    expect(run.counts.eventsSelected).toBe(4);
   });
 
   test('FR-18 an unknown run has no Evidence Pack', async ({ page }) => {

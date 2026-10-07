@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** Row 24 of research-pipeline.md "Slice 06_events": the configured concurrency bounds the batches in flight, the result does not change. */
-// @trace FR-14, FR-46
-// news-search.md FR-46: F240 keeps 30 sources; batch sizes 5 / 3 keep 6 normalisation and 10 classification batches
+// @trace FR-14, FR-46, FR-53
+// FR-46 / FR-53: F240_BODY_TEN keeps 30 sources; batch sizes 5 / 3 keep 6 normalisation and 10 classification batches
 @TestPropertySource(properties = {
     "oracul.events.normalization-batch-size=5",
     "oracul.events.classification-batch-size=3",
@@ -25,7 +25,7 @@ class EventConcurrencyIT extends AbstractEventIT {
         newsF240();
         responses.delay(NORMALIZATION, Duration.ofMillis(300));
         responses.delay(CLASSIFICATION, Duration.ofMillis(300));
-        Ran r = run(A);
+        Ran r = run(F240_BODY_TEN);
         assertThat(requests(NORMALIZATION)).hasSize(6);
         assertThat(requests(CLASSIFICATION)).hasSize(10);
         assertThat(responses.maxInFlight(NORMALIZATION)).isEqualTo(2);

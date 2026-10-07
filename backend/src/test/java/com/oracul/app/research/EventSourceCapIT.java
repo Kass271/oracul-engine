@@ -8,11 +8,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Row 22 of research-pipeline.md "Slice 06_events": the normaliser source cap on F240. Since news-search.md FR-46 a run keeps
- * at most 30 sources, so the default cap (120) can never bite; the cap is exercised with oracul.events.max-sources=12
- * (batches of 5 sources / 5 events keep the multi-batch layout).
+ * Row 22 of research-pipeline.md "Slice 06_events": the normaliser source cap on F240. A run keeps at most 30 sources, so the
+ * default cap (120) can never bite; the cap is exercised with oracul.events.max-sources=12 (batches of 5 sources / 5 events keep the
+ * multi-batch layout). FR-53: F240 runs through F240_BODY_TEN (10 wildcards x 2 queries, 227 candidates) and keeps 30 sources.
  */
-// @trace FR-14, FR-46
+// @trace FR-14, FR-46, FR-53
 @TestPropertySource(properties = {
     "oracul.research.query-budget=18",
     "oracul.events.max-sources=12",
@@ -25,9 +25,10 @@ class EventSourceCapIT extends AbstractEventIT {
     @Test
     void onlyTheFirst12SourcesInIdOrderAreNormalizedWhenEverythingTies() throws Exception {
         newsF240();
-        Ran r = run(A);
+        Ran r = run(F240_BODY_TEN);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
-        assertThat(counts(r.run()).get("articlesConsidered")).as("FR-46: at most 30 sources are kept").isEqualTo(30);
+        assertThat(counts(r.run()).get("sourcesKept")).as("FR-46 / FR-53: at most 30 sources are kept").isEqualTo(30);
+        assertThat(counts(r.run()).get("articlesConsidered")).as("FR-53: distinct usable candidates").isEqualTo(227);
         assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(12);
 
         assertThat(requests(NORMALIZATION)).hasSize(3);

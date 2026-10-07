@@ -37,7 +37,7 @@ import org.springframework.test.web.servlet.ResultActions;
  * and runId class (seeded rows), and the stop during every kind of outbound request of the pipeline (the stub holds the
  * request, the run is stopped, the stub releases it: nothing more may be sent or written for the run).
  */
-// @trace FR-45, FR-51
+// @trace FR-45, FR-51, FR-53
 class StopRunIT extends AbstractStoryIT {
 
     private static final String PROFILE = "{\"darkness\":0.5,\"optimism\":0.5,\"realism\":0.8,\"horizon\":\"1y\",\"topics\":[]}";
@@ -295,8 +295,8 @@ class StopRunIT extends AbstractStoryIT {
                 case "MODELS", "GOOGLE" -> arrived.await(15, TimeUnit.SECONDS);
                 // fetch concurrency is 8: wait until all permits are taken, the other fetches of the 12 articles are queued
                 case "ARTICLE" -> awaitTrue(() -> news.articleRequests.size() >= 8, 15_000);
-                // FR-51: the gate holds the call of every pipeline of body A (2), all started before the stop
-                case "QUERY_GENERATION" -> responses.awaitArrived(kind, 2, Duration.ofSeconds(15));
+                // FR-51: the gate holds the call of every pipeline of the stop body (3 wildcards), all started before the stop
+                case "QUERY_GENERATION" -> responses.awaitArrived(kind, STOP_PIPELINES, Duration.ofSeconds(15));
                 default -> responses.awaitArrived(kind, 1, Duration.ofSeconds(15));
             };
         }
@@ -314,6 +314,9 @@ class StopRunIT extends AbstractStoryIT {
             }
         }
     }
+
+    /** FR-53: the stop body has three wildcards, so twelve articles (4 per pipeline) are all kept and 8 article fetches can be open. */
+    private static final int STOP_PIPELINES = 3;
 
     private static List<Art> twelveArticles() {
         List<Art> arts = new ArrayList<>();
@@ -359,11 +362,12 @@ class StopRunIT extends AbstractStoryIT {
     @MethodSource("outboundKinds")
     void aStopDuringAnOutboundRequestEndsTheRunForGood(String kind, boolean packReady, boolean scenarioReady) throws Exception {
         news.reset();
-        newsArticles(twelveArticles());
+        // FR-53: at most 4 sources per pipeline: 12 articles in Q01 would keep 4, and "8 fetches open, the rest queued" never happens
+        newsArticlesPerPipeline(twelveArticles(), 4, 4, 4);
         Hold hold = new Hold(kind);
         hold.install();
         String sid = connectedSid();
-        String id = (String) startOk(sid, A).get("id");
+        String id = (String) startOk(sid, wildcardsBody(STOP_PIPELINES)).get("id");
         try {
             assertThat(hold.awaitArrival()).as(kind + " request arrived at the stub").isTrue();
 
@@ -376,6 +380,16 @@ class StopRunIT extends AbstractStoryIT {
             assertThat(rowAtStop.get("status")).isEqualTo("STOPPED");
             Map<String, Integer> trafficAtStop = traffic();
             Map<String, Integer> rowsAtStop = rowCounts(id);
+            if (List.of("QUERY_GENERATION", "MODELS", "GOOGLE", "ARTICLE").contains(kind)) {
+                // FR-53: the READING_SOURCES commit is one guarded transaction; a stop before it leaves no source row, no sourcesKept
+                // and no candidatesConsidered / sourceIds
+                assertThat(rowsAtStop.get("source")).as("no source row of a run stopped before READING_SOURCES committed").isZero();
+                assertThat(jdbc.queryForObject("select count(*) from generation_run where id = cast(? as uuid) and jsonb_typeof(counts->'sourcesKept') = 'number'",
+                    Integer.class, id)).as("no sourcesKept in the counts of a run stopped before the commit").isZero();
+                assertThat(jdbc.queryForObject("select count(*) from generation_run r, jsonb_array_elements(coalesce(r.search_plan->'pipelines', '[]'::jsonb)) p "
+                    + "where r.id = cast(? as uuid) and (jsonb_typeof(p->'candidatesConsidered') = 'number' or jsonb_typeof(p->'sourceIds') = 'array')",
+                    Integer.class, id)).as("no candidatesConsidered / sourceIds in the plan of a run stopped before the commit").isZero();
+            }
 
             hold.release();
             long end = System.currentTimeMillis() + 2000;

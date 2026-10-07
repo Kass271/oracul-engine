@@ -8,7 +8,11 @@ import java.util.List;
 public interface NewsProvider {
 
     /** Raw provider article. Fields may be null. */
-    record Article(String url, String title, java.time.Instant publishedAt, String sourceName, String sourceUrl) {
+    record Article(String url, String title, java.time.Instant publishedAt, String sourceName, String sourceUrl,
+                   String snippet) {
+        public Article(String url, String title, java.time.Instant publishedAt, String sourceName, String sourceUrl) {
+            this(url, title, publishedAt, sourceName, sourceUrl, null);
+        }
     }
 
     record Result(SearchQueryStatus status, List<Article> articles, boolean rateLimited) {

@@ -9,6 +9,7 @@ import com.oracul.app.api.model.SearchQuery;
 import com.oracul.app.api.model.SearchQueryStatus;
 import com.oracul.app.api.model.Source;
 import com.oracul.app.api.model.WildcardPipeline;
+import com.oracul.app.api.model.WildcardPipelineKind;
 import jakarta.annotation.PreDestroy;
 import java.net.URI;
 import java.time.Clock;
@@ -87,7 +88,7 @@ public class SourceRetrieval {
     }
 
     /** FR-46: the most sources a run keeps. */
-    public static final int MAX_SOURCES = SourceCap.MAX;
+    public static final int MAX_SOURCES = WildcardSelector.MAX_SOURCES;
     private static final int GOOGLE_REDIRECTS = 5;
 
     private final NewsSearchProvider search;
@@ -181,6 +182,10 @@ public class SourceRetrieval {
                              Instant seen, java.util.SortedSet<String> pipelines) {
     }
 
+    /** Stored sources in Evidence order, the plan with candidatesConsidered / sourceIds, and the distinct usable links. */
+    public record Read(List<SourceRepository.Stored> sources, SearchPlan plan, int articlesConsidered) {
+    }
+
     public List<SourceRepository.Stored> readSources(SearchOutcome outcome, HorizonCode horizon)
         throws InterruptedException {
         return readSources(outcome, horizon, () -> true);
@@ -189,14 +194,42 @@ public class SourceRetrieval {
     /** {@code mayFetch} is the run guard, checked before each article fetch (no fetch once the run is not RUNNING). */
     public List<SourceRepository.Stored> readSources(SearchOutcome outcome, HorizonCode horizon,
                                                       BooleanSupplier mayFetch) throws InterruptedException {
-        List<Candidate> usable = filter(outcome, horizon);
-        List<SourceCap.Ranked> ranked = new ArrayList<>();
-        for (Candidate c : usable) {
-            ranked.add(new SourceCap.Ranked(c.topic(), quality.classify(qualityDomain(c, c.url())).quality()));
+        return read(outcome, horizon, mayFetch).sources();
+    }
+
+    /** FR-53: select per wildcard, fetch metadata of the kept articles only, number in Evidence order. */
+    public Read read(SearchOutcome outcome, HorizonCode horizon, BooleanSupplier mayFetch)
+        throws InterruptedException {
+        Instant cutoff = clock.instant().minus(GoogleNewsSearch.timespanDays(horizon), ChronoUnit.DAYS);
+        SearchPlan plan = outcome.plan();
+        boolean hasPipelines = plan.getPipelines() != null && !plan.getPipelines().isEmpty();
+        Map<String, SearchIntent> intents = new HashMap<>();
+        plan.getIntents().forEach(in -> intents.put(in.getId(), in));
+        Map<String, SearchQuery> legacy = new HashMap<>();
+        plan.getQueries().forEach(q -> legacy.put(q.getId(), q));
+        List<WildcardSelector.Pipeline> input = new ArrayList<>();
+        if (hasPipelines) {
+            for (WildcardPipeline p : plan.getPipelines()) {
+                List<WildcardSelector.Query> queries = new ArrayList<>();
+                for (PipelineQuery q : p.getQueries()) {
+                    queries.add(new WildcardSelector.Query(q.getId(), q.getText(), itemsOf(outcome, q.getId(), q.getStatus())));
+                }
+                boolean general = p.getKind() == WildcardPipelineKind.GENERAL;
+                input.add(new WildcardSelector.Pipeline(p.getId(), general ? WildcardSelector.GENERAL_SUBJECT : p.getLabel(),
+                    general || p.getTopicKey() == null ? "major" : p.getTopicKey(), queries));
+            }
+        } else {
+            for (SearchQuery q : plan.getQueries()) {
+                WildcardSelector.Query query = new WildcardSelector.Query(q.getId(), q.getText(),
+                    itemsOf(outcome, q.getId(), q.getStatus()));
+                input.add(new WildcardSelector.Pipeline(q.getId(), "", topicOf(intents.get(q.getIntentId())), List.of(query)));
+            }
         }
+        WildcardSelector.Result selected = WildcardSelector.select(input, cutoff);
         List<Candidate> candidates = new ArrayList<>();
-        for (int i : SourceCap.select(ranked)) {
-            candidates.add(usable.get(i));
+        for (WildcardSelector.Kept k : selected.kept()) {
+            candidates.add(new Candidate(k.article(), k.url(), new ArrayList<>(k.queryIds()), k.topic(),
+                k.article().publishedAt(), hasPipelines ? new java.util.TreeSet<>(k.pipelineIds()) : null));
         }
         Prepared[] prepared = new Prepared[candidates.size()];
         runBounded(fetchPool, fetchConcurrency, candidates.size(), i -> {
@@ -204,6 +237,7 @@ public class SourceRetrieval {
             return null;
         });
         List<SourceRepository.Stored> out = new ArrayList<>();
+        String[] ids = new String[prepared.length];
         java.util.Set<String> used = new java.util.HashSet<>();
         for (Prepared p : prepared) {
             if (p != null) {
@@ -221,55 +255,32 @@ public class SourceRetrieval {
             boolean useResolved = resolved != null && !taken.contains(resolved) && !used.contains(resolved);
             SourceRepository.Stored stored = build(out.size(), p, useResolved ? resolved : null);
             taken.add(stored.source().getUrl().toString());
+            ids[i] = stored.source().getId();
             out.add(stored);
         }
-        return out;
+        SearchPlan result = plan;
+        if (hasPipelines) {
+            List<WildcardPipeline> pipelines = new ArrayList<>();
+            for (WildcardPipeline p : plan.getPipelines()) {
+                List<String> sourceIds = new ArrayList<>();
+                for (int idx : selected.groups().get(p.getId())) {
+                    if (ids[idx] != null) {
+                        sourceIds.add(ids[idx]);
+                    }
+                }
+                pipelines.add(new WildcardPipeline(p.getId(), p.getKind(), p.getLabel(), p.getHeading(),
+                    p.getQueryMode(), p.getQueries()).level(p.getLevel()).topicKey(p.getTopicKey())
+                    .candidatesConsidered(selected.candidatesConsidered().get(p.getId())).sourceIds(sourceIds));
+            }
+            result = new SearchPlan(plan.getQueryBudget(), plan.getExpansionMode(), plan.getBuckets(), plan.getIntents(),
+                plan.getQueries()).pipelines(pipelines);
+        }
+        return new Read(out, result, selected.articlesConsidered());
     }
 
-    private List<Candidate> filter(SearchOutcome outcome, HorizonCode horizon) {
-        Map<String, SearchIntent> intents = new HashMap<>();
-        outcome.plan().getIntents().forEach(in -> intents.put(in.getId(), in));
-        Instant cutoff = clock.instant().minus(GoogleNewsSearch.timespanDays(horizon), ChronoUnit.DAYS);
-        Map<String, QueryRef> byId = new HashMap<>();
-        flat(outcome.plan()).forEach(q -> byId.put(q.id(), q));
-        Map<String, SearchQuery> legacy = new HashMap<>();
-        outcome.plan().getQueries().forEach(q -> legacy.put(q.getId(), q));
-        Map<String, Candidate> byUrl = new LinkedHashMap<>();
-        for (Attributed attributed : outcome.ordered()) {
-            NewsProvider.Article a = attributed.article();
-            QueryRef q = byId.get(attributed.queryId());
-            String url = UrlNormalizer.normalize(a.url());
-            if (url == null || a.title() == null || a.title().isBlank()) {
-                continue;
-            }
-            Instant seen = a.publishedAt();
-            if (seen != null && seen.isBefore(cutoff)) {
-                continue;
-            }
-            Candidate existing = byUrl.get(url);
-            if (existing != null) {
-                if (!existing.queryIds().contains(q.id())) {
-                    existing.queryIds().add(q.id());
-                    java.util.Collections.sort(existing.queryIds());
-                }
-                if (q.pipeline() != null) {
-                    existing.pipelines().add(q.pipeline().getId());
-                }
-                continue;
-            }
-            List<String> ids = new ArrayList<>();
-            ids.add(q.id());
-            java.util.SortedSet<String> pipelines = q.pipeline() == null ? null : new java.util.TreeSet<>();
-            String topic;
-            if (q.pipeline() != null) {
-                pipelines.add(q.pipeline().getId());
-                topic = q.pipeline().getTopicKey() == null ? "major" : q.pipeline().getTopicKey();
-            } else {
-                topic = topicOf(intents.get(legacy.get(q.id()).getIntentId()));
-            }
-            byUrl.put(url, new Candidate(a, url, ids, topic, seen, pipelines));
-        }
-        return new ArrayList<>(byUrl.values());
+    private static List<NewsProvider.Article> itemsOf(SearchOutcome outcome, String queryId, SearchQueryStatus status) {
+        List<NewsProvider.Article> items = outcome.articles().get(queryId);
+        return items == null ? List.of() : List.copyOf(items);
     }
 
     /** Domain whose quality table entry ranks the candidate: Google publisher host, else the URL host. */

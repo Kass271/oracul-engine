@@ -13,7 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.TestPropertySource;
 
 /** Rows 14-17 of research-pipeline.md "Slice 06_events": ChatGPT transport failures of EVENT_NORMALIZATION / EVENT_CLASSIFICATION. */
-// @trace FR-14, FR-15, FR-38, FR-39, FR-46
+// @trace FR-14, FR-15, FR-38, FR-39, FR-46, FR-53
 // F240 for row 35; news-search.md FR-46 keeps 30 sources, batches of 5 keep the 6 normalisation batches
 @TestPropertySource(properties = {"oracul.research.query-budget=18", "oracul.events.max-sources=1000",
     "oracul.events.normalization-batch-size=5"})
@@ -186,11 +186,12 @@ class EventFailureIT extends AbstractEventIT {
     @Test
     void aRateLimitedBatchStopsTheStageBeforeLaterBatchesStart() throws Exception {
         newsF240();
+        // FR-53: F240_BODY_TEN keeps 30 sources, so 6 normalisation batches of 5 exist
         // the 429 is held until all four requests have arrived, so batch 4 has certainly passed its gate
         always(NORMALIZATION, req -> StubResponses.batch(req) == 2
             ? holdUntilFourArrived()
             : StubResponses.delayed(StubResponses.completed(StubResponses.defaultNormalization(req.inputText())), 500));
-        Ran r = run(A);
+        Ran r = run(F240_BODY_TEN);
         assertFailed(r, "CHATGPT_RATE_LIMITED", RATE_LIMITED, NORMALIZATION, 4);
         assertThat(requests(NORMALIZATION).stream().map(StubResponses::batch).sorted().toList()).containsExactly(1, 2, 3, 4);
         assertThat(requests(CLASSIFICATION)).isEmpty();

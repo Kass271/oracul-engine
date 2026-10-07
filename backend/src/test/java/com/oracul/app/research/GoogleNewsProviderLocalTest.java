@@ -14,6 +14,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import java.util.stream.Stream;
 
 /** Google News provider rules that need no Spring and no internet: base URL, zero budget, title cleaning (FR-48). */
 // @trace FR-48
@@ -73,5 +77,46 @@ class GoogleNewsProviderLocalTest {
         assertThat(GoogleNewsProvider.cleanTitle(null, null)).isNull();
         assertThat(GoogleNewsProvider.cleanTitle("  Vaccine - Reuters ", " ")).isEqualTo("Vaccine - Reuters");
         assertThat(GoogleNewsProvider.cleanTitle("Vaccine - Reuters", null)).isEqualTo("Vaccine - Reuters");
+    }
+
+    // ---- FR-53 feed data: Article.snippet from the item's <description> ------------------------------------------
+
+    private static String xml(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private static String feedWithDescription(String descriptionHtml) {
+        return "<rss><channel><item><title>Vaccine approved - Reuters</title><link>https://r.example/a</link>"
+            + "<pubDate>Tue, 06 Oct 2026 10:00:00 GMT</pubDate><source url=\"https://r.example\">Reuters</source>"
+            + (descriptionHtml == null ? "" : "<description>" + xml(descriptionHtml) + "</description>") + "</item></channel></rss>";
+    }
+
+    static Stream<Arguments> descriptions() {
+        return Stream.of(
+            Arguments.of("<b>Bold</b> text", "Bold text"),
+            Arguments.of("Tom &amp; Jerry", "Tom & Jerry"),
+            Arguments.of("&lt;not a tag&gt; here", "<not a tag> here"),
+            Arguments.of("She said &quot;hi&quot; &#39;x&#39; &apos;y&apos;", "She said \"hi\" 'x' 'y'"),
+            Arguments.of("&#65;&#x42;&#x63;", "ABc"),
+            Arguments.of("  a \n\t b   c  ", "a b c"),
+            Arguments.of("A&nbsp;B", "A B"),
+            Arguments.of("<a href=\"https://news.google.com/rss/articles/CBM\" target=\"_blank\">Vaccine approved</a>&nbsp;&nbsp;"
+                + "<font color=\"#6f6f6f\">Reuters</font>", "Vaccine approved Reuters"),
+            Arguments.of("   ", null),
+            Arguments.of("<br/><p></p>", null),
+            Arguments.of(null, null));
+    }
+
+    // @trace FR-53
+    @ParameterizedTest(name = "description {0} -> snippet {1}")
+    @MethodSource("descriptions")
+    void theSnippetIsTheDescriptionAsPlainText(String descriptionHtml, String expected) {
+        NewsProvider.Result result = GoogleNewsProvider.parse(feedWithDescription(descriptionHtml), 25);
+        assertThat(result.status()).isEqualTo(SearchQueryStatus.OK);
+        assertThat(result.articles()).hasSize(1);
+        String snippet = SelectorApi.snippetOf(result.articles().get(0));
+        // a no-break space decodes to a space of some kind: compare with it normalised
+        assertThat(snippet == null ? null : snippet.replace('\u00a0', ' ').replaceAll("\\s+", " ")).isEqualTo(expected);
+        assertThat(result.articles().get(0).title()).as("the other fields are unchanged").isEqualTo("Vaccine approved");
     }
 }

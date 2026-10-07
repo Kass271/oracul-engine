@@ -71,21 +71,21 @@ async function listEvents(page: Page, id: string): Promise<any[]> {
 // @trace FR-46
 // @trace FR-47
 // @trace FR-50
+// @trace FR-53
 test.describe('FR-14 / FR-15 Event normalisation and semantic classification', () => {
-  test('the acceptance run produces 13 normalized, classified events from its 25 kept sources', async ({ page }) => {
+  test('the acceptance run produces 4 normalized, classified events from its 7 kept sources', async ({ page }) => {
     test.setTimeout(90_000);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    // FR-50: 6 queries x 5 items = 25 distinct usable candidates (the shared article + 6 x 4), all kept; the stub pairs them up -> 13 events
+    // FR-53: 25 distinct usable candidates, 7 kept (the shared article + 3 per pipeline); the stub pairs them up -> 4 events
     expect(run.counts.articlesConsidered).toBe(25);
-    expect(run.counts.uniqueEvents).toBe(13);
+    expect(run.counts.sourcesKept).toBe(7);
+    expect(run.counts.uniqueEvents).toBe(4);
 
     const events = await listEvents(page, id);
-    expect(events).toHaveLength(13);
-    expect(events[0].id).toBe('EV001');
-    expect(events[12].id).toBe('EV013');
-    expect(events[0].sourceIds).toEqual(['S001', 'S002']);
-    expect(events[12].sourceIds).toEqual(['S025']);
+    expect(events).toHaveLength(4);
+    expect(events.map((e: any) => e.id)).toEqual(['EV001', 'EV002', 'EV003', 'EV004']);
+    expect(events.map((e: any) => e.sourceIds)).toEqual([['S001', 'S002'], ['S003', 'S004'], ['S005', 'S006'], ['S007']]);
     for (const e of events) {
       expect(e.excludedReason).toBeUndefined();
       expect(e.classification).toBeTruthy();
@@ -112,7 +112,7 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     // FR-51: one QUERY_GENERATION request per pipeline (two wildcards), no QUERY_EXPANSION any more
     expect(purposes.filter((p) => p === 'QUERY_GENERATION')).toHaveLength(2);
     expect(purposes.filter((p) => p === 'QUERY_EXPANSION')).toHaveLength(0);
-    // 25 sources fit one normalisation batch (40), 13 events one classification batch (20)
+    // 7 sources fit one normalisation batch (40), 4 events one classification batch (20)
     expect(purposes.filter((p) => p === 'EVENT_NORMALIZATION')).toHaveLength(1);
     expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(1);
     // slice 08: the pack is not empty, so exactly one SCENARIO_GENERATION request follows
@@ -133,9 +133,9 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(mode.status()).toBe(204);
     const id = await startAcceptanceRun(page);
     const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    expect(run.counts.uniqueEvents).toBe(13);
+    expect(run.counts.uniqueEvents).toBe(4);
     const events = await listEvents(page, id);
-    expect(events).toHaveLength(13);
+    expect(events).toHaveLength(4);
     for (const e of events) {
       expect(e.excludedReason).toBe('CLASSIFICATION_FAILED');
       expect(e.classification).toBeUndefined();

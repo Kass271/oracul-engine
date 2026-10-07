@@ -9,10 +9,10 @@ import org.springframework.test.context.TestPropertySource;
 
 /**
  * Rows 8 and 13 of research-pipeline.md "Slice 06_events": F240 with default batch sizes (40 sources / 20 events), the
- * source cap lifted to 1000, default concurrency 4. Since news-search.md FR-46 the run keeps 30 of the 205 usable sources:
+ * source cap lifted to 1000, default concurrency 4. FR-53: F240_BODY_TEN (10 wildcards x 2 queries, 227 usable candidates) keeps 30 sources:
  * one normalisation batch of 30 sources, 30 events in two classification batches (20 + 10).
  */
-// @trace FR-14, FR-15, FR-46
+// @trace FR-14, FR-15, FR-46, FR-53
 @TestPropertySource(properties = {"oracul.research.query-budget=18", "oracul.events.max-sources=1000"})
 class EventBatchingIT extends AbstractEventIT {
 
@@ -20,10 +20,11 @@ class EventBatchingIT extends AbstractEventIT {
     @Test
     void thirtyKeptSourcesAreBatchedAndEveryClassificationIsInRange() throws Exception {
         newsF240();
-        Ran r = run(A);
+        Ran r = run(F240_BODY_TEN);
         assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
         assertThat(counts(r.run()).get("uniqueEvents")).isEqualTo(30);
-        assertThat(counts(r.run()).get("articlesConsidered")).isEqualTo(30);
+        assertThat(counts(r.run()).get("sourcesKept")).isEqualTo(30);
+        assertThat(counts(r.run()).get("articlesConsidered")).isEqualTo(227);
 
         // arrival order of parallel batches is not defined: batches are identified by their "Batch: k of n" line
         List<StubResponses.Request> norm = requests(NORMALIZATION);
@@ -62,7 +63,7 @@ class EventBatchingIT extends AbstractEventIT {
             }
             for (Map<String, Object> w : wildcardMatches(e)) assertThat(num(w.get("score"))).isBetween(0.0, 1.0);
             assertThat(wildcardMatches(e).stream().map(w -> w.get("key")).toList())
-                .isEqualTo(List.of("biology-new-pandemic", "robotics-humanoid-boom"));
+                .as("one entry per wildcard of the configuration").containsExactlyInAnyOrderElementsOf(PlanSupport.TEN_WILDCARDS);
         }
     }
 }

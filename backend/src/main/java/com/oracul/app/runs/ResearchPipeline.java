@@ -135,16 +135,17 @@ public class ResearchPipeline {
         if (started < 0) {
             return false;
         }
-        List<SourceRepository.Stored> found = retrieval.readSources(outcome, cfg.getHorizon(), () -> guard.check(runId));
+        SourceRetrieval.Read read0 = retrieval.read(outcome, cfg.getHorizon(), () -> guard.check(runId));
+        List<SourceRepository.Stored> found = read0.sources();
         ResearchCounts withSources = new ResearchCounts(counts.getSearches(), counts.getArticlesRetrieved(),
-            found.size(), 0, 0, 0, 0);
+            read0.articlesConsidered(), 0, 0, 0, 0).sourcesKept(found.size());
         Boolean read = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
                 s.setRollbackOnly();
                 return false;
             }
             sources.insertAll(runId, found);
-            runs.storeCounts(runId, withSources, now());
+            runs.storeSearchResults(runId, read0.plan(), withSources, now());
             return true;
         });
         if (!Boolean.TRUE.equals(read)) {
@@ -179,7 +180,7 @@ public class ResearchPipeline {
             }
         }
         ResearchCounts withEvents = new ResearchCounts(withSources.getSearches(), withSources.getArticlesRetrieved(),
-            withSources.getArticlesConsidered(), normalized.size(), 0, 0, 0);
+            withSources.getArticlesConsidered(), normalized.size(), 0, 0, 0).sourcesKept(found.size());
         List<NormalizedEvent> toStore = normalized;
         Boolean stored = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
@@ -225,7 +226,7 @@ public class ResearchPipeline {
         EvidencePack pack = packService.build(packId, generationId, cutoff, cfg, profile, selection, byId);
         ResearchCounts withPack = new ResearchCounts(withEvents.getSearches(), withEvents.getArticlesRetrieved(),
             withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), selected.size(),
-            selection.counterSignals().size(), 0);
+            selection.counterSignals().size(), 0).sourcesKept(found.size());
         int realism = cfg.getRealism();
         int total = selection.core().size() + selection.supporting().size() + selection.counterSignals().size();
         var decision = EvidenceNotes.decide(selection.core().size(), total, realism, minCore);
