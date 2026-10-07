@@ -70,7 +70,7 @@ public class SafeFetcher {
     SafeFetcher(@Value("${oracul.news.fetch.allowed-private-hosts:}") String allowedPrivateHosts,
                 @Value("${oracul.news.article-max-bytes:2097152}") int maxBytes,
                 @Value("${oracul.news.article-max-redirects:5}") int maxRedirects,
-                @Value("${oracul.news.article-fetch-timeout:PT3S}") Duration timeout) {
+                @Value("${oracul.news.article-fetch-timeout:PT8S}") Duration timeout) {
         this(InetAddress_::all, parse(allowedPrivateHosts), timeout, maxBytes, maxRedirects);
     }
 
@@ -115,10 +115,15 @@ public class SafeFetcher {
     }
 
     public Result fetch(URI uri, Duration timeout) {
+        return fetch(uri, timeout, false);
+    }
+
+    /** With {@code sameHostOnly} a redirect to another host or port is not followed: the 3xx answer itself is returned. */
+    public Result fetch(URI uri, Duration timeout, boolean sameHostOnly) {
         long deadline = System.nanoTime() + Math.max(0, timeout.toNanos());
         AtomicReference<Socket> current = new AtomicReference<>();
         AtomicBoolean cancelled = new AtomicBoolean();
-        Future<Result> future = workers.submit(() -> run(uri, deadline, current, cancelled));
+        Future<Result> future = workers.submit(() -> run(uri, deadline, current, cancelled, sameHostOnly));
         try {
             return future.get(Math.max(1, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -158,7 +163,8 @@ public class SafeFetcher {
         return new Result(outcome, 0, null, new byte[0], false, uri, redirects);
     }
 
-    private Result run(URI start, long deadline, AtomicReference<Socket> current, AtomicBoolean cancelled) {
+    private Result run(URI start, long deadline, AtomicReference<Socket> current, AtomicBoolean cancelled,
+                       boolean sameHostOnly) {
         URI target = start;
         int redirects = 0;
         try {
@@ -186,6 +192,9 @@ public class SafeFetcher {
                 }
                 Hop hop = hop(target, host, addresses, deadline, current, cancelled);
                 if (hop.redirect != null) {
+                    if (sameHostOnly && !sameHost(target, target.resolve(hop.redirect))) {
+                        return new Result(Outcome.OK, hop.status, hop.contentType, new byte[0], false, target, redirects);
+                    }
                     if (redirects >= maxRedirects) {
                         return refused(Outcome.TOO_MANY_REDIRECTS, target, redirects);
                     }
@@ -201,6 +210,16 @@ public class SafeFetcher {
         } catch (Exception e) {
             return failed(target);
         }
+    }
+
+    private static boolean sameHost(URI a, URI b) {
+        String ha = a.getHost();
+        String hb = b.getHost();
+        return ha != null && hb != null && ha.equalsIgnoreCase(hb) && effectivePort(a) == effectivePort(b);
+    }
+
+    private static int effectivePort(URI u) {
+        return u.getPort() > 0 ? u.getPort() : "https".equalsIgnoreCase(u.getScheme()) ? 443 : 80;
     }
 
     private List<InetAddress> resolve(String host) throws UnknownHostException {
@@ -301,7 +320,7 @@ public class SafeFetcher {
             String path = rawPath + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());
             String hostHeader = uri.getHost() + (uri.getPort() > 0 ? ":" + uri.getPort() : "");
             String request = "GET " + path + " HTTP/1.1\r\nHost: " + hostHeader
-                + "\r\nAccept: text/html,application/xhtml+xml\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
+                + "\r\nUser-Agent: Mozilla/5.0 (compatible; ORACUL/1.0)\r\nAccept: text/html,application/xhtml+xml\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
             OutputStream out = wire.getOutputStream();
             out.write(request.getBytes(StandardCharsets.UTF_8));
             out.flush();

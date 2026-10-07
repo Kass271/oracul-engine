@@ -17,7 +17,7 @@ abstract class SourceMixin {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     abstract ArticleContentStatus getContentStatus();
 
-    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     abstract List<SourceExcerpt> getExcerpts();
 
     @JsonInclude(JsonInclude.Include.NON_EMPTY)

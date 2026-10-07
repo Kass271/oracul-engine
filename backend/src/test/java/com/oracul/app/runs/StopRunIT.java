@@ -37,7 +37,7 @@ import org.springframework.test.web.servlet.ResultActions;
  * and runId class (seeded rows), and the stop during every kind of outbound request of the pipeline (the stub holds the
  * request, the run is stopped, the stub releases it: nothing more may be sent or written for the run).
  */
-// @trace FR-45, FR-51, FR-53
+// @trace FR-45, FR-51, FR-53, FR-54
 class StopRunIT extends AbstractStoryIT {
 
     private static final String PROFILE = "{\"darkness\":0.5,\"optimism\":0.5,\"realism\":0.8,\"horizon\":\"1y\",\"topics\":[]}";
@@ -286,6 +286,9 @@ class StopRunIT extends AbstractStoryIT {
                     };
                 }
                 case "ARTICLE" -> news.articleGate = open;
+                // FR-54: retrieval has three request kinds sharing the 8 permits (article-retrieval.md slice 08 "Changes earlier behaviour")
+                case "GOOGLE_PAGE" -> news.googlePageGate = open;
+                case "DECODE" -> news.decodeGate = open;
                 default -> responses.gate(kind);
             }
         }
@@ -295,6 +298,8 @@ class StopRunIT extends AbstractStoryIT {
                 case "MODELS", "GOOGLE" -> arrived.await(15, TimeUnit.SECONDS);
                 // fetch concurrency is 8: wait until all permits are taken, the other fetches of the 12 articles are queued
                 case "ARTICLE" -> awaitTrue(() -> news.articleRequests.size() >= 8, 15_000);
+                case "GOOGLE_PAGE" -> awaitTrue(() -> news.googlePageRequests.size() >= 8, 15_000);
+                case "DECODE" -> awaitTrue(() -> news.decodeArrivals.get() >= 8, 15_000);
                 // FR-51: the gate holds the call of every pipeline of the stop body (3 wildcards), all started before the stop
                 case "QUERY_GENERATION" -> responses.awaitArrived(kind, STOP_PIPELINES, Duration.ofSeconds(15));
                 default -> responses.awaitArrived(kind, 1, Duration.ofSeconds(15));
@@ -303,7 +308,7 @@ class StopRunIT extends AbstractStoryIT {
 
         void release() {
             open.countDown();
-            if (!"ARTICLE".equals(kind) && !List.of("MODELS", "GOOGLE").contains(kind)) responses.release(kind);
+            if (!List.of("ARTICLE", "GOOGLE_PAGE", "DECODE", "MODELS", "GOOGLE").contains(kind)) responses.release(kind);
         }
 
         private void await() {
@@ -332,6 +337,8 @@ class StopRunIT extends AbstractStoryIT {
         t.put("news", news.requests.size());
         t.put("paths", news.paths.size());
         t.put("articles", news.articleRequests.size());
+        t.put("googlePages", news.googlePageRequests.size());
+        t.put("decodes", news.decodeArrivals.get()); // counted on arrival: a held decode is recorded in decodeRequests only when its answer is sent
         return t;
     }
 
@@ -350,6 +357,8 @@ class StopRunIT extends AbstractStoryIT {
             Arguments.of("QUERY_GENERATION", false, false),
             Arguments.of("MODELS", false, false),
             Arguments.of("GOOGLE", false, false),
+            Arguments.of("GOOGLE_PAGE", false, false),
+            Arguments.of("DECODE", false, false),
             Arguments.of("ARTICLE", false, false),
             Arguments.of("EVENT_NORMALIZATION", false, false),
             Arguments.of("EVENT_CLASSIFICATION", false, false),
@@ -380,7 +389,7 @@ class StopRunIT extends AbstractStoryIT {
             assertThat(rowAtStop.get("status")).isEqualTo("STOPPED");
             Map<String, Integer> trafficAtStop = traffic();
             Map<String, Integer> rowsAtStop = rowCounts(id);
-            if (List.of("QUERY_GENERATION", "MODELS", "GOOGLE", "ARTICLE").contains(kind)) {
+            if (List.of("QUERY_GENERATION", "MODELS", "GOOGLE", "GOOGLE_PAGE", "DECODE", "ARTICLE").contains(kind)) {
                 // FR-53: the READING_SOURCES commit is one guarded transaction; a stop before it leaves no source row, no sourcesKept
                 // and no candidatesConsidered / sourceIds
                 assertThat(rowsAtStop.get("source")).as("no source row of a run stopped before READING_SOURCES committed").isZero();

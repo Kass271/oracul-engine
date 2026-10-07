@@ -21,8 +21,8 @@ test.describe.configure({ mode: 'serial' });
 test.beforeEach(async ({ request }) => {
   const r = await request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  // the reset must also bring the news provider back up (Google News RSS)
-  await request.post(`${STUB}/__control/rss`, { data: { mode: 'ok' } });
+  // the reset must also bring the news provider back up (Google News RSS): FR-61 control endpoint, modes as in the stub table
+  expect((await request.post(`${STUB}/__control/google`, { data: { mode: 'ok' } })).status()).toBe(204);
 });
 
 async function connect(page: Page): Promise<void> {
@@ -125,11 +125,11 @@ function sentText(text: string): string {
     .join(' ');
 }
 
-// @trace FR-46, FR-47, FR-48, FR-50, FR-52, FR-53
+// @trace FR-46, FR-47, FR-48, FR-50, FR-52, FR-53, FR-61
 test.describe('FR-52 / FR-53 Google News RSS, one request per query, at most 4 sources per wildcard and 30 per run', () => {
   async function rssMode(page: Page, mode: string): Promise<void> {
-    const r = await page.request.post(`${STUB}/__control/rss`, { data: { mode } });
-    expect(r.status(), `rss mode ${mode}`).toBe(204);
+    const r = await page.request.post(`${STUB}/__control/google`, { data: { mode } });
+    expect(r.status(), `google mode ${mode}`).toBe(204);
   }
   /** FR-49: no run ever sends a request to the path of the former provider; every request of the stub is logged by kind=all. */
   async function expectNoFormerProviderRequest(page: Page): Promise<void> {
@@ -306,10 +306,14 @@ test.describe('FR-52 / FR-53 Google News RSS, one request per query, at most 4 s
     );
   });
 
-  test('an unknown rss mode is rejected by the stub control API', async ({ request }) => {
-    const r = await request.post(`${STUB}/__control/rss`, { data: { mode: 'sideways' } });
+  test('an unknown google mode is rejected by the stub control API and the former /__control/rss route is gone', async ({ request }) => {
+    const r = await request.post(`${STUB}/__control/google`, { data: { mode: 'sideways' } });
     expect(r.status()).toBe(400);
     expect(await r.json()).toEqual({ error: 'unknown_mode' });
+    // FR-61: the former control route is removed (404), also with a mode that used to be valid
+    const former = await request.post(`${STUB}/__control/rss`, { data: { mode: 'ok' } });
+    expect(former.status()).toBe(404);
+    expect(await former.json()).toEqual({ error: 'not_found' });
   });
 });
 

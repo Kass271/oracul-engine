@@ -18,25 +18,24 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
 /**
  * SourceRetrieval without Spring or internet: the search window, a failing article fetch, an interrupted wait (FR-13, FR-48,
- * FR-52). The new constructor {@code SourceRetrieval(NewsSearchProvider, ArticleMetadataFetcher, SourceQualityTable, Clock,
- * Duration searchWindow, int)} and {@code GoogleNewsSearch} are reached reflectively (they do not exist while the RED tests
- * are written).
+ * FR-52, FR-54). The constructor {@code SourceRetrieval(NewsSearchProvider, ArticleRetriever, SourceQualityTable, Clock,
+ * Duration searchWindow, Duration stageBudget)} (slice 08) and {@code GoogleNewsSearch} are reached reflectively (they do not
+ * exist while the RED tests are written).
  */
 // @trace FR-13
 // @trace FR-48
 // @trace FR-52
+// @trace FR-54
 // @trace FR-56
 @Timeout(30)
 class SourceRetrievalUnitTest {
@@ -44,31 +43,29 @@ class SourceRetrievalUnitTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-07T12:00:00Z"), ZoneOffset.UTC);
 
     /**
-     * Article fetcher double: a Mockito mock of the real class, so no constructor runs and the test does not depend on how
-     * the fetcher is built (the production constructor takes a SafeFetcher since FR-56); the network call is replaced.
+     * Article retriever double (article-retrieval.md slice 08: {@code SourceRetrieval} calls {@code ArticleRetriever.retrieveAll} instead of
+     * {@code ArticleMetadataFetcher.fetchDetailed}): a Mockito mock of the real class, so no constructor runs; {@code retrieveAll} counts the
+     * call and, when {@code blocking}, waits until released (an interrupt of the waiting thread throws InterruptedException, as the real
+     * one does). The class does not exist while the RED tests are written, so it is reached by name.
      */
     private static final class FakeFetcher {
         final CountDownLatch release = new CountDownLatch(1);
         final boolean blocking;
         final AtomicInteger calls = new AtomicInteger();
-        final ArticleMetadataFetcher fetcher = Mockito.mock(ArticleMetadataFetcher.class);
+        final Object fetcher;
 
+        @SuppressWarnings("unchecked")
         FakeFetcher(boolean blocking) {
             this.blocking = blocking;
-            Mockito.when(fetcher.fetchDetailed(ArgumentMatchers.anyString(), ArgumentMatchers.anyInt())).thenAnswer(inv -> {
-                String url = inv.getArgument(0);
-                calls.incrementAndGet();
-                if (url.contains("/boom")) {
-                    throw new IllegalStateException("unexpected fetch problem");
-                }
-                if (blocking) {
-                    try {
+            fetcher = Mockito.mock((Class<Object>) ParallelSearchSupport.cls(ParallelSearchSupport.RETRIEVER), inv -> {
+                if (inv.getMethod().getName().equals("retrieveAll")) {
+                    calls.incrementAndGet();
+                    if (blocking) {
                         release.await(20, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
                     }
+                    return List.of();
                 }
-                return Optional.<ArticleMetadataFetcher.Fetched>empty();
+                return inv.getMethod().getReturnType() == boolean.class ? Boolean.FALSE : null;
             });
         }
     }
@@ -84,7 +81,7 @@ class SourceRetrievalUnitTest {
         fetchers.add(fetcher);
         SourceQualityTable table = new SourceQualityTable("who.int", "nature.com", "reuters.com", "medium.com");
         Object search = ParallelSearchSupport.googleSearch(provider, 1, Duration.ofSeconds(1), Duration.ZERO);
-        return ParallelSearchSupport.retrieval(search, fetcher.fetcher, table, clock, window, 2);
+        return ParallelSearchSupport.retrieval(search, fetcher.fetcher, table, clock, window, Duration.ofSeconds(90));
     }
 
     private SourceRetrieval retrieval(NewsProvider provider, FakeFetcher fetcher, Duration window) {

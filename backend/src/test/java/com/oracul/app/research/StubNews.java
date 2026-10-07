@@ -6,10 +6,12 @@ import java.io.IOException;
 import java.net.URLDecoder;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +43,51 @@ public final class StubNews {
     /** A custom article page for /articles/<name>. */
     public record Page(int status, String contentType, String body) {}
 
+    /** FR-61: one request of {@code /rss/articles/<id>}: the 302 (redirect true) or the Google page (false); {@code rawQuery} as sent. */
+    public record GooglePageHit(String id, String rawQuery, boolean redirect) {}
+
+    /** FR-61: one batchexecute request; {@code id} / {@code ts} / {@code sg} are null when the {@code f.req} value did not carry them. */
+    public record Decode(String id, String ts, String sg, String contentType, String userAgent, String fReq, int status) {}
+
+    /** Paragraphs of the stub's publisher page (FR-61): the generic ones, and the ones that hold the remembered match text. */
+    public static final String P1 = "Opening paragraph of this publisher page. It introduces the report in plain words for every reader.";
+    public static final String P2_GENERIC = "Paragraph two continues the opening with neutral filler text and no particular subject at all.";
+    public static final String P3 = "Background paragraph three adds neutral filler text so that the page reads like a real article.";
+    public static final String P4_GENERIC = "Paragraph four continues with neutral filler text, written only to give the page enough length.";
+    public static final String P5 = "Paragraph five repeats neutral filler text to keep the article long enough for the extraction rules.";
+    public static final String P6 = "Closing paragraph six ends the article with a short summary in neutral and ordinary language here.";
+
+    /** P2 for the match text {@code m}. */
+    public static String p2(String m) {
+        return m + " is the subject of this second paragraph, which gives the details the reader asked about.";
+    }
+
+    /** P4 for the match text {@code m}. */
+    public static String p4(String m) {
+        return "Further details on " + m + " follow in the fourth paragraph, with dates, names and a short quote.";
+    }
+
+    /** The Google page of FR-61 for an id; a null {@code ts} / {@code sg} / {@code id} leaves that attribute out. */
+    public static String googlePage(String id, String ts, String sg) {
+        return "<!doctype html><html><head><title>Google News</title><meta property=\"og:site_name\" content=\"Google News\">"
+            + "<meta property=\"og:description\" content=\"Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.\">"
+            + "</head><body><c-wiz><div jscontroller=\"aLI87\"" + (id == null ? "" : " data-n-a-id=\"" + id + "\"")
+            + (ts == null ? "" : " data-n-a-ts=\"" + ts + "\"") + (sg == null ? "" : " data-n-a-sg=\"" + sg + "\"")
+            + "></div></c-wiz></body></html>";
+    }
+
+    /** The publisher page of FR-61: {@code match} = the remembered match text M (null: the generic page); {@code site} = og:site_name. */
+    public static String publisherPage(String name, String match, String site) {
+        String m = match == null ? "" : " " + match;
+        return "<!doctype html><html><head><title>Stub article " + name + "</title><meta property=\"og:site_name\" content=\"" + site + "\">"
+            + "<meta property=\"og:description\" content=\"Summary of " + name.replaceAll("[^\\w-]", "") + "\">"
+            + "<style>body { color: black } /* STYLE TEXT" + m + " */</style><script>var x = 'SCRIPT TEXT" + m + "';</script></head>"
+            + "<body><nav><p>NAVIGATION TEXT home world business" + m + "</p></nav><header><p>HEADER TEXT" + m + "</p></header>"
+            + "<article><p>" + P1 + "</p><p>" + (match == null ? P2_GENERIC : p2(match)) + "</p><p>" + P3 + "</p><p>"
+            + (match == null ? P4_GENERIC : p4(match)) + "</p><p>" + P5 + "</p><p>" + P6 + "</p></article>"
+            + "<footer><p>FOOTER TEXT" + m + "</p></footer></body></html>";
+    }
+
     public static final StubNews INSTANCE = new StubNews();
 
     private final HttpServer server;
@@ -50,6 +97,8 @@ public final class StubNews {
     public final List<Request> requests = new CopyOnWriteArrayList<>();
     /** Every request path the stub receives (any route, also unknown ones), in arrival order; cleared by {@link #reset()}. */
     public final List<String> paths = new CopyOnWriteArrayList<>();
+    /** Every request of any route as "&lt;path&gt; &lt;User-Agent header&gt;" in arrival order (FR-54: every hop of a fetch sends the same User-Agent); cleared by {@link #reset()}. */
+    public final List<String> userAgents = new CopyOnWriteArrayList<>();
     /** Every request of any route in arrival order with its arrival time; cleared by {@link #reset()}. */
     public final List<Arrival> arrivals = new CopyOnWriteArrayList<>();
     /** FR-52: request number to System.nanoTime() right after the answer was written or the connection was dropped. */
@@ -64,6 +113,38 @@ public final class StubNews {
     public volatile java.util.concurrent.CountDownLatch articleGate;
     public final Map<String, Page> pages = new ConcurrentHashMap<>();
     public final Map<String, String> sites = new ConcurrentHashMap<>();
+    // ---- FR-61 / FR-54: the Google article page, the batchexecute decode and the publisher page ------------------------
+    /** id of {@code /rss/articles/<id>} to the answer given instead of the default Google page (after the 302 step). */
+    public final Map<String, Page> googlePages = new ConcurrentHashMap<>();
+    /** The requests of {@code /rss/articles/<id>} in arrival order (the 302 step and the page step). */
+    public final List<GooglePageHit> googlePageRequests = new CopyOnWriteArrayList<>();
+    /** When set, every Google page answer (not the 302) waits until the latch is counted down (at most 60 s). */
+    public volatile java.util.concurrent.CountDownLatch googlePageGate;
+    public volatile long googlePageDelayMs;
+    /** id to the URL the decode answer returns instead of {@code baseUrl()/articles/<id>} (any string). */
+    public final Map<String, String> decoded = new ConcurrentHashMap<>();
+    /** ok | fail (500) | google-host | no-url (200 structured answer with a null URL). */
+    public volatile String decodeMode = "ok";
+    public volatile long decodeDelayMs;
+    public final List<Decode> decodeRequests = new CopyOnWriteArrayList<>();
+    public volatile java.util.concurrent.CountDownLatch decodeGate;
+    /** Number of decode requests that reached the stub, counted on arrival (before {@link #decodeGate}); {@link #decodeRequests} is filled only after the answer. */
+    public final java.util.concurrent.atomic.AtomicInteger decodeArrivals = new java.util.concurrent.atomic.AtomicInteger();
+    /** name of {@code /articles/<name>} to the match text M (remembered by {@link #googleLike()} or set by a test). */
+    public final Map<String, String> articleText = new ConcurrentHashMap<>();
+    public final Map<String, Long> articleDelays = new ConcurrentHashMap<>();
+    public volatile long publisherDelayMs;
+    /**
+     * Body stall: the headers (and the first body byte) are sent on time, the rest of the body only after this many ms. Per route: the Google
+     * page of {@code /rss/articles/<id>} (not its 302 step), the decode answer and the publisher page of {@code /articles/<name>}.
+     */
+    public volatile long googlePageBodyStallMs;
+    public volatile long decodeBodyStallMs;
+    public volatile long publisherBodyStallMs;
+    /** ok | fail (every publisher page answers 503). */
+    private volatile String publisherMode = "ok";
+    private final AtomicInteger retrievalOpen = new AtomicInteger();
+    private final AtomicInteger retrievalMaxOpen = new AtomicInteger();
     /** Answer of GET /rss/search; the default is an empty channel (200), like a Google answer without items. */
     public volatile Function<Request, Reply> responder = defaultResponder();
 
@@ -77,6 +158,7 @@ public final class StubNews {
         server.createContext("/", this::handleOther);
         server.createContext("/rss/search", this::handleSearch);
         server.createContext("/rss/articles/", this::handleRssArticle);
+        server.createContext("/_/DotsSplashUi/data/batchexecute", this::handleDecode);
         server.createContext("/articles/", this::handleArticle);
         server.createContext("/redirect/", this::handleRedirect);
         server.createContext("/redirect-to", this::handleRedirectTo);
@@ -99,6 +181,8 @@ public final class StubNews {
     /** Points the Google News client at this stub (NFR-7): a request never reaches the real internet. */
     public static void registerBaseUrls(DynamicPropertyRegistry r) {
         r.add("oracul.news.google.base-url", INSTANCE::baseUrl);
+        // FR-61: the batchexecute decode call goes to the stub as well (NFR-7)
+        r.add("oracul.news.google.decode-url", () -> INSTANCE.baseUrl() + "/_/DotsSplashUi/data/batchexecute");
         // FR-56: the in-process stub is on the loopback address; exactly this host name is exempt from the address check
         r.add("oracul.news.fetch.allowed-private-hosts", () -> "127.0.0.1");
     }
@@ -107,8 +191,15 @@ public final class StubNews {
         java.util.concurrent.CountDownLatch gate = articleGate;
         articleGate = null;
         if (gate != null) gate.countDown(); // never leave a handler thread parked
+        java.util.concurrent.CountDownLatch pageGate = googlePageGate;
+        googlePageGate = null;
+        if (pageGate != null) pageGate.countDown();
+        java.util.concurrent.CountDownLatch decGate = decodeGate;
+        decodeGate = null;
+        if (decGate != null) decGate.countDown();
         requests.clear();
         paths.clear();
+        userAgents.clear();
         arrivals.clear();
         finishedNanos.clear();
         epoch++;
@@ -120,7 +211,137 @@ public final class StubNews {
         articleRequests.clear();
         pages.clear();
         sites.clear();
+        googlePages.clear();
+        googlePageRequests.clear();
+        googlePageDelayMs = 0;
+        decoded.clear();
+        decodeMode = "ok";
+        decodeDelayMs = 0;
+        decodeRequests.clear();
+        decodeArrivals.set(0);
+        articleText.clear();
+        articleDelays.clear();
+        publisherDelayMs = 0;
+        googlePageBodyStallMs = 0;
+        decodeBodyStallMs = 0;
+        publisherBodyStallMs = 0;
+        publisherMode = "ok";
+        retrievalOpen.set(0);
+        retrievalMaxOpen.set(0);
     }
+
+    /** FR-61: the exchanges open right now over {@code /rss/articles/}, the decode route and {@code /articles/}. */
+    public int retrievalOpen() {
+        return retrievalOpen.get();
+    }
+
+    /** FR-61: the most exchanges open at the same time over those three routes since reset (handler entry until finished, delays included). */
+    public int retrievalMaxOpen() {
+        return retrievalMaxOpen.get();
+    }
+
+    /**
+     * FR-61: the control modes of the E2E stub as in-process settings (one mode at a time: a call replaces the previous one):
+     * ok, empty, down, malformed, rate-limited-once, slow (2000 ms), decode-fail, decode-google-host, publisher-fail, publisher-timeout.
+     */
+    public void mode(String mode) {
+        mode(mode, mode.equals("slow") ? 2000L : 0L, null);
+    }
+
+    /** {@code empty-for} + term (searches whose decoded {@code q} contains the term, case-insensitive, answer 0 items). */
+    public void mode(String mode, String term) {
+        mode(mode, 0L, term);
+    }
+
+    /** {@code slow} + ms. */
+    public void mode(String mode, long ms) {
+        mode(mode, ms, null);
+    }
+
+    private void mode(String mode, long ms, String term) {
+        responder = googleLike();
+        decodeMode = "ok";
+        publisherMode = "ok";
+        publisherDelayMs = 0;
+        switch (mode) {
+            case "ok" -> { }
+            case "empty" -> responder = req -> rss();
+            case "empty-for" -> {
+                String t = term.toLowerCase();
+                Function<Request, Reply> inner = googleLike();
+                responder = req -> req.q().toLowerCase().contains(t) ? rss() : inner.apply(req);
+            }
+            case "down" -> responder = req -> status(503);
+            case "malformed" -> responder = req -> rssBody("<rss><channel><item><title>broken");
+            case "rate-limited-once" -> {
+                AtomicInteger first = new AtomicInteger();
+                Function<Request, Reply> inner = googleLike();
+                responder = req -> first.getAndIncrement() == 0 ? tooMany() : inner.apply(req);
+            }
+            case "slow" -> responder = slow(ms, googleLike());
+            case "decode-fail" -> decodeMode = "fail";
+            case "decode-google-host" -> decodeMode = "google-host";
+            case "publisher-fail" -> publisherMode = "fail";
+            case "publisher-timeout" -> publisherDelayMs = 10_000;
+            default -> throw new IllegalArgumentException("unknown mode " + mode);
+        }
+    }
+
+    private static final java.util.regex.Pattern WHEN = java.util.regex.Pattern.compile(" when:\\d+d$");
+
+    /**
+     * FR-61, the pure matcher of {@code /rss/search}: after removing a trailing " when:&lt;N&gt;d", a query holding "(" or ")" answers 0
+     * items, so does a query with " OR " in which any element has more than one word or starts with a quote; every other query answers items.
+     */
+    public static boolean answersItems(String q) {
+        String t = WHEN.matcher(q == null ? "" : q.trim()).replaceFirst("").trim();
+        if (t.contains("(") || t.contains(")")) return false;
+        if (t.contains(" OR ")) {
+            for (String element : t.split(" OR ")) {
+                String e = element.trim();
+                if (e.startsWith("\"") || e.split("\\s+").length > 1) return false;
+            }
+        }
+        return true;
+    }
+
+    private static String sha1Key(String text) {
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-1").digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : d) sb.append(String.format("%02x", b));
+            return sb.substring(0, 8);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * FR-61: a responder that answers like the E2E stub: the matcher of {@link #answersItems} first (0 items), else 5 items per element
+     * (item 1 "Shared stub article - Reuters" at {@code <base>/rss/articles/shared?utm_source=<n>}, items 2...5 "&lt;e&gt; stub article
+     * &lt;key&gt;-&lt;a&gt; - Reuters" at {@code <base>/rss/articles/<key>-<a>}, key = sha1(e)[0..8]); every key-a remembers its element as
+     * the match text of the publisher page.
+     */
+    public static Function<Request, Reply> googleLike() {
+        return req -> {
+            if (!answersItems(req.q())) return rss();
+            String base = INSTANCE.baseUrl();
+            String date = pubDate(Instant.now().minus(1, ChronoUnit.DAYS));
+            List<String> items = new ArrayList<>();
+            for (String e : req.elements()) {
+                String key = sha1Key(e);
+                for (int a = 1; a <= 5; a++) {
+                    String title = a == 1 ? "Shared stub article - Reuters" : e + " stub article " + key + "-" + a + " - Reuters";
+                    String link = a == 1 ? base + "/rss/articles/shared?utm_source=" + req.number() : base + "/rss/articles/" + key + "-" + a;
+                    if (a > 1) INSTANCE.articleText.put(key + "-" + a, e);
+                    String description = "<a href=\"" + link + "\" target=\"_blank\">" + title + "</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">Reuters</font>";
+                    items.add(rssItem(title, link, date, "Reuters", "https://www.reuters.com", description));
+                }
+            }
+            return rss(items.toArray(String[]::new));
+        };
+    }
+
 
     /** Registers the og:site_name of /articles/<name>; unregistered pages keep "Stub Site". */
     public void site(String name, String siteName) {
@@ -180,6 +401,7 @@ public final class StubNews {
     private void arrive(HttpExchange ex) {
         String path = ex.getRequestURI().getPath();
         paths.add(path);
+        userAgents.add(path + " " + ex.getRequestHeaders().getFirst("User-Agent"));
         arrivals.add(new Arrival(path, System.nanoTime()));
     }
 
@@ -317,44 +539,179 @@ public final class StubNews {
         return out;
     }
 
-    /** /rss/articles/<rest> answers 302 to {base}/articles/<rest> (the query string is dropped). */
+    private void enterRetrieval() {
+        retrievalMaxOpen.accumulateAndGet(retrievalOpen.incrementAndGet(), Math::max);
+    }
+
+    private void leaveRetrieval(int myEpoch) {
+        if (myEpoch == epoch) retrievalOpen.decrementAndGet();
+    }
+
+    /** One retrieval exchange: it stops counting as open once the client can see the answer (it may release its permit and send the next request at once). */
+    private final class Exchange {
+        private final int myEpoch = epoch;
+        private boolean left;
+
+        Exchange() {
+            enterRetrieval();
+        }
+
+        void leave() {
+            if (!left) {
+                left = true;
+                leaveRetrieval(myEpoch);
+            }
+        }
+
+        int epoch() {
+            return myEpoch;
+        }
+    }
+
+    private static void awaitGate(java.util.concurrent.CountDownLatch gate) {
+        if (gate == null) return;
+        try {
+            gate.await(60, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void sleep(long ms) {
+        if (ms <= 0) return;
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * FR-61 /rss/articles/&lt;id&gt;: without the query parameter {@code hl} a 302 to the same path with {@code &hl=en-US&gl=US&ceid=US:en}
+     * appended, with it the Google page carrying {@code data-n-a-id / -ts / -sg} (or the {@link #googlePages} override).
+     */
     private void handleRssArticle(HttpExchange ex) throws IOException {
         arrive(ex);
-        String rest = ex.getRequestURI().getPath().substring("/rss/articles/".length());
-        ex.getResponseHeaders().add("Location", baseUrl() + "/articles/" + rest);
-        ex.sendResponseHeaders(302, -1);
-        ex.close();
+        Exchange x = new Exchange();
+        try {
+            String rawPath = ex.getRequestURI().getRawPath();
+            String id = rawPath.substring("/rss/articles/".length());
+            String raw = ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery();
+            boolean hasHl = false;
+            for (String pair : raw.split("&")) {
+                if (pair.equals("hl") || pair.startsWith("hl=")) hasHl = true;
+            }
+            googlePageRequests.add(new GooglePageHit(id, raw, !hasHl));
+            if (!hasHl) {
+                ex.getResponseHeaders().add("Location", rawPath + "?" + (raw.isEmpty() ? "" : raw + "&") + "hl=en-US&gl=US&ceid=US:en");
+                x.leave();
+                ex.sendResponseHeaders(302, -1);
+                ex.close();
+                return;
+            }
+            awaitGate(googlePageGate);
+            sleep(googlePageDelayMs);
+            Page page = googlePages.get(id);
+            x.leave();
+            if (page != null) {
+                send(ex, page.status(), page.contentType(), page.body().getBytes(StandardCharsets.UTF_8), googlePageBodyStallMs);
+                return;
+            }
+            send(ex, 200, "text/html; charset=utf-8", googlePage(id, "1759737600", "sig-" + id).getBytes(StandardCharsets.UTF_8), googlePageBodyStallMs);
+        } finally {
+            x.leave();
+        }
+    }
+
+    /** FR-61 batchexecute: form field f.req (JSON) holds id, ts and sg at entries 2, 3 and 4 of its inner array. */
+    private void handleDecode(HttpExchange ex) throws IOException {
+        arrive(ex);
+        Exchange x = new Exchange();
+        try {
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String fReq = null;
+            for (String pair : body.split("&")) {
+                if (pair.startsWith("f.req=")) fReq = URLDecoder.decode(pair.substring("f.req=".length()), StandardCharsets.UTF_8);
+            }
+            String id = null;
+            String ts = null;
+            String sg = null;
+            try {
+                String inner = com.jayway.jsonpath.JsonPath.read(fReq, "$[0][0][1]");
+                Object i = com.jayway.jsonpath.JsonPath.read(inner, "$[2]");
+                Object t = com.jayway.jsonpath.JsonPath.read(inner, "$[3]");
+                Object g = com.jayway.jsonpath.JsonPath.read(inner, "$[4]");
+                id = i == null ? null : String.valueOf(i);
+                ts = t == null ? null : String.valueOf(t);
+                sg = g == null ? null : String.valueOf(g);
+            } catch (RuntimeException e) {
+                // unparsable: answered 400 below, the values stay null
+            }
+            boolean valid = id != null && ts != null && sg != null && ts.matches("\\d+") && sg.equals("sig-" + id);
+            if (x.epoch() == epoch) decodeArrivals.incrementAndGet();
+            awaitGate(decodeGate);
+            sleep(decodeDelayMs);
+            int status;
+            String reply;
+            String contentType = "application/json;charset=utf-8";
+            if (!valid) {
+                status = 400;
+                reply = "bad request";
+                contentType = "text/plain";
+            } else if ("fail".equals(decodeMode)) {
+                status = 500;
+                reply = "decode failed";
+                contentType = "text/plain";
+            } else {
+                status = 200;
+                String url;
+                if ("google-host".equals(decodeMode)) url = "https://news.google.com/rss/articles/" + id;
+                else if ("no-url".equals(decodeMode)) url = null;
+                else url = decoded.getOrDefault(id, baseUrl() + "/articles/" + id);
+                String urlJson = url == null ? "null" : "\\\"" + url.replace("\\", "\\\\\\\\").replace("\"", "\\\\\\\"") + "\\\"";
+                reply = ")]}'\n\n[[\"wrb.fr\",\"Fbv4je\",\"[\\\"garturlres\\\"," + urlJson + ",1]\",null,null,null,\"generic\"]]";
+            }
+            if (x.epoch() == epoch) {
+                decodeRequests.add(new Decode(id, ts, sg, ex.getRequestHeaders().getFirst("Content-Type"),
+                    ex.getRequestHeaders().getFirst("User-Agent"), fReq, status));
+            }
+            x.leave();
+            send(ex, status, contentType, reply.getBytes(StandardCharsets.UTF_8), decodeBodyStallMs);
+        } finally {
+            x.leave();
+        }
     }
 
     private void handleArticle(HttpExchange ex) throws IOException {
         arrive(ex);
-        String name = ex.getRequestURI().getPath().substring("/articles/".length());
-        articleRequests.add(name);
-        java.util.concurrent.CountDownLatch gate = articleGate;
-        if (gate != null) {
-            try {
-                gate.await(60, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        Exchange x = new Exchange();
+        try {
+            String name = ex.getRequestURI().getPath().substring("/articles/".length());
+            articleRequests.add(name);
+            awaitGate(articleGate);
+            sleep(publisherDelayMs);
+            Long delay = articleDelays.get(name);
+            if (delay != null) sleep(delay);
+            Page page = pages.get(name);
+            if ("slow".equals(name) && page == null && !"fail".equals(publisherMode)) sleep(3000);
+            x.leave();
+            if (page != null) {
+                send(ex, page.status(), page.contentType(), page.body().getBytes(StandardCharsets.UTF_8), publisherBodyStallMs);
+                return;
             }
-        }
-        Page page = pages.get(name);
-        if (page != null) {
-            send(ex, page.status(), page.contentType(), page.body().getBytes(StandardCharsets.UTF_8));
-            return;
-        }
-        if ("slow".equals(name)) {
-            try {
-                Thread.sleep(3000);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
+            if ("fail".equals(publisherMode)) {
+                send(ex, 503, "text/plain", "unavailable".getBytes(StandardCharsets.UTF_8), publisherBodyStallMs);
+                return;
             }
+            if ("pdf".equals(name)) {
+                send(ex, 200, "application/pdf", "%PDF-1.4 stub".getBytes(StandardCharsets.UTF_8), publisherBodyStallMs);
+                return;
+            }
+            send(ex, 200, "text/html; charset=utf-8",
+                publisherPage(name, articleText.get(name), sites.getOrDefault(name, "Stub Site")).getBytes(StandardCharsets.UTF_8), publisherBodyStallMs);
+        } finally {
+            x.leave();
         }
-        if ("pdf".equals(name)) {
-            send(ex, 200, "application/pdf", "%PDF-1.4 stub".getBytes(StandardCharsets.UTF_8));
-            return;
-        }
-        send(ex, 200, "text/html; charset=utf-8", html(name, sites.getOrDefault(name, "Stub Site")).getBytes(StandardCharsets.UTF_8));
     }
 
     /** /redirect/N answers 302 to /redirect/N-1; /redirect/0 is an article page "redirected". */
@@ -409,10 +766,22 @@ public final class StubNews {
     }
 
     private static void send(HttpExchange ex, int status, String contentType, byte[] out) throws IOException {
-        ex.getResponseHeaders().add("Content-Type", contentType);
+        send(ex, status, contentType, out, 0);
+    }
+
+    /** As above; with {@code stallMs} > 0 the headers and the first byte go out at once, the rest of the body after the stall. */
+    private static void send(HttpExchange ex, int status, String contentType, byte[] out, long stallMs) throws IOException {
+        if (contentType != null) ex.getResponseHeaders().add("Content-Type", contentType);
         try {
             ex.sendResponseHeaders(status, out.length == 0 ? -1 : out.length);
-            if (out.length > 0) ex.getResponseBody().write(out);
+            if (out.length > 0 && stallMs > 0 && out.length > 1) {
+                ex.getResponseBody().write(out, 0, 1);
+                ex.getResponseBody().flush();
+                sleep(stallMs);
+                ex.getResponseBody().write(out, 1, out.length - 1);
+            } else if (out.length > 0) {
+                ex.getResponseBody().write(out);
+            }
         } catch (IOException ignored) {
             // client gave up
         } finally {

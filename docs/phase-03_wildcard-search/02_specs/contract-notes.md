@@ -136,3 +136,14 @@ Description-only edits of 0.7.0, no shape change and no rename (so still no `Ren
 - `FutureResult.sources` — for packs with `wildcardSections`: one entry per distinct Evidence ID, CORE, no counter-signal.
 Wire rule of the slice: `wildcardSections` present for every new pack; `PackWildcardSection.level`,
 `PackSourceItem.publishedAt` and `PackSourceItem.snippet` are absent when unset (NON_NULL mixins), never `null`.
+
+## Slice 08_article-text (step 4a)
+No shape change of 0.7.0 and no rename (still no `Renamed:` line): `Source.contentStatus` / `excerpts` /
+`publisherHost`, `ArticleContentStatus`, `SourceExcerpt` and `ResearchCounts.sourcesWithContent` already describe the
+slice. Wire rule of the slice: for runs created since this slice every source carries `contentStatus` and `excerpts`
+(possibly `[]`), `publisherHost` only when `url` is the publisher URL, and `counts.sourcesWithContent` is sent from the
+READING_SOURCES commit on (also `0`); stored older runs send none of them (NULL columns map to absent fields).
+Flyway file: `V13__source_content.sql` (`content_status`, `excerpts`, `publisher_host` on `source`). New configuration:
+`oracul.news.google.decode-url` (default derived from `oracul.news.google.base-url`), `oracul.news.article-fetch-timeout`
+default `PT8S`, `oracul.search.stage-budget` now also bounds retrieval; Docker E2E adds
+`ORACUL_NEWS_ARTICLE_FETCH_TIMEOUT: PT3S`. The stack modes of `.oracul/stack.json` do not change.

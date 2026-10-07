@@ -672,6 +672,74 @@ Removed (no longer read; a value that is still set is ignored and the backend st
   fusion when:90d` → 0. Every control mode produces its effect and `reset` returns to `ok` (parameterized E2E over the
   mode table, API-level).
 
+#### Slice 08_article-text — FR-61 delta (step 4a)
+Both stubs implement the happy path above with these exact details (refinements of items 1–5, decided here):
+- **Feed items keep their current shape** in the E2E stub (the slice-05 worked fixture and the E2E acceptance
+  assertions rely on it): per OR element e (a bare query is one element, outer quotes removed), key = `sha1(e)[0..8]`,
+  item 1 title `Shared stub article - Reuters`, link `http://stub:4010/rss/articles/shared?utm_source=<n>` (n = number of
+  the search request), items 2…5 title `<e> stub article <key>-<a> - Reuters`, link
+  `http://stub:4010/rss/articles/<key>-<a>`, `pubDate` now − 1 day, `<source url="https://www.reuters.com">Reuters</source>`;
+  new: `<description>` = XML-escaped `<a href="<link>" target="_blank"><title></a>&nbsp;&nbsp;<font color="#6f6f6f">Reuters</font>`.
+  The stub remembers `<key>-<a>` → e (match text of the publisher page). The FR-61 matcher (0 items) applies before.
+- **Google page route** `GET /rss/articles/<id>` (`<id>` = path rest, raw): without query parameter `hl` → 302,
+  `Location: /rss/articles/<id>?<original query>&hl=en-US&gl=US&ceid=US:en` (relative; `?hl=…` when the original query is
+  empty); with `hl` → 200 `text/html; charset=utf-8`:
+  `<!doctype html><html><head><title>Google News</title><meta property="og:site_name" content="Google News"><meta property="og:description" content="Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News."></head><body><c-wiz><div jscontroller="aLI87" data-n-a-id="<id>" data-n-a-ts="1759737600" data-n-a-sg="sig-<id>"></div></c-wiz></body></html>`.
+- **Decode route** `POST /_/DotsSplashUi/data/batchexecute`: form field `f.req` → JSON → `[0][0][1]` → JSON →
+  entries 2, 3, 4 = id, ts, sg. Missing / unparsable / sg ≠ `sig-<id>` / ts not a number → 400 `text/plain`
+  `bad request`; else 200 `application/json;charset=utf-8` with the body of item 3 and URL `<publisher base>/articles/<id>`
+  (Docker `http://stub:4010`, in-process `StubNews.baseUrl()`, unless overridden). Mode `decode-fail` → 500;
+  `decode-google-host` → URL `https://news.google.com/rss/articles/<id>`.
+- **Publisher page** `GET /articles/<name>`: 200 `text/html; charset=utf-8`, with M = the remembered match text (none →
+  generic page):
+  `<!doctype html><html><head><title>Stub article <name></title><meta property="og:site_name" content="<site>"><meta property="og:description" content="Summary of <name>"><style>body { color: black } /* STYLE TEXT <M> */</style><script>var x = 'SCRIPT TEXT <M>';</script></head><body><nav><p>NAVIGATION TEXT home world business <M></p></nav><header><p>HEADER TEXT <M></p></header><article><p>P1</p><p>P2</p><p>P3</p><p>P4</p><p>P5</p><p>P6</p></article><footer><p>FOOTER TEXT <M></p></footer></body></html>`
+  (`<site>` as today: E2E `Stub Site <name before its last '-', [^\w-] removed>` or `Stub Site`; in-process `sites`
+  entry or `Stub Site`; `<name>` with `[^\w-]` removed in the description; ` <M>` left out when there is no M):
+  - P1 `Opening paragraph of this publisher page. It introduces the report in plain words for every reader.` (99)
+  - P2 `<M> is the subject of this second paragraph, which gives the details the reader asked about.`; generic:
+    `Paragraph two continues the opening with neutral filler text and no particular subject at all.` (94)
+  - P3 `Background paragraph three adds neutral filler text so that the page reads like a real article.` (95)
+  - P4 `Further details on <M> follow in the fourth paragraph, with dates, names and a short quote.`; generic:
+    `Paragraph four continues with neutral filler text, written only to give the page enough length.` (95)
+  - P5 `Paragraph five repeats neutral filler text to keep the article long enough for the extraction rules.` (100)
+  - P6 `Closing paragraph six ends the article with a short summary in neutral and ordinary language here.` (98)
+  None of P1…P6 (generic) holds a token of a catalogue label, of `major current world events`, or `stub` / `query`.
+  Mode `publisher-fail` → 503 `text/plain`; `publisher-timeout` → the page after 10 s.
+- **E2E records** (`GET /__control/requests?kind=…`, cleared by reset): `rss` `{q, params, at, doneAt, items}`;
+  `google-page` `{id, step: "redirect"|"page", at}`; `decode` `{id, ts, sg, contentType, userAgent, status, at}` (also
+  for 400 answers, missing values `null`); `article` `{name, at}`; `all` unchanged `{method, path, at}`. Unknown kind →
+  400 `{"error":"unknown_kind"}`.
+- **E2E control** `POST /__control/google` body `{"mode": <string>, "term"?: <string>, "ms"?: <int>}` → 204; mode not in
+  the table or body not JSON → 400 `{"error":"unknown_mode"}`; `empty-for` without a non-blank `term` → 400
+  `{"error":"term_required"}`; `slow` without `ms` → 2000. One mode at a time (setting a mode replaces the previous one);
+  `rate-limited-once` answers 429 `text/plain` to the first search after it was set. `POST /__control/rss` → 404
+  `{"error":"not_found"}` (route removed). The E2E stub is owned by backend-builder.
+- **In-process harness `StubNews`** (owner tester; names fixed so ITs and units agree):
+  - `registerBaseUrls` also registers `oracul.news.google.decode-url` = `baseUrl() + "/_/DotsSplashUi/data/batchexecute"`.
+  - The default `/rss/search` responder stays the empty feed (the fixture ITs rely on it); `static Function<Request,
+    Reply> googleLike()` answers like the E2E stub (5 items per element, FR-61 matcher, links on `baseUrl()`, match text
+    remembered); `static boolean answersItems(String q)` is the pure matcher.
+  - `/rss/articles/<id>`: the 302 / Google page above; `Map<String, Page> googlePages` (id → answer instead of the
+    default page) and `static String googlePage(String id, String ts, String sg)` (null → attribute left out); records
+    `List<GooglePageHit> googlePageRequests` with `record GooglePageHit(String id, String rawQuery, boolean redirect)`;
+    `volatile CountDownLatch googlePageGate` (page answers wait ≤ 60 s) and `volatile long googlePageDelayMs`.
+  - `/_/DotsSplashUi/data/batchexecute` (POST): as above; `Map<String, String> decoded` (id → URL returned instead of
+    `baseUrl()/articles/<id>`, any string); `volatile String decodeMode` ∈ `ok`, `fail` (500), `google-host`, `no-url`
+    (200 structured answer with `null` URL), set also by `mode(...)`; `volatile long decodeDelayMs`; records
+    `List<Decode> decodeRequests` with `record Decode(String id, String ts, String sg, String contentType, String
+    userAgent, String fReq, int status)`; `volatile CountDownLatch decodeGate`.
+  - `/articles/<name>`: the publisher page above (`pages` overrides keep working, `html(name, siteName)` stays the
+    metadata-only page = NO_TEXT); `Map<String, String> articleText` (name → M); `Map<String, Long> articleDelays`
+    (name → ms) and `volatile long publisherDelayMs`; `articleRequests` / `articleGate` and the special names `slow` (3 s delay) and `pdf` (`application/pdf`) unchanged.
+  - `int retrievalOpen()` / `int retrievalMaxOpen()` — exchanges open at once over `/rss/articles/`, the decode route
+    and `/articles/` since reset; `void mode(String mode)`, `mode(String mode, String term)`, `mode(String mode, long ms)`
+    with the E2E names (`ok` installs `googleLike()`, `publisher-timeout` sets `publisherDelayMs` 10 000, …);
+    `reset()` clears every new map / list / gate / delay and sets `decodeMode` `ok` (responder: empty feed as today).
+- Changes earlier behaviour: E2E stub control `POST /__control/rss {"mode":"ok"|"empty"|"down"|"malformed"}` → 204 ⇒ 404 `{"error":"not_found"}`; the same modes (and more) via `POST /__control/google`, unknown mode there → 400 `{"error":"unknown_mode"}`; the beforeEach / helper / "unknown rss mode" calls move to `/__control/google`, and the unknown-mode test also asserts `/__control/rss` is 404 (tests: e2e/tests/search-sources.spec.ts, e2e/tests/insufficient-evidence.spec.ts, e2e/tests/run-control.spec.ts)
+- Changes earlier behaviour: in-process `/rss/articles/<rest>` answered 302 → `<base>/articles/<rest>` (query dropped) and `/articles/<name>` served a metadata-only page (`<body>x</body>`) ⇒ `/rss/articles/<id>` answers like real Google (same-path 302 with `hl`, then the Google page with `data-n-a-*`), the batchexecute route decodes it, `/articles/<name>` serves the article page with nav, header, script, style, footer and P1…P6; `registerBaseUrls` adds the decode URL (tests: backend/src/test/java/com/oracul/app/research/StubNews.java)
+- Ranges & invariants: (a) `q` classes, one table for `StubNews.answersItems` (unit) and an API-level E2E (`GET http://localhost:4010/rss/search?q=…`, count `<item>`): `vaccines when:90d` → 5; `energy crisis supply shortage warnings when:90d` → 5; `"mRNA vaccine approval" when:90d` → 5; `fusion OR fission when:90d` → 10; `(fusion OR fission) when:90d` → 0; `(energy crisis OR geopolitical fragmentation) when:90d` → 0; `"mRNA vaccine" OR "fusion plant" when:90d` → 0; `energy crisis OR fusion when:90d` → 0; `vaccines` (no window) → 5; (b) control (E2E, parameterized over the mode table): each mode → 204 and its effect on the next search / Google page / decode / publisher request (`empty` 0 items, `empty-for` `term` `W02` → only `W02 …` queries get 0 items, `down` 503, `malformed` the broken body, `rate-limited-once` 429 once then items, `slow` `ms` 500 → answer ≥ 500 ms later, `decode-fail` 500, `decode-google-host` the news.google.com URL, `publisher-fail` 503, `publisher-timeout` no answer within 3 s); `reset` → `ok` and every record list empty; unknown mode, non-JSON body, `empty-for` without term → 400; `/__control/rss` → 404; (c) Google page / decode shape (E2E API-level): `GET /rss/articles/abc?oc=5` → 302 with `Location` `/rss/articles/abc?oc=5&hl=en-US&gl=US&ceid=US:en`; that URL → 200 with exactly one element carrying `data-n-a-id="abc"`, `data-n-a-ts="1759737600"`, `data-n-a-sg="sig-abc"`; batchexecute with the slice `f.req` of that triple → 200 whose `garturlres` URL is `http://stub:4010/articles/abc`; with sg `sig-x` → 400; `/articles/abc` → HTML containing `<nav>`, `<script>`, `<style>` and six `<p>` inside `<article>`; (d) stub-driven runs (E2E `article-text.spec.ts`, body A unless named): mode `ok` → the worked fixture of article-retrieval.md slice 08 (all RETRIEVED, 7 `decode`, 14 `google-page`, 7 `article` records, no fragment containing `NAVIGATION TEXT`, `HEADER TEXT`, `FOOTER TEXT`, `SCRIPT TEXT` or `STYLE TEXT`); `decode-fail` and `decode-google-host` → all DECODE_FAILED (Google link, no `publisherHost`, 0 `article` records); `publisher-fail` and `publisher-timeout` → all PAGE_FAILED with url `http://stub:4010/articles/…` and `publisherHost` `stub`; `rate-limited-once` → 7 `rss` records, every query OK; `empty-for` `W02` → W02's 3 queries EMPTY, 4 sources all `pipelineIds` [W01], W02 `sourceIds` []; every one of these runs is COMPLETED. Invariant: no backend test and no E2E test sends a request to a real Google host (every `decode` / `google-page` / `article` request is recorded by a stub).
+
+
 ### NFR-10 — Search stage time budget
 - Rule: t0 = start of stage RESEARCH_STRATEGY (the instant `markStage(RESEARCH_STRATEGY)` commits, from the injected
   `Clock`). Windows, all cut further by the run's `deadlineAt`:
@@ -692,6 +760,19 @@ Removed (no longer read; a value that is still set is ignored and the backend st
   stub that never answers → templates, plan stored within ≈ 1 s; a search stub that never answers → every query FAILED
   at ≈ 2 s; a publisher stub that never answers → every source NOT_ATTEMPTED / "content not retrieved" at ≈ 3 s; in
   all three the run continues and ends COMPLETED with a story.
+- Slice 08_article-text (part 3, step 4a): `SearchBudget.Phase.RETRIEVAL` with window `oracul.search.stage-budget`
+  (PT90S), used by `ArticleRetriever` (article-retrieval.md slice-08 delta: per-request timeouts cut to the remaining
+  window, budget polled every ≤ 100 ms, unfinished retrievals NOT_ATTEMPTED). `SearchBudgetTest` gains the RETRIEVAL
+  classes (remaining at t0 = 90 s, at t0 + 90 s − 1 ms = 1 ms, at t0 + 90 s → 0 and expired, `deadlineAt` before
+  t0 + 90 s wins). The backend ITs are those of article-retrieval.md slice-08 range (j). E2E (`e2e/tests/article-text.spec.ts`,
+  NFR-10 acceptance 2): body with three wildcards (`biology-new-pandemic` 8, `robotics-humanoid-boom` 6,
+  `energy-energy-crisis` 5; realism 8, darkness 9, optimism 2, horizon 5y, story on) in stub mode `ok` → COMPLETED,
+  9 `rss` records, 10 sources all RETRIEVED, `completedAt` − `createdAt` < 30 000 ms (10 s + 10 × the 2 s stage pacing),
+  and in `kind=all` the last `/articles/` request is < 10 000 ms after the first `POST /v1/responses` (= the first
+  QUERY_GENERATION call). Compose: a plain backend test (no Spring context, e.g.
+  `backend/src/test/java/com/oracul/app/ArticleFetchTimeoutComposeTest.java`) asserts `../docker-compose.e2e.yml` has
+  exactly one line `ORACUL_NEWS_ARTICLE_FETCH_TIMEOUT: PT3S` (quoted or not) and `../docker-compose.yml` none.
+
 
 ### NFR-11 — Real-service check gates GREEN (planning hook)
 - After the release the user runs ORACUL in real mode (`docker compose up -d`, real ChatGPT account, real Google News)

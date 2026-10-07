@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** getRun row #2: pipeline without delay ends COMPLETED at WRITING_STORY. */
-// @trace FR-24, FR-47, FR-50, FR-53
+// @trace FR-24, FR-47, FR-50, FR-53, FR-54
 // slice 05 / FR-50: stage SEARCHING runs the 3 queries of body B's one GENERAL pipeline (every one EMPTY), so counts.searches is 3.
 @TestPropertySource(properties = "oracul.run.placeholder-stage-delay=PT0S")
 class GetRunTerminalIT extends AbstractRunIT {
@@ -27,8 +27,9 @@ class GetRunTerminalIT extends AbstractRunIT {
         // run-control.md FR-47: the empty-news run is speculative and ends COMPLETED with a headline and the NO_EVIDENCE note
         assertThat(run.get("headline")).isEqualTo("Stub headline from the future");
         assertThat(noteKind(run)).isEqualTo("NO_EVIDENCE");
-        // FR-53: READING_SOURCES commits sourcesKept (also 0) and later counts writes keep it
-        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":3").replace("}", ",\"sourcesKept\":0}")));
+        // FR-53 / FR-54: READING_SOURCES commits sourcesKept and sourcesWithContent (also 0) and later counts writes keep both
+        assertThat(run.get("counts")).isEqualTo(json(ZERO_COUNTS.replace("\"searches\":0", "\"searches\":3")
+            .replace("}", ",\"sourcesKept\":0,\"sourcesWithContent\":0}")));
         assertThat(run.get("configuration")).isEqualTo(json(B));
     }
 }

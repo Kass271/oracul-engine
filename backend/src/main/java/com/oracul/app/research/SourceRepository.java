@@ -1,6 +1,8 @@
 package com.oracul.app.research;
 
+import com.oracul.app.api.model.ArticleContentStatus;
 import com.oracul.app.api.model.Source;
+import com.oracul.app.api.model.SourceExcerpt;
 import com.oracul.app.api.model.SourceType;
 import java.net.URI;
 import java.sql.Timestamp;
@@ -30,8 +32,9 @@ public class SourceRepository {
 
     public void insertAll(UUID runId, List<Stored> sources) {
         jdbc.batchUpdate("insert into source (run_id, id, url, publisher, title, published_at, retrieved_at, summary, "
-                + "topic, entities, source_type, source_quality, metadata_fetched, language, query_ids, publisher_url, pipeline_ids) "
-                + "values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, cast(? as jsonb), ?, cast(? as jsonb))",
+                + "topic, entities, source_type, source_quality, metadata_fetched, language, query_ids, publisher_url, pipeline_ids, content_status, excerpts, publisher_host) "
+                + "values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, cast(? as jsonb), ?, cast(? as jsonb), ?, "
+                + "cast(? as jsonb), ?)",
             sources, 100, (ps, st) -> {
                 Source s = st.source();
                 ps.setObject(1, runId);
@@ -52,6 +55,9 @@ public class SourceRepository {
                 ps.setString(16, s.getPublisherUrl() == null ? null : s.getPublisherUrl().toString());
                 ps.setString(17, s.getPipelineIds() == null || s.getPipelineIds().isEmpty() ? null
                     : json.writeValueAsString(s.getPipelineIds()));
+                ps.setString(18, s.getContentStatus() == null ? null : s.getContentStatus().getValue());
+                ps.setString(19, s.getExcerpts() == null ? null : json.writeValueAsString(s.getExcerpts()));
+                ps.setString(20, s.getPublisherHost());
             });
     }
 
@@ -68,7 +74,7 @@ public class SourceRepository {
 
     public List<Source> list(UUID runId) {
         return jdbc.query("select id, url, publisher, title, published_at, retrieved_at, summary, topic, entities, "
-                + "source_type, source_quality, metadata_fetched, query_ids, publisher_url, pipeline_ids from source where run_id = ? "
+                + "source_type, source_quality, metadata_fetched, query_ids, publisher_url, pipeline_ids, content_status, excerpts, publisher_host from source where run_id = ? "
                 + "order by length(id), id",
             (rs, i) -> {
                 Source s = new Source();
@@ -93,6 +99,14 @@ public class SourceRepository {
                 if (pipelineIds != null) {
                     s.setPipelineIds(json.readValue(pipelineIds, new TypeReference<List<String>>() { }));
                 }
+                String status = rs.getString("content_status");
+                if (status != null) {
+                    s.setContentStatus(ArticleContentStatus.fromValue(status));
+                }
+                String excerpts = rs.getString("excerpts");
+                s.setExcerpts(excerpts == null ? null
+                    : json.readValue(excerpts, new TypeReference<List<SourceExcerpt>>() { }));
+                s.setPublisherHost(rs.getString("publisher_host"));
                 return s;
             }, runId);
     }

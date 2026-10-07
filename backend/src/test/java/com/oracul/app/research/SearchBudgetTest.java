@@ -18,7 +18,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * NFR-10 part 1 / FR-52 (slice 03 delta): the pure {@code SearchBudget(Clock, t0, windows, deadlineAt)} for phase
  * SEARCH, with a fixed (mutable) clock. Reached reflectively: the record does not exist while this test is written.
  */
-// @trace FR-52, NFR-10
+// @trace FR-52, FR-54, NFR-10
 @Timeout(20)
 class SearchBudgetTest {
 
@@ -97,5 +97,52 @@ class SearchBudgetTest {
     void theCanonicalConstructorTakesTheWindowsMap() {
         Object budget = ParallelSearchSupport.budgetOf(clockAt(59_999), T0, Map.of("SEARCH", WINDOW), null);
         assertThat(ParallelSearchSupport.remaining(budget, "SEARCH")).isEqualTo(Duration.ofMillis(1));
+    }
+
+    // ---- slice 08 (NFR-10 part 3): phase RETRIEVAL, window = oracul.search.stage-budget (90 s) ------------------------------
+
+    private static final Duration STAGE_BUDGET = Duration.ofSeconds(90);
+
+    static Stream<Arguments> retrievalOffsets() {
+        // offset from t0 in ms, expected remaining in ms, expected expired: boundary classes of the 90 s stage budget
+        return Stream.of(
+            Arguments.of(0L, 90_000L, false),
+            Arguments.of(1L, 89_999L, false),
+            Arguments.of(45_000L, 45_000L, false),
+            Arguments.of(89_999L, 1L, false),
+            Arguments.of(90_000L, 0L, true),
+            Arguments.of(90_001L, 0L, true),
+            Arguments.of(300_000L, 0L, true));
+    }
+
+    // remaining at t0 = 90 s, at t0 + 90 s - 1 ms = 1 ms, at t0 + 90 s = 0 and expired
+    @ParameterizedTest(name = "RETRIEVAL, no deadline, {0} ms after t0: remaining {1} ms, expired {2}")
+    @MethodSource("retrievalOffsets")
+    void theRetrievalWindowFollowsTheStageBudget(long offsetMs, long remainingMs, boolean expired) {
+        Object budget = ParallelSearchSupport.retrievalBudget(clockAt(offsetMs), T0, STAGE_BUDGET, null);
+        assertThat(ParallelSearchSupport.remaining(budget, "RETRIEVAL")).isEqualTo(Duration.ofMillis(remainingMs));
+        assertThat(ParallelSearchSupport.expired(budget, "RETRIEVAL")).isEqualTo(expired);
+    }
+
+    static Stream<Arguments> retrievalDeadlines() {
+        // deadline offset from t0 (before, equal to and after t0 + 90 s), clock offset, expected remaining, expected expired
+        return Stream.of(
+            Arguments.of(30_000L, 0L, 30_000L, false),
+            Arguments.of(30_000L, 29_999L, 1L, false),
+            Arguments.of(30_000L, 30_000L, 0L, true),
+            Arguments.of(30_000L, 80_000L, 0L, true),
+            Arguments.of(90_000L, 89_999L, 1L, false),
+            Arguments.of(180_000L, 0L, 90_000L, false),
+            Arguments.of(180_000L, 89_999L, 1L, false),
+            Arguments.of(180_000L, 90_000L, 0L, true));
+    }
+
+    // deadlineAt before t0 + 90 s wins
+    @ParameterizedTest(name = "RETRIEVAL, deadline t0+{0} ms, clock t0+{1} ms: remaining {2} ms, expired {3}")
+    @MethodSource("retrievalDeadlines")
+    void theDeadlineWinsOverTheRetrievalWindowWhenItIsEarlier(long deadlineMs, long clockMs, long remainingMs, boolean expired) {
+        Object budget = ParallelSearchSupport.retrievalBudget(clockAt(clockMs), T0, STAGE_BUDGET, T0.plusMillis(deadlineMs));
+        assertThat(ParallelSearchSupport.remaining(budget, "RETRIEVAL")).isEqualTo(Duration.ofMillis(remainingMs));
+        assertThat(ParallelSearchSupport.expired(budget, "RETRIEVAL")).isEqualTo(expired);
     }
 }

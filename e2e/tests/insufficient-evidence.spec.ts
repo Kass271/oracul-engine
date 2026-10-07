@@ -141,7 +141,7 @@ test.describe('FR-47 Always generate, note insufficient evidence at the end', ()
 
   test('FR-47 no news at all: a speculative future with the NO_EVIDENCE note and no LOWER REALISM', async ({ page }) => {
     test.setTimeout(240_000);
-    expect((await page.request.post(`${STUB}/__control/rss`, { data: { mode: 'down' } })).status()).toBe(204);
+    expect((await page.request.post(`${STUB}/__control/google`, { data: { mode: 'down' } })).status()).toBe(204);
     await connect(page);
     await configureA10(page);
     await page.getByTestId('generate-button').click();

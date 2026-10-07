@@ -1,0 +1,1 @@
+ALTER TABLE source ADD COLUMN content_status VARCHAR(32) NULL, ADD COLUMN excerpts JSONB NULL, ADD COLUMN publisher_host TEXT NULL;

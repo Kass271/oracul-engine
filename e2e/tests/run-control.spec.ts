@@ -9,7 +9,7 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(async ({ request }) => {
   expect((await request.post(`${STUB}/__control/reset`)).status()).toBe(204);
-  await request.post(`${STUB}/__control/rss`, { data: { mode: 'ok' } });
+  expect((await request.post(`${STUB}/__control/google`, { data: { mode: 'ok' } })).status()).toBe(204);
   for (const name of ['events', 'scenario', 'story']) {
     expect((await request.post(`${STUB}/__control/${name}`, { data: { mode: 'ok' } })).status()).toBe(204);
   }
@@ -46,7 +46,7 @@ async function startAcceptanceRun(page: Page): Promise<string> {
   return page.url().split('/').pop()!;
 }
 
-async function recordedCount(page: Page, kind: 'responses' | 'rss' | 'all'): Promise<number> {
+async function recordedCount(page: Page, kind: 'responses' | 'rss' | 'google-page' | 'decode' | 'article' | 'all'): Promise<number> {
   const res = await page.request.get(`${STUB}/__control/requests?kind=${kind}`);
   expect(res.status()).toBe(200);
   const body = await res.json();
@@ -57,6 +57,10 @@ async function traffic(page: Page): Promise<Record<string, number>> {
   return {
     responses: await recordedCount(page, 'responses'),
     rss: await recordedCount(page, 'rss'),
+    // FR-54 / FR-61: the retrieval requests (Google page, decode, publisher page) stop with the run as well
+    googlePage: await recordedCount(page, 'google-page'),
+    decode: await recordedCount(page, 'decode'),
+    article: await recordedCount(page, 'article'),
     all: await recordedCount(page, 'all'),
   };
 }
@@ -67,7 +71,7 @@ async function getRun(page: Page, id: string): Promise<any> {
   return res.json();
 }
 
-// @trace FR-45
+// @trace FR-45, FR-61
 test.describe('FR-45 Stop a generation and start a new one', () => {
   test('FR-45 STOP ends the generation, nothing more is sent, and GENERATE THE FUTURE starts a new run', async ({ page }) => {
     test.setTimeout(120_000);

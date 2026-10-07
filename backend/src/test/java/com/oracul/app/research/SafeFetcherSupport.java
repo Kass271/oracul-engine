@@ -135,6 +135,11 @@ final class SafeFetcherSupport {
             return call("fetch", new Class<?>[] {URI.class, Duration.class}, URI.create(url), timeout);
         }
 
+        /** {@code fetch(URI, Duration, boolean sameHostOnly)} (article-retrieval.md slice 08 "SafeFetcher (additive)"). */
+        Res fetch(String url, Duration timeout, boolean sameHostOnly) {
+            return call("fetch", new Class<?>[] {URI.class, Duration.class, boolean.class}, URI.create(url), timeout, sameHostOnly);
+        }
+
         Object raw() {
             return target;
         }

@@ -2,11 +2,15 @@ package com.oracul.app.research;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.oracul.app.api.model.ArticleContentStatus;
 import com.oracul.app.api.model.HorizonCode;
+import com.oracul.app.api.model.PipelineQuery;
+import com.oracul.app.api.model.SearchPlan;
 import com.oracul.app.api.model.SearchQuery;
 import com.oracul.app.api.model.SearchQueryStatus;
 import com.oracul.app.api.model.Source;
 import com.oracul.app.api.model.SourceType;
+import com.oracul.app.api.model.WildcardPipeline;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -19,12 +23,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * phase-02 news-search.md FR-48 steps 3, 4 and 8 as changed by FR-52: what a Google News RSS item becomes — title
+ * phase-02 news-search.md FR-48 steps 3, 4 and 8 as changed by FR-52 and (R2) FR-54: what a Google News RSS item becomes — title
  * cleaning, attribution to the query whose own request returned the item (no longer by title), pubDate and link classes,
- * the article fetch that resolves a Google link (or does not), publisher and publisherUrl, source type and quality from
- * the publisher host. The search stage sends one request per planned query.
+ * the retrieval that decodes a Google link into the publisher URL and reads the publisher page (or does not), publisher and
+ * publisherUrl, source type and quality from the publisher host. The search stage sends one request per planned query.
  */
-// @trace FR-48, FR-52
+// @trace FR-48, FR-52, FR-54
 @TestPropertySource(properties = {
     "oracul.news.google.timeout=PT1S",
 })
@@ -228,75 +232,206 @@ class GoogleNewsSourceIT extends AbstractNewsSearchIT {
         }
     }
 
-    // ---- the article fetch: resolving a Google link ------------------------------------------------------------------------
+    // ---- the article retrieval: decoding a Google link (R2, article-retrieval.md FR-54) --------------------------------------
 
     @Test
-    void aRedirectToAnHtmlPageResolvesTheLink() throws Exception {
+    void aGoogleLinkIsDecodedToThePublisherPageAndRead() throws Exception {
         news.site("resolved-1", "Resolved Site");
         List<Source> s = oneItem(base() + "/rss/articles/resolved-1", "Resolved story - Reuters", recent(), "Reuters", REUTERS);
         assertThat(s).hasSize(1);
         Source src = s.get(0);
-        assertThat(src.getUrl()).as("the final URL, normalised").hasToString(base() + "/articles/resolved-1");
+        assertThat(src.getUrl()).as("the decoded publisher URL, normalised").hasToString(base() + "/articles/resolved-1");
+        assertThat(src.getPublisherHost()).isEqualTo("127.0.0.1");
+        assertThat(src.getContentStatus()).isEqualTo(ArticleContentStatus.RETRIEVED);
         assertThat(src.getMetadataFetched()).isTrue();
-        assertThat(src.getPublisher()).as("og:site_name of the page").isEqualTo("Resolved Site");
+        assertThat(src.getPublisher()).as("og:site_name of the publisher page").isEqualTo("Resolved Site");
         assertThat(src.getSummary()).as("the description of the page").isEqualTo("Summary of resolved-1");
         assertThat(src.getPublisherUrl()).hasToString(REUTERS);
         assertThat(src.getSourceType()).isEqualTo(SourceType.NEWS);
         assertThat(src.getSourceQuality()).isEqualTo(0.85);
         assertThat(src.getTitle()).isEqualTo("Resolved story");
-        assertThat(news.articleRequests).contains("resolved-1");
+        assertThat(news.articleRequests).containsExactly("resolved-1");
+        assertThat(news.decodeRequests).hasSize(1);
+        assertThat(news.decodeRequests.get(0).id()).isEqualTo("resolved-1");
+        assertThat(news.googlePageRequests.stream().map(StubNews.GooglePageHit::redirect).toList()).as("302 step, then the page").containsExactly(true, false);
     }
 
     @Test
-    void anAnswerWithoutARedirectKeepsTheGoogleLink() throws Exception {
+    void aLinkOnTheGoogleHostWhosePageHasNoAttributesKeepsTheGoogleLink() throws Exception {
         String link = base() + "/articles/direct-1";
         List<Source> s = oneItem(link, "Direct story - Reuters", recent(), "Reuters", REUTERS);
         assertThat(s).hasSize(1);
         Source src = s.get(0);
-        assertThat(src.getUrl()).as("no redirect: real Google answers its own page").hasToString(link);
+        assertThat(src.getUrl()).as("no data-n-a-* attributes on the page: decode failed, the Google link stays").hasToString(link);
+        assertThat(src.getContentStatus()).isEqualTo(ArticleContentStatus.DECODE_FAILED);
+        assertThat(src.getPublisherHost()).isNull();
         assertThat(src.getMetadataFetched()).isFalse();
         assertThat(src.getPublisher()).isEqualTo("Reuters");
-        assertThat(src.getSummary()).as("the title").isEqualTo("Direct story");
+        assertThat(src.getSummary()).as("no snippet: the title").isEqualTo("Direct story");
         assertThat(src.getPublisherUrl()).hasToString(REUTERS);
+        assertThat(news.decodeRequests).as("nothing to decode").isEmpty();
     }
 
-    static Stream<Arguments> unresolved() {
+    static Stream<Arguments> publisherOutcomes() {
+        // name, feed link path, expected status, expected metadataFetched
         return Stream.of(
-            Arguments.of("redirect to a 404", "/rss/articles/gone-404"),
-            Arguments.of("redirect to a page that outlasts the fetch timeout", "/rss/articles/slow"),
-            Arguments.of("redirect to a PDF", "/rss/articles/pdf"),
-            Arguments.of("six redirects", "/redirect/6"));
+            Arguments.of("decoded page answers 404", "/rss/articles/gone-404", ArticleContentStatus.PAGE_FAILED, false),
+            Arguments.of("decoded page is a PDF", "/rss/articles/pdf", ArticleContentStatus.PAGE_FAILED, false),
+            // 3 s page under the 8 s article-fetch-timeout (it was a failure under the phase-01 3 s)
+            Arguments.of("decoded page needs 3 s", "/rss/articles/slow", ArticleContentStatus.RETRIEVED, true));
     }
 
-    @ParameterizedTest(name = "{0}: the Google link is kept, metadataFetched false")
-    @MethodSource("unresolved")
-    void aFetchThatDoesNotEndInAnHtmlPageKeepsTheGoogleLink(String name, String path) throws Exception {
+    @ParameterizedTest(name = "{0}: {2}, publisher URL kept")
+    @MethodSource("publisherOutcomes")
+    void theDecodedPublisherUrlIsKeptWhetherOrNotThePageWasRead(String name, String path, ArticleContentStatus status, boolean metadata) throws Exception {
         news.pages.put("gone-404", new StubNews.Page(404, "text/html", "<html>gone</html>"));
+        String name2 = path.substring(path.lastIndexOf('/') + 1);
+        List<Source> s = oneItem(base() + path, "Publisher story - Reuters", recent(), "Reuters", REUTERS);
+        assertThat(s).as(name).hasSize(1);
+        Source src = s.get(0);
+        assertThat(src.getUrl()).as("the publisher URL, not the Google link").hasToString(base() + "/articles/" + name2);
+        assertThat(src.getPublisherHost()).isEqualTo("127.0.0.1");
+        assertThat(src.getContentStatus()).as(name).isEqualTo(status);
+        assertThat(src.getMetadataFetched()).isEqualTo(metadata);
+        assertThat(src.getPublisherUrl()).hasToString(REUTERS);
+        if (!metadata) {
+            assertThat(src.getPublisher()).isEqualTo("Reuters");
+            assertThat(src.getSummary()).isEqualTo("Publisher story");
+        }
+    }
+
+    static Stream<Arguments> googlePageFailures() {
+        return Stream.of(
+            Arguments.of("six same-host redirects", "/redirect/6"),
+            Arguments.of("a redirect chain that ends on a page without attributes", "/redirect/3"));
+    }
+
+    @ParameterizedTest(name = "{0}: DECODE_FAILED, the Google link is kept")
+    @MethodSource("googlePageFailures")
+    void aGooglePageThatCannotBeReadKeepsTheGoogleLink(String name, String path) throws Exception {
         String link = base() + path;
         List<Source> s = oneItem(link, "Unresolved story - Reuters", recent(), "Reuters", REUTERS);
         assertThat(s).as(name).hasSize(1);
         Source src = s.get(0);
         assertThat(src.getUrl()).hasToString(link);
+        assertThat(src.getContentStatus()).isEqualTo(ArticleContentStatus.DECODE_FAILED);
+        assertThat(src.getPublisherHost()).isNull();
         assertThat(src.getMetadataFetched()).isFalse();
         assertThat(src.getPublisher()).isEqualTo("Reuters");
         assertThat(src.getSummary()).isEqualTo("Unresolved story");
         assertThat(src.getPublisherUrl()).hasToString(REUTERS);
+        assertThat(news.decodeRequests).as("no attributes, no decode call").isEmpty();
+        assertThat(news.articleRequests).as("never a publisher fetch").isEmpty();
+    }
+
+    // R2 "a resolved URL already taken keeps its Google link" -> merge: two links decoding to one publisher URL are one source
+    @Test
+    void twoLinksThatDecodeToOnePublisherUrlAreOneSourceListingBothQueries() throws Exception {
+        var plan = new SearchPlanHolder(planOf(List.of("alpha one", "beta two")), HorizonCode._1Y);
+        news.decoded.put("m2", base() + "/articles/m1");
+        news.responder = req -> req.elements().contains("alpha one")
+            ? StubNews.rss(StubNews.rssItem("First story - Reuters", base() + "/rss/articles/m1", recent(), "Reuters", REUTERS))
+            : StubNews.rss(StubNews.rssItem("Second story - Reuters", base() + "/rss/articles/m2", recent(), "Reuters", REUTERS));
+        var outcome = search(plan.plan());
+        List<Source> s = new ArrayList<>();
+        for (var st : retrieval.readSources(outcome, plan.horizon())) s.add(st.source());
+        assertThat(s).as("merged before numbering").hasSize(1);
+        Source src = s.get(0);
+        assertThat(src.getId()).isEqualTo("S001");
+        assertThat(src.getUrl()).hasToString(base() + "/articles/m1");
+        assertThat(src.getTitle()).as("the earliest source in kept order keeps its fields").isEqualTo("First story");
+        assertThat(src.getQueryIds()).as("sorted union of the merged sources").isEqualTo(List.of("Q01", "Q02"));
+        assertThat(src.getContentStatus()).isEqualTo(ArticleContentStatus.RETRIEVED);
+        assertThat(news.decodeRequests).as("the decode endpoint is called once per kept Google link").hasSize(2);
+    }
+
+    // spec range (i): two links of two different pipelines that decode to one publisher URL
+    @Test
+    void twoLinksOfTwoPipelinesThatDecodeToOnePublisherUrlAreOneSourceOfBothPipelines() throws Exception {
+        SearchPlan plan = PlanSupport.plan(PlanSupport.cfgOfSize(2, 0));
+        assertThat(plan.getPipelines()).as("a plan with at least two pipelines").hasSizeGreaterThanOrEqualTo(2);
+        WildcardPipeline w1 = plan.getPipelines().get(0);
+        WildcardPipeline w2 = plan.getPipelines().get(1);
+        PipelineQuery q1 = w1.getQueries().get(0);
+        PipelineQuery q2 = w2.getQueries().get(0);
+        // the page of the merged source holds one paragraph per pipeline, each carrying the whole first query text of that pipeline
+        String para1 = q1.getText() + " is the subject of this paragraph, written for the first pipeline and its own readers alone.";
+        String para2 = q2.getText() + " is the subject of this paragraph, written for the second pipeline and its own readers alone.";
+        news.pages.put("m1", new StubNews.Page(200, "text/html", "<!doctype html><html><head><title>Merged</title></head><body><article>"
+            + "<p>" + StubNews.P1 + "</p><p>" + para1 + "</p><p>" + para2 + "</p><p>" + StubNews.P3 + "</p></article></body></html>"));
+        // m2 (found by the second pipeline) decodes to the publisher URL of m1; each pipeline has one more own article
+        news.decoded.put("m2", base() + "/articles/m1");
+        news.responder = req -> {
+            if (req.elements().contains(q1.getText())) {
+                return StubNews.rss(
+                    StubNews.rssItem("First pipeline story - Reuters", base() + "/rss/articles/m1", recent(), "Reuters", REUTERS),
+                    StubNews.rssItem("First pipeline own report - Reuters", base() + "/rss/articles/x1", recent(), "Reuters", REUTERS));
+            }
+            if (req.elements().contains(q2.getText())) {
+                return StubNews.rss(
+                    StubNews.rssItem("Second pipeline story - Reuters", base() + "/rss/articles/m2", recent(), "Reuters", REUTERS),
+                    StubNews.rssItem("Second pipeline own report - Reuters", base() + "/rss/articles/y1", recent(), "Reuters", REUTERS));
+            }
+            return StubNews.rss();
+        };
+        var outcome = search(plan);
+        SourceRetrieval.Read read = retrieval.read(outcome, HorizonCode._1Y, () -> true);
+        List<Source> s = read.sources().stream().map(SourceRepository.Stored::source).toList();
+
+        // m2 is merged into m1: three sources, ids contiguous in order
+        assertThat(s).as("m1 and m2 merged, x1 and y1 kept").hasSize(3);
+        assertThat(s).extracting(Source::getId).containsExactly("S001", "S002", "S003");
+        assertThat(s.stream().map(x -> x.getUrl().toString()).distinct().count()).as("stored urls distinct").isEqualTo(3L);
+        Source merged = s.stream().filter(x -> x.getUrl().toString().equals(base() + "/articles/m1")).findFirst().orElseThrow();
+        Source own1 = s.stream().filter(x -> x.getUrl().toString().equals(base() + "/articles/x1")).findFirst().orElseThrow();
+        Source own2 = s.stream().filter(x -> x.getUrl().toString().equals(base() + "/articles/y1")).findFirst().orElseThrow();
+        assertThat(s.stream().map(x -> x.getUrl().toString())).as("the merged-away link is no source").noneMatch(u -> u.endsWith("/m2"));
+        assertThat(merged.getPipelineIds()).as("the union of the pipelineIds, ascending").isEqualTo(List.of(w1.getId(), w2.getId()));
+        assertThat(merged.getQueryIds()).as("both queries that returned it, sorted").isEqualTo(
+            java.util.stream.Stream.of(q1.getId(), q2.getId()).sorted().toList());
+        assertThat(own1.getPipelineIds()).isEqualTo(List.of(w1.getId()));
+        assertThat(own2.getPipelineIds()).isEqualTo(List.of(w2.getId()));
+
+        // both pipelines list the survivor; the merged-away source is in neither list, no id twice
+        List<WildcardPipeline> pipelines = read.plan().getPipelines();
+        WildcardPipeline r1 = pipelines.stream().filter(p -> p.getId().equals(w1.getId())).findFirst().orElseThrow();
+        WildcardPipeline r2 = pipelines.stream().filter(p -> p.getId().equals(w2.getId())).findFirst().orElseThrow();
+        assertThat(r1.getSourceIds()).as(w1.getId() + " sourceIds").containsExactlyInAnyOrder(merged.getId(), own1.getId());
+        assertThat(r2.getSourceIds()).as(w2.getId() + " sourceIds: the survivor replaces the merged-away source").containsExactlyInAnyOrder(
+            merged.getId(), own2.getId());
+        assertThat(r1.getSourceIds()).doesNotHaveDuplicates();
+        assertThat(r2.getSourceIds()).doesNotHaveDuplicates();
+        assertThat(java.util.stream.Stream.concat(r1.getSourceIds().stream(), r2.getSourceIds().stream()).distinct().toList())
+            .as("every listed id is a source, every source is listed").containsExactlyInAnyOrderElementsOf(s.stream().map(Source::getId).toList());
+        for (Source x : s) {
+            for (WildcardPipeline p : pipelines) {
+                assertThat(p.getSourceIds().contains(x.getId())).as(p.getId() + " lists " + x.getId() + " iff its pipelineIds contain it")
+                    .isEqualTo(x.getPipelineIds().contains(p.getId()));
+            }
+        }
+        assertThat(read.sourcesWithContent()).as("every row RETRIEVED").isEqualTo(3);
+        assertThat(s).allSatisfy(x -> assertThat(x.getContentStatus()).isEqualTo(ArticleContentStatus.RETRIEVED));
+        assertThat(news.articleRequests).as("the page of the merged source was fetched").contains("m1");
+
+        // extraction runs per pipeline of the merged source: an excerpt for each pipeline that got a fragment, own paragraph strongest
+        assertThat(merged.getExcerpts()).as("one excerpt per pipeline").extracting(e -> e.getPipelineId()).containsExactly(w1.getId(), w2.getId());
+        assertThat(merged.getExcerpts().get(0).getFragments().get(0)).as(w1.getId() + " strongest fragment").isEqualTo(para1);
+        assertThat(merged.getExcerpts().get(1).getFragments().get(0)).as(w2.getId() + " strongest fragment").isEqualTo(para2);
+        for (var e : merged.getExcerpts()) {
+            assertThat(merged.getPipelineIds()).as("excerpt pipelineId in the source's pipelineIds").contains(e.getPipelineId());
+        }
     }
 
     @Test
-    void aResolvedUrlThatAnEarlierSourceAlreadyHasIsNotUsedTwice() throws Exception {
+    void twoGoogleLinksOfOneArticleWithTheSameIdAreOneSource() throws Exception {
         List<Source> s = sources(one(),
             StubNews.rssItem("First story - Reuters", base() + "/rss/articles/same", recent(), "Reuters", REUTERS),
             StubNews.rssItem("Second story - Reuters", base() + "/rss/articles/same?second=1", recent(), "Reuters", REUTERS));
-        assertThat(s).hasSize(2);
+        assertThat(s).hasSize(1);
         assertThat(s.get(0).getId()).isEqualTo("S001");
         assertThat(s.get(0).getUrl()).hasToString(base() + "/articles/same");
         assertThat(s.get(0).getMetadataFetched()).isTrue();
-        assertThat(s.get(1).getId()).isEqualTo("S002");
-        assertThat(s.get(1).getUrl().toString()).as("the later source keeps its Google link: urls stay unique per run")
-            .startsWith(base() + "/rss/articles/same").isNotEqualTo(s.get(0).getUrl().toString());
-        assertThat(s.get(1).getMetadataFetched()).isFalse();
-        assertThat(s.stream().map(x -> x.getUrl().toString()).distinct().count()).isEqualTo(2);
+        assertThat(s.stream().map(x -> x.getUrl().toString()).distinct().count()).isEqualTo(s.size());
     }
 
     @Test

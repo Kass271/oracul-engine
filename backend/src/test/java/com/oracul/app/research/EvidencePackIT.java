@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
  * Rows #3, #4, #7, #9-#12 of research-pipeline.md "Slice 07_evidence-pack" (the Evidence Pack and getEvidencePack), as changed
  * by wildcard-evidence.md "Slice 06_wildcard-pack": the pack is grouped by wildcard (fixtures (a), (b), (c), (f)).
  */
-// @trace FR-18, FR-47, FR-57
+// @trace FR-18, FR-47, FR-55, FR-57
 class EvidencePackIT extends AbstractEvidenceIT {
 
     private static final List<String> PACK_KEYS = List.of("id", "generationId", "cutoff", "configuration", "profile", "core",
@@ -68,8 +68,9 @@ class EvidencePackIT extends AbstractEvidenceIT {
         for (int k = 0; k < 4; k++) {
             Map<String, Object> item = w1Items.get(k);
             Map<String, Object> source = sources.get(k);
+            // FR-55: the publisher page of every source is read, so the items carry fragments and no snippet
             assertThat(item.keySet()).containsExactlyInAnyOrder("evidenceId", "sourceId", "title", "publisher", "publishedAt", "url",
-                "contentRetrieved", "fragments", "snippet");
+                "contentRetrieved", "fragments");
             assertThat(item.get("evidenceId")).isEqualTo(String.format("E%03d", k + 1));
             assertThat(item.get("sourceId")).isEqualTo(source.get("id"));
             assertThat(item.get("title")).isEqualTo(source.get("title")).isEqualTo(V4_TITLES.get(k));
@@ -77,9 +78,9 @@ class EvidencePackIT extends AbstractEvidenceIT {
             assertThat(OffsetDateTime.parse((String) item.get("publishedAt")).toInstant())
                 .isEqualTo(OffsetDateTime.parse((String) source.get("publishedAt")).toInstant());
             assertThat(item.get("url")).isEqualTo(source.get("url"));
-            assertThat(item.get("contentRetrieved")).isEqualTo(false);
-            assertThat(item.get("fragments")).isEqualTo(List.of());
-            assertThat(item.get("snippet")).isEqualTo(source.get("summary"));
+            assertThat(item.get("contentRetrieved")).isEqualTo(true);
+            assertThat(item.get("fragments")).isEqualTo(List.of(StubNews.P1));
+            assertThat(item).doesNotContainKey("snippet");
         }
 
         String gen = (String) pack.get("generationId");

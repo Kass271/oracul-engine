@@ -17,19 +17,17 @@ import org.springframework.test.web.servlet.MvcResult;
  * {@code SearchPlan.pipelines} and {@code Source.pipelineIds} are present on the wire for a new run, so they left the walked
  * set and are asserted present instead; slice 05 (FR-53) does the same for {@code ResearchCounts.sourcesKept},
  * {@code WildcardPipeline.candidatesConsidered} and {@code WildcardPipeline.sourceIds}; slice 06 (FR-57) does the same for
- * {@code EvidencePack.wildcardSections} and checks that no {@code null} value appears inside it; the fields written by later slices
- * stay absent.
+ * {@code EvidencePack.wildcardSections} and checks that no {@code null} value appears inside it; slice 08 (FR-54 / FR-55,
+ * article-retrieval.md "Changes earlier behaviour") does the same for {@code ResearchCounts.sourcesWithContent},
+ * {@code Source.contentStatus}, {@code Source.excerpts} and {@code Source.publisherHost}; only {@code wildcardsWithoutSources}
+ * and {@code wildcardGroups} (slice 09) stay absent.
  */
-// @trace FR-49, FR-50, FR-53, FR-57
+// @trace FR-49, FR-50, FR-53, FR-54, FR-55, FR-57
 class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
 
     /** Optional 0.7.0 field name -> the schema property it belongs to. */
     private static final Map<String, String> OPTIONAL = Map.ofEntries(
         Map.entry("wildcardsWithoutSources", "EvidenceNote.wildcardsWithoutSources"),
-        Map.entry("sourcesWithContent", "ResearchCounts.sourcesWithContent"),
-        Map.entry("publisherHost", "Source.publisherHost"),
-        Map.entry("contentStatus", "Source.contentStatus"),
-        Map.entry("excerpts", "Source.excerpts"),
         Map.entry("wildcardGroups", "FutureResult.wildcardGroups"));
 
     private String get(String sid, String path) throws Exception {
@@ -96,6 +94,18 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         List<Object> pipelineIds = JsonPath.read(sources, "$.items[*].pipelineIds");
         assertThat(pipelineIds).as("every source of a new run carries pipelineIds").hasSize(items.size());
         assertThat(pipelineIds).allSatisfy(ids -> assertThat((List<?>) ids).isNotEmpty());
+        // FR-54 / FR-55: every source of a new run carries contentStatus, excerpts and (publisher page known) publisherHost; the V4 pages
+        // are served by the stub's default publisher page, so all four are RETRIEVED with the single fallback fragment P1
+        assertThat(JsonPath.<List<Object>>read(sources, "$.items[*].contentStatus")).as("contentStatus on every source").hasSize(items.size())
+            .containsOnly("RETRIEVED");
+        assertThat(JsonPath.<List<Object>>read(sources, "$.items[*].excerpts")).as("excerpts on every source").hasSize(items.size());
+        assertThat(JsonPath.<List<Object>>read(sources, "$.items[*].publisherHost")).as("publisherHost on every source")
+            .hasSize(items.size()).containsOnly("127.0.0.1");
+        assertThat(JsonPath.<List<String>>read(sources, "$.items[*].excerpts[0].fragments[0]")).hasSize(items.size())
+            .containsOnly(P1);
+        assertThat(JsonPath.<Integer>read(research, "$.counts.sourcesWithContent")).as("research counts").isEqualTo(4);
+        assertThat(JsonPath.<Integer>read(run, "$.counts.sourcesWithContent")).as("run counts").isEqualTo(4);
+        assertThat(JsonPath.<Integer>read(result, "$.research.counts.sourcesWithContent")).as("result counts").isEqualTo(4);
 
         assertNoOptionalKeys("GET /api/runs/{id}", run);
         assertNoOptionalKeys("GET /api/runs/{id}/research", research);
@@ -110,7 +120,14 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         collectNulls(JsonPath.read(pack, "$.wildcardSections"), "$.wildcardSections", nulls);
         assertThat(nulls).as("null values inside wildcardSections").isEmpty();
         assertThat(JsonPath.<List<Object>>read(pack, "$.wildcardSections[*].items[*].fragments")).as("fragments always present").hasSize(4);
+        // FR-55: the fragments of the retrieved pages are the pack content now, no snippet
+        assertThat(JsonPath.<List<Object>>read(pack, "$.wildcardSections[*].items[*].contentRetrieved")).containsOnly(true);
+        assertThat(JsonPath.<List<String>>read(pack, "$.wildcardSections[*].items[*].fragments[0]")).hasSize(4).containsOnly(P1);
+        assertThat(JsonPath.<List<Object>>read(pack, "$.wildcardSections[*].items[*].snippet")).as("no snippet for retrieved items").isEmpty();
     }
+
+    /** P1 of the stub's publisher page (FR-61): the fragment of a page without match text (first paragraph of at least 80 characters). */
+    private static final String P1 = "Opening paragraph of this publisher page. It introduces the report in plain words for every reader.";
 
     private static void collectNulls(Object node, String path, List<String> hits) {
         if (node == null) {
@@ -122,11 +139,15 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         }
     }
 
-    /** A GENERAL run (body B) whose only item has no pubDate: the section has no level, the item no publishedAt, a snippet instead. */
+    /**
+     * A GENERAL run (body B) whose only item has no pubDate and whose publisher page is served as metadata only (NO_TEXT, article-retrieval.md
+     * slice 08 "Changes earlier behaviour"): the section has no level, the item no publishedAt, a snippet instead of fragments.
+     */
     @Test
     @Timeout(60)
     void aGeneralSectionHasNoLevelAndAnItemWithoutADateHasNoPublishedAt() throws Exception {
         news.reset();
+        news.pages.put("undated", new StubNews.Page(200, "text/html; charset=utf-8", StubNews.html("undated")));
         String undated = StubNews.rssItem("Undated report on harbour automation", news.baseUrl() + "/rss/articles/undated", null,
             "reuters.com", "https://reuters.com");
         news.responder = StubNews.firstQueryItems(List.of(List.of(undated)));
@@ -147,5 +168,24 @@ class OptionalWireFieldsAbsentIT extends AbstractStoryIT {
         assertThat(nulls).as("null values inside wildcardSections").isEmpty();
         assertThat(lines(JsonPath.read(pack, "$.promptText"))).anyMatch(l -> l.startsWith("[E001] Undated report on harbour automation · ")
             && l.contains(" · unknown · "));
+    }
+
+    /** FR-55: the same undated GENERAL item on the stub's default publisher page is RETRIEVED: fragment P1 and no snippet. */
+    @Test
+    @Timeout(60)
+    void aGeneralItemWithAReadablePageIsRetrievedWithTheFallbackFragment() throws Exception {
+        news.reset();
+        String undated = StubNews.rssItem("Undated report on harbour automation", news.baseUrl() + "/rss/articles/undated", null,
+            "reuters.com", "https://reuters.com");
+        news.responder = StubNews.firstQueryItems(List.of(List.of(undated)));
+        Ran r = run(B);
+        assertThat(r.run().get("status")).as("run: " + r.run()).isEqualTo("COMPLETED");
+        String pack = packRaw(r.sid(), r.id());
+        Map<String, Object> item = JsonPath.read(pack, "$.wildcardSections[0].items[0]");
+        assertThat(item).as("undated item").doesNotContainKey("publishedAt").doesNotContainKey("snippet");
+        assertThat(item).containsEntry("contentRetrieved", true).containsEntry("evidenceId", "E001");
+        assertThat(item.get("fragments")).isEqualTo(List.of(P1));
+        assertThat(lines(JsonPath.read(pack, "$.promptText"))).contains("Excerpt: " + P1)
+            .noneMatch(l -> l.startsWith("Content not retrieved"));
     }
 }

@@ -140,6 +140,12 @@ final class ParallelSearchSupport {
             clock, t0, searchWindow, deadlineAt);
     }
 
+    /** {@code SearchBudget.retrieval(Clock, Instant t0, Duration stageBudget, Instant deadlineAt)} (article-retrieval.md slice 08, phase RETRIEVAL). */
+    static Object retrievalBudget(Clock clock, Instant t0, Duration stageBudget, Instant deadlineAt) {
+        return staticCall(cls(BUDGET), "retrieval", new Class<?>[] {Clock.class, Instant.class, Duration.class, Instant.class},
+            clock, t0, stageBudget, deadlineAt);
+    }
+
     /** The canonical record constructor {@code SearchBudget(Clock, Instant, Map<Phase, Duration>, Instant)}; phases by name. */
     static Object budgetOf(Clock clock, Instant t0, Map<String, Duration> windowsByPhase, Instant deadlineAt) {
         Class<?> t = cls(BUDGET);
@@ -203,18 +209,24 @@ final class ParallelSearchSupport {
 
     // ---- SourceRetrieval with a NewsSearchProvider -------------------------------------------------------------------
 
-    /** {@code new SourceRetrieval(NewsSearchProvider, ArticleMetadataFetcher, SourceQualityTable, Clock, Duration, int)}. */
-    static SourceRetrieval retrieval(Object searchProvider, ArticleMetadataFetcher fetcher, SourceQualityTable table, Clock clock,
-                                     Duration searchWindow, int fetchConcurrency) {
+    static final String RETRIEVER = "com.oracul.app.research.ArticleRetriever";
+
+    /**
+     * {@code new SourceRetrieval(NewsSearchProvider, ArticleRetriever, SourceQualityTable, Clock, Duration searchWindow, Duration stageBudget)}
+     * (article-retrieval.md slice 08: the metadata fetcher and the fetch concurrency moved to {@code ArticleRetriever}; {@code retriever}
+     * is an instance of it, e.g. a Mockito mock).
+     */
+    static SourceRetrieval retrieval(Object searchProvider, Object retriever, SourceQualityTable table, Clock clock,
+                                     Duration searchWindow, Duration stageBudget) {
         try {
-            Constructor<SourceRetrieval> c = SourceRetrieval.class.getDeclaredConstructor(cls(PROVIDER), ArticleMetadataFetcher.class,
-                SourceQualityTable.class, Clock.class, Duration.class, int.class);
+            Constructor<SourceRetrieval> c = SourceRetrieval.class.getDeclaredConstructor(cls(PROVIDER), cls(RETRIEVER),
+                SourceQualityTable.class, Clock.class, Duration.class, Duration.class);
             c.setAccessible(true);
-            return c.newInstance(searchProvider, fetcher, table, clock, searchWindow, fetchConcurrency);
+            return c.newInstance(searchProvider, retriever, table, clock, searchWindow, stageBudget);
         } catch (InvocationTargetException e) {
             return unwrap(e);
         } catch (ReflectiveOperationException e) {
-            return fail("SourceRetrieval(NewsSearchProvider, ArticleMetadataFetcher, SourceQualityTable, Clock, Duration, int) is missing: " + e);
+            return fail("SourceRetrieval(NewsSearchProvider, ArticleRetriever, SourceQualityTable, Clock, Duration, Duration) is missing: " + e);
         }
     }
 
@@ -271,7 +283,7 @@ final class ParallelSearchSupport {
         ApplicationContextRunner runner = new ApplicationContextRunner()
             .withInitializer(ctx -> ctx.getBeanFactory().setConversionService(ApplicationConversionService.getSharedInstance()))
             .withBean(Clock.class, Clock::systemUTC)
-            .withBean(ArticleMetadataFetcher.class, () -> Mockito.mock(ArticleMetadataFetcher.class))
+            .withBean((Class) cls(RETRIEVER), () -> Mockito.mock(cls(RETRIEVER)))
             .withBean(SourceQualityTable.class, () -> new SourceQualityTable("who.int", "nature.com", "reuters.com", "medium.com"))
             .withBean((Class) iface, () -> provider)
             .withUserConfiguration(SourceRetrieval.class);

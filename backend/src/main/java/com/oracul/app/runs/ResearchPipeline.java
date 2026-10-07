@@ -133,10 +133,12 @@ public class ResearchPipeline {
         if (started < 0) {
             return false;
         }
-        SourceRetrieval.Read read0 = retrieval.read(outcome, cfg.getHorizon(), () -> guard.check(runId));
+        SourceRetrieval.Read read0 = retrieval.read(outcome, cfg.getHorizon(), t0, deadlineAt,
+            () -> guard.check(runId));
         List<SourceRepository.Stored> found = read0.sources();
         ResearchCounts withSources = new ResearchCounts(counts.getSearches(), counts.getArticlesRetrieved(),
-            read0.articlesConsidered(), 0, 0, 0, 0).sourcesKept(found.size());
+            read0.articlesConsidered(), 0, 0, 0, 0).sourcesKept(found.size())
+            .sourcesWithContent(read0.sourcesWithContent());
         Boolean read = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
                 s.setRollbackOnly();
@@ -178,7 +180,8 @@ public class ResearchPipeline {
             }
         }
         ResearchCounts withEvents = new ResearchCounts(withSources.getSearches(), withSources.getArticlesRetrieved(),
-            withSources.getArticlesConsidered(), normalized.size(), 0, 0, 0).sourcesKept(found.size());
+            withSources.getArticlesConsidered(), normalized.size(), 0, 0, 0).sourcesKept(found.size())
+            .sourcesWithContent(withSources.getSourcesWithContent());
         List<NormalizedEvent> toStore = normalized;
         Boolean stored = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
@@ -215,7 +218,7 @@ public class ResearchPipeline {
         int total = WildcardPackRenderer.evidenceIds(pack).size();
         ResearchCounts withPack = new ResearchCounts(withEvents.getSearches(), withEvents.getArticlesRetrieved(),
             withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), total, 0, 0)
-            .sourcesKept(found.size());
+            .sourcesKept(found.size()).sourcesWithContent(withEvents.getSourcesWithContent());
         int realism = cfg.getRealism();
         var decision = EvidenceNotes.decide(total, total, realism, minCore);
         Boolean packed = tx.execute(s -> {

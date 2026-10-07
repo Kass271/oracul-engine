@@ -291,6 +291,165 @@ at most 4 usable items into each pipeline's answers. `CapOracle` and `SourceCapI
   decoding; `sourcesWithContent` = number of RETRIEVED sources; the decode endpoint is called at most once per kept
   Google-link source.
 
+#### Slice 08_article-text — delta (step 4a)
+Scope of this slice: FR-54 (retrieval), FR-55 (extraction, below), FR-61 (stubs, `wildcard-search.md`) and NFR-10
+part 3 (stage budget for retrieval). It replaces the slice-02/05 "redirect-resolved" article metadata fetch in
+`SourceRetrieval` (release finding R2) and makes the 06 pack show `Excerpt:` lines. No UI, no `data-testid`.
+`api/openapi.yaml` stays 0.7.0: `Source.contentStatus` / `excerpts` / `publisherHost`, `ArticleContentStatus`,
+`SourceExcerpt` and `ResearchCounts.sourcesWithContent` already exist; no path, status or `ApiError.code` changes
+(`listRunSources` unknown / malformed / foreign run → 404 `RUN_NOT_FOUND` "Future not found", unchanged). No rename.
+Flyway: `V13__source_content.sql` = `ALTER TABLE source ADD COLUMN content_status VARCHAR(32) NULL, ADD COLUMN excerpts
+JSONB NULL, ADD COLUMN publisher_host TEXT NULL;` (V11 / V12 untouched). Dependency: `org.jsoup:jsoup` (current 1.x
+release) in `backend/build.gradle.kts`. `.oracul/stack.json` is unchanged (both modes start the same compose files);
+`docker-compose.e2e.yml` gains `ORACUL_NEWS_ARTICLE_FETCH_TIMEOUT: PT3S` (owner backend-builder), `docker-compose.yml`
+gets no such variable.
+
+**Definitions (exact).**
+- **Google link** (step 1): the host of the source's normalised link equals, case-insensitively, `news.google.com` or
+  the host of `oracul.news.google.base-url` (port ignored). In-process that host is `127.0.0.1` (every fixture link on
+  the stub is a Google link, also `<base>/articles/<x>`, whose page has no attributes → DECODE_FAILED, which is the old
+  "no redirect keeps the Google link" outcome); in Docker it is `stub`. Any other link is a publisher URL (step 4).
+- **Google host** (decode answer rejected): host equal to or a subdomain of `google.com`, `gstatic.com` or
+  `googleusercontent.com` (so `news.google.com`, `www.google.com`, `consent.google.com`), **or** the URL is again a
+  Google article link of the configured base (host of `google.base-url` and path starting `/rss/articles/`). A decoded
+  `http://stub:4010/articles/<id>` / `http://127.0.0.1:<p>/articles/<id>` is therefore accepted.
+- **Page read** = publisher fetch outcome `OK`, status 2xx, `Content-Type` starting (case-insensitive) with `text/html`,
+  `application/xhtml+xml` or `text/plain`. Body text = the bytes read (≤ 2 MB) decoded with the `charset=` of the
+  Content-Type, else UTF-8.
+
+**`SafeFetcher` (additive).** New `public Result fetch(URI uri, Duration timeout, boolean sameHostOnly)`; the two
+existing methods mean `sameHostOnly = false`. With `true`, a redirect whose resolved `Location` has another host
+(case-insensitive) or another effective port is not followed: the 3xx answer is returned as `OK` with that status,
+`finalUri` = the answering hop. Every hop now also sends `User-Agent: Mozilla/5.0 (compatible; ORACUL/1.0)` (the value of
+`GoogleNewsProvider`). Default of `oracul.news.article-fetch-timeout` moves `PT3S` → `PT8S`; constructors unchanged.
+
+**Component `com.oracul.app.research.ArticleUrlDecoder`** (`@Component`; the only class that knows the decode format):
+- Constructor `ArticleUrlDecoder(String decodeUrl, String googleBaseUrl)` (Spring `@Value`s `oracul.news.google.decode-url`,
+  default blank → `<google.base-url without trailing />` + `/_/DotsSplashUi/data/batchexecute`, and
+  `oracul.news.google.base-url`); answers are read up to 2,097,152 bytes.
+- `public record Attributes(String id, long ts, String sg)`;
+  `static Optional<Attributes> attributes(String googlePageHtml)` — jsoup parse (no script execution, no network), the
+  first element in document order carrying all three attributes with `data-n-a-id` non-blank (trimmed), `data-n-a-ts`
+  matching `^\d{1,18}$` (trimmed), `data-n-a-sg` non-blank (trimmed); attributes split over elements, text that only
+  looks like an attribute (comment, script text) → empty.
+- `static String fReq(Attributes a)` — exactly
+  `[[["Fbv4je","[\"garturlreq\",[[\"X\",\"X\",[\"X\",\"X\"],null,null,1,1,\"US:en\",null,1,null,null,null,null,null,0,1],\"X\",\"X\",1,[1,1,1],1,1,null,0,0,null,0],\"<id>\",<ts>,\"<sg>\"]",null,"generic"]]]`
+  with `<id>` / `<sg>` JSON-string-escaped and `<ts>` the decimal digits. The request body is `f.req=` +
+  `URLEncoder.encode(value, UTF_8)`.
+- `static Optional<String> publisherUrl(String answerBody, String googleBaseUrl)` — (1) structured: drop everything
+  before the first `[`, parse as JSON; the first array element `[ "wrb.fr", "Fbv4je", <string>, … ]` whose third entry is
+  a string is parsed as JSON again; when that is an array whose first entry is `garturlres` and second a string, that
+  string is the candidate; (2) otherwise the first match of `https?://[^"\\\s<>]+` in the raw body. The candidate must
+  parse as an absolute `http`/`https` URL and must not be on a Google host, else empty.
+- `public Result decode(Attributes a, Duration timeout)` with `record Result(String url, String reason)` (`url` null on
+  failure, `reason` one of the log words below): one `POST <decode-url>`, headers `Content-Type:
+  application/x-www-form-urlencoded;charset=UTF-8` and the User-Agent above, no redirect followed; non-2xx → `status=<n>`; timeout / connection error → `timeout` / `error`; no candidate → `no-url`;
+  Google host → `google-host`. The decode endpoint is trusted configuration (not checked by SafeFetcher).
+
+**Component `com.oracul.app.research.ArticleRetriever`** (`@Component`):
+- Spring reads `oracul.news.google.base-url`, `oracul.news.article-fetch-timeout` (PT8S) and
+  `oracul.news.article-fetch-concurrency` (8; a value outside 1…8 fails startup with an `IllegalStateException` naming
+  the property). Package-private test constructor `ArticleRetriever(SafeFetcher fetcher, ArticleUrlDecoder decoder,
+  String googleBaseUrl, Duration timeout, int concurrency, Clock clock)`.
+- `public enum Status { PAGE_READ, DECODE_FAILED, PAGE_FAILED, REFUSED, NOT_ATTEMPTED }` (domain enum; mapped to
+  `ArticleContentStatus` only in `SourceRetrieval`: PAGE_READ → RETRIEVED / NO_TEXT after extraction).
+- `public record Outcome(Status status, String publisherUrl, String contentType, String body, String description,
+  String siteName, Instant endedAt)` — `publisherUrl` = the decoded URL (Google link) or the link itself (publisher
+  link), null while unknown; `body` / `contentType` / `description` / `siteName` only for PAGE_READ (`description` =
+  page `og:description` if non-blank else `meta name=description`, `siteName` = `og:site_name`, both via
+  `ArticleMetadataFetcher.parse`, which stays as it is; the Google page is never parsed for them).
+- `public boolean isGoogleLink(String url)`.
+- `public List<Outcome> retrieveAll(List<String> links, SearchBudget budget, BooleanSupplier mayStart) throws
+  InterruptedException` — one virtual thread per link, links started in list order; one fair semaphore of
+  `concurrency` permits is taken for **every** HTTP request (Google page GET incl. its redirects as one fetch, decode
+  POST, publisher GET) and released when that request ended; `mayStart` (run guard) and `budget.expired(RETRIEVAL)` are
+  checked before each request: false / expired → the link ends NOT_ATTEMPTED and no further request is made for it.
+  Google link: `fetcher.fetch(link, t, true)` (same host only, ≤ 5 redirects), page must be `OK` 2xx, then
+  `attributes` → `decoder.decode`; t for the Google page and the decode POST together = min(article-fetch-timeout,
+  `budget.remaining(RETRIEVAL)`), the POST gets what is left of it. Publisher: `fetcher.fetch(publisherUrl, t, false)`
+  with t = min(article-fetch-timeout, remaining). While links are open the caller thread checks the budget at least
+  every 100 ms; once it is expired every unfinished link is cancelled (its request interrupted) and ends NOT_ATTEMPTED
+  with the `publisherUrl` known so far; `retrieveAll` then returns. An interrupt of the caller cancels all links and
+  is rethrown.
+- Outcome per fetch result: Google page `REFUSED_SCHEME` / `REFUSED_ADDRESS` → REFUSED (publisherUrl null); Google page
+  `TOO_MANY_REDIRECTS` → DECODE_FAILED `redirects`; `FAILED` → DECODE_FAILED `timeout` (the fetch used its whole time)
+  or `error`; non-2xx (also a not-followed off-host 3xx) → DECODE_FAILED `status=<n>`; no attributes → DECODE_FAILED
+  `no-attributes`; decode failure → DECODE_FAILED with the decoder's reason. Publisher `REFUSED_*` → REFUSED;
+  `TOO_MANY_REDIRECTS` → PAGE_FAILED `redirects`; `FAILED` → PAGE_FAILED `timeout` / `error`; non-2xx → PAGE_FAILED
+  `status=<n>`; other content type or none → PAGE_FAILED `content-type`; else PAGE_READ. A request cut because the
+  budget expired is NOT_ATTEMPTED, never DECODE_FAILED / PAGE_FAILED.
+- Logs (WARN, logger `com.oracul.app.research.ArticleRetriever`): `article decode failed: <reason>` /
+  `article fetch failed: <reason>`; refusals are logged by SafeFetcher (`article fetch refused: blocked-address
+  host=<host>` / `scheme scheme=<scheme>`). No log line ever holds a URL, a query string, a page body, the `f.req` value
+  or the decode answer.
+
+**`SourceRetrieval`.** Package-private constructor becomes `SourceRetrieval(NewsSearchProvider search, ArticleRetriever
+retriever, SourceQualityTable quality, Clock clock, Duration searchWindow, Duration stageBudget)` (Spring:
+`oracul.search.search-window` PT60S, `oracul.search.stage-budget` PT90S; ≤ 0 → `IllegalStateException` naming it); the
+`ArticleMetadataFetcher` dependency and `oracul.news.article-fetch-concurrency` move to `ArticleRetriever`.
+`SearchBudget.Phase` gains `RETRIEVAL`; `static SearchBudget retrieval(Clock clock, Instant t0, Duration stageBudget,
+Instant deadlineAt)`. New `public Read read(SearchOutcome outcome, HorizonCode horizon, Instant t0, Instant deadlineAt,
+BooleanSupplier mayFetch)` (the pipeline's call: t0 = RESEARCH_STRATEGY start, deadlineAt = the run's); the existing
+`read(outcome, horizon, mayFetch)` uses t0 = `clock.instant()` and no deadline; `readSources(...)` keep their
+signatures. `Read` gains a 4th component `int sourcesWithContent` (accessor name `sourcesWithContent()`). Steps:
+1. `WildcardSelector.select` (unchanged) → kept candidates in Evidence order.
+2. `retriever.retrieveAll(kept links)`; the decode endpoint is called at most once per kept Google-link source.
+3. **Merge**: kept sources whose stored `url` (below) is equal after `UrlNormalizer` are one source: the earliest in kept
+   order stays (its fields), `pipelineIds` / `queryIds` = sorted unions, the later ones leave no row; every pipeline
+   group that listed a removed source lists the remaining one at the first of its positions (no duplicate in a group).
+   This replaces the slice-05 rule "a resolved URL that an earlier source already has keeps its Google link".
+4. **Extraction** (FR-55) of every PAGE_READ source for each pipeline in its (merged) `pipelineIds`, terms of that
+   pipeline = the FR-53 label terms / query terms (`WildcardSelector.tokens`, GENERAL → `GENERAL_SUBJECT`).
+5. **Numbering**: S001… in kept order without the merged-away entries (= Evidence order); `sourceIds` per pipeline from
+   its group; `sourcesWithContent` = number of RETRIEVED sources.
+- **Source fields** (refines the FR-54 table; `publisher` and `sourceType` / `sourceQuality` keep the current FR-48 code
+  rules, so stored fixture expectations stay valid):
+  | Field | Rule |
+  |---|---|
+  | `url` | `publisherUrl` (normalised) when the outcome has one, else the normalised link |
+  | `publisherHost` | only when `url` came from `publisherUrl`: its host lower-cased, a leading `www.` removed; absent otherwise (DECODE_FAILED, REFUSED of the Google link, NOT_ATTEMPTED before the decode) |
+  | `contentStatus` | PAGE_READ with ≥ 1 fragment for ≥ 1 pipeline → RETRIEVED; PAGE_READ without → NO_TEXT; else the outcome status |
+  | `metadataFetched` | true ⇔ PAGE_READ |
+  | `summary` | PAGE_READ: `description` whitespace-collapsed (≤ 600) if non-blank, else snippet, else title; all others: snippet, else title (snippet = `Article.snippet`, cut to 600) |
+  | `publisher` | PAGE_READ and `siteName` non-blank (trimmed) → it; else RSS source text (trimmed, non-blank); else host of an absolute http(s) `source@url`; else host of `url` |
+  | `sourceType` / `sourceQuality` | `SourceQualityTable.classify` of the host of an absolute http(s) `source@url`, else of the host of `url` |
+  | `excerpts` | `[{pipelineId, fragments}]` for each pipeline (ascending) that got ≥ 1 fragment; `[]` otherwise |
+  | `retrievedAt` | `Outcome.endedAt` truncated to micros |
+  | `title`, `publisherUrl`, `publishedAt`, `topic`, `queryIds`, `pipelineIds`, `language` | unchanged (FR-48 / FR-53) |
+- A plan **without** `pipelines` (test seam only) is retrieved the same way; extraction uses label terms ∅ and the
+  tokens of the texts of the source's queries; `excerpts` = `[]` (no pipeline id to key them); `contentStatus` RETRIEVED
+  / NO_TEXT by whether a fragment was found.
+
+**Storage and wire.** `SourceRepository.insertAll` writes `content_status`, `excerpts` (JSON, `[]` allowed) and
+`publisher_host` (NULL when absent); `list` maps NULL columns to absent fields (`setExcerpts(null)` for NULL, so the
+`SourceMixin` rule for `excerpts` becomes `NON_NULL`: new runs always send `excerpts`, possibly `[]`; older runs send
+neither `contentStatus` nor `excerpts`). `ResearchPipeline` READING_SOURCES: calls the 5-argument `read`, writes
+`counts.sourcesWithContent` (also `0`) together with `sourcesKept` in the one guarded commit; every later counts write
+(CONNECTING_SIGNALS, RANKING, accepted attempt) keeps both. A STOP or budget/deadline end before the commit writes
+neither. ALTERNATIVE runs keep reusing the parent's sources and counts.
+
+**Worked fixtures.**
+- *E2E acceptance run* (body A, stub mode `ok`): the 7 sources of slice 05 keep ids and urls
+  (`http://stub:4010/articles/shared`, `…/<key>-2`), all `contentStatus` RETRIEVED, `publisherHost` `stub`,
+  `metadataFetched` true, summary `Summary of <name>`; `excerpts`: S001 `[{W01,[P1]},{W02,[P1]}]`; S002–S004
+  `[{W01,[P2(q),P4(q)]}]` with q = `W01 stub query 1` / `2` / `3`; S005–S007 `[{W02,[P2(q),P4(q)]}]` with q =
+  `W02 stub query 1` / `2` / `3` (paragraph texts P1…P6 in FR-61); `sourcesWithContent` 7; stub records: `decode` 7
+  (ts 1759737600, sg `sig-<id>`, contentType `application/x-www-form-urlencoded;charset=UTF-8`), `google-page` 14 (7
+  `redirect` + 7 `page`), `article` 7; the pack has 14 `Excerpt: ` lines and no `Content not retrieved` line.
+- *Same run, stub mode `decode-fail`*: every source DECODE_FAILED, `url` = the normalised Google link
+  (`http://stub:4010/rss/articles/shared`, `…/<key>-2`), no `publisherHost`, `metadataFetched` false, `excerpts` `[]`,
+  summary = snippet (`<raw RSS title> Reuters`, e.g. `Shared stub article - Reuters Reuters`), publisher `Reuters`,
+  `sourcesWithContent` 0, 0 `article` records, run COMPLETED, pack all in the snippet form.
+- *In-process default page* (`StubNews` FR-61 article page without a registered match text): every pipeline gets the
+  single fallback fragment P1, so a V4 run stores RETRIEVED sources with `excerpts` `[{W01,[P1]}]` and the pack item
+  reads `Excerpt: Opening paragraph of this publisher page. It introduces the report in plain words for every reader.`
+- Changes earlier behaviour: R2 — a Google link counted as resolved by following HTTP redirects (`/rss/articles/<x>` 302 → `/articles/<x>`), a failed page kept the feed link, a resolved URL already taken kept its Google link → decode flow: the Google page `/rss/articles/<x>` (same-host 302 then the page with `data-n-a-*`), the batchexecute POST, then the publisher page; a failed, slow or non-HTML publisher page now keeps the **publisher** URL (`<base>/articles/gone-404`, `…/pdf`) with PAGE_FAILED, `/articles/slow` (3 s) is RETRIEVED under the new 8 s timeout, `text/plain` pages are read (`metadataFetched` true, NO_TEXT for `just text`), `/redirect/3` ends on a page without attributes → DECODE_FAILED, the FR-56 refusal cases move to decoded publisher URLs (`news.decoded`) and to redirect hops of the publisher fetch, two links decoding to one publisher URL are merged into one source (tests: backend/src/test/java/com/oracul/app/research/GoogleNewsSourceIT.java, backend/src/test/java/com/oracul/app/research/SourceMetadataIT.java)
+- Changes earlier behaviour: new runs carried no `contentStatus` / `excerpts` / `publisherHost` / `sourcesWithContent` → every source of a new run carries `contentStatus` and `excerpts` (possibly `[]`) and, with a publisher URL, `publisherHost`, and counts carry `sourcesWithContent` from the READING_SOURCES commit on (also `0`): exact-JSON count comparisons gain `"sourcesWithContent":0` after `"sourcesKept":0`, the optional-wire walk keeps only `wildcardsWithoutSources` and `wildcardGroups` absent and asserts the four fields present, and its GENERAL undated item is now RETRIEVED (`contentRetrieved` true, fragment P1, no snippet) unless the test serves `StubNews.html(name)` as a NO_TEXT page (tests: backend/src/test/java/com/oracul/app/result/OptionalWireFieldsAbsentIT.java, backend/src/test/java/com/oracul/app/runs/GetRunTerminalIT.java, backend/src/test/java/com/oracul/app/research/SourceRetrievalIT.java)
+- Changes earlier behaviour: `SourceRetrieval(NewsSearchProvider, ArticleMetadataFetcher, SourceQualityTable, Clock, Duration, int)` called `ArticleMetadataFetcher.fetchDetailed` → `SourceRetrieval(NewsSearchProvider, ArticleRetriever, SourceQualityTable, Clock, Duration searchWindow, Duration stageBudget)` calling `ArticleRetriever.retrieveAll`; the reflective constructor helper and the blocking fake fetcher (interrupted-wait case) switch to a mocked `ArticleRetriever`, other assertions unchanged (tests: backend/src/test/java/com/oracul/app/research/ParallelSearchSupport.java, backend/src/test/java/com/oracul/app/research/SourceRetrievalUnitTest.java)
+- Changes earlier behaviour: the ARTICLE stop case held the only article request kind (8 metadata fetches open) → retrieval has three request kinds sharing the 8 permits; the parameterized stop gains rows `GOOGLE_PAGE` (`news.googlePageGate`, wait for ≥ 8 `googlePageRequests`) and `DECODE` (`news.decodeGate`, wait for ≥ 8 `decodeRequests`), and the traffic snapshot adds both counts, so no request of any kind starts after a stop (tests: backend/src/test/java/com/oracul/app/runs/StopRunIT.java)
+- Ranges & invariants: (a) Google-link classes (unit, `isGoogleLink`, base `http://127.0.0.1:<p>` and `https://news.google.com`): `https://news.google.com/rss/articles/X` yes, `https://NEWS.GOOGLE.COM/x` yes, `http://127.0.0.1:<p>/rss/articles/x` yes, `http://127.0.0.1:1/x` yes (host only), `http://localhost:<p>/x` no, `https://www.reuters.com/x` no, `https://news.google.com.evil.org/x` no; (b) decode-answer classes (unit, `publisherUrl`): structured answer with `http://127.0.0.1:<p>/articles/x` → it; structured with `=` / `&` escapes → unescaped URL; structured with `null` URL → empty; raw body `x http://a.example/1 y https://b.example/2` → the first; `https://news.google.com/rss/articles/x`, `https://www.google.com/url?q=x`, `https://google.com/`, `https://consent.google.com/m`, `https://fonts.gstatic.com/x`, `https://lh3.googleusercontent.com/x`, `<base>/rss/articles/x` → empty (Google host); `https://notgoogle.com/x`, `https://google.com.evil.org/x`, `<base>/articles/x` → accepted; `ftp://x/y`, `file:///etc/passwd`, empty body, `)]}'` only → empty; (c) attribute classes (unit, `attributes`): all three valid → found; id missing / blank, ts missing / blank / `17597a` / `-1` / 19 digits, sg missing / blank → empty; split over two elements → empty; inside an HTML comment or `<script>` text → empty; two valid elements → the first; (d) `fReq` of (`CBMiX`, 1759737600, `AU_yqLx`) equals the literal above with those values, `id` `a"b` is escaped `a\"b`; (e) outcome rows (IT, one kept source each, stub modes / maps of FR-61): ok → RETRIEVED with url `<base>/articles/<id>`, `publisherHost` `127.0.0.1`, one `decode` request whose `f.req` carries id / ts / `sig-<id>` and Content-Type `application/x-www-form-urlencoded;charset=UTF-8`; Google page 404 (`news.googlePages`), without attributes (`googlePage(id, null, null)` or a direct `<base>/articles/<x>` link), with blank / non-digit attributes, feed link `<base>/redirect-to?location=http%3A%2F%2Flocalhost%3A<p>%2Fx` (off-host 302 not followed: no request reaches `localhost`), feed link `<base>/redirect/6` (6 same-host redirects) → DECODE_FAILED, Google link kept, no `publisherHost`, 0 `article` requests; decode 500, 400 (wrong sg), `decode-no-url`, `decode-google-host` (`https://news.google.com/rss/articles/<id>`), `news.decoded` = `https://www.google.com/url?q=x` or `<base>/rss/articles/again` (no `/rss/articles/again` request follows), answer after the timeout → DECODE_FAILED; publisher 404, 503, `application/pdf`, no Content-Type, answer after the timeout, 6 redirects → PAGE_FAILED with url `<base>/articles/<id>` and `publisherHost`; `text/plain` page with an 80-character block → RETRIEVED, `just text` → NO_TEXT; decoded `http://localhost:<p>/articles/x`, `http://10.0.0.5/x`, `http://[::1]:<p>/x`, `<base>/redirect-to?location=http%3A%2F%2F169.254.169.254%2F` → REFUSED with url = the decoded URL, no request reaches the refused address; a non-Google feed link `http://localhost:<p>/articles/x` → REFUSED, 0 decode requests; (f) timing with `article-fetch-timeout` PT1S: publisher answer after 0.7 s → RETRIEVED, after 1.3 s → PAGE_FAILED; decode answer after 0.7 s → RETRIEVED, after 1.3 s → DECODE_FAILED; (g) concurrency (unit `ArticleRetrieverTest`, real StubNews, parameterized c ∈ {1, 8}): 20 Google links, every Google page / decode / publisher answer delayed 200 ms → `retrievalMaxOpen()` = c, all 20 PAGE_READ, the first c Google-page requests are for links 1…c; 3 links with c = 8 → maxOpen ≤ 3; (h) guard: `mayStart` false from the start → 0 retrieval requests, all NOT_ATTEMPTED; false after the k-th request → exactly k requests; (i) merge: links `/rss/articles/m1` (W01) and `/rss/articles/m2` (W02) with `news.decoded` m2 → `<base>/articles/m1` → one source S00k with `pipelineIds` [W01, W02], both `queryIds`, listed in both pipelines' `sourceIds`, ids contiguous, `sourcesKept` = rows; (j) budget (IT, `query-generation-window` PT1S, `search-window` PT2S, `stage-budget` PT3S): `articleGate` never released → READING_SOURCES commits at t0 + 3 s ± 1 s, every source NOT_ATTEMPTED with url `<base>/articles/<id>` and `publisherHost`, `metadataFetched` false, `excerpts` `[]`, summary = snippet else title, run COMPLETED with a story; `googlePageGate` held instead → NOT_ATTEMPTED with the Google link and no `publisherHost`; injected clock (`AbstractDeadlineIT`, `MutableClock`): `articleGate` held, clock advanced 91 s (deadline 3 min) → commit within 1 s of real time, every source NOT_ATTEMPTED, no `article` request starts after the advance. Invariants for every run of every IT and E2E: `contentStatus` RETRIEVED ⇔ `excerpts` non-empty (plans with pipelines); `metadataFetched` ⇔ status ∈ {RETRIEVED, NO_TEXT}; `publisherHost` present ⇔ `url` is not the Google link of a DECODE_FAILED / Google-REFUSED / pre-decode NOT_ATTEMPTED source; no stored `url` on a Google host (google.com, gstatic.com, googleusercontent.com families) unless that status; `sourcesWithContent` = number of RETRIEVED sources ≤ `sourcesKept` = rows; stored urls distinct; decode requests ≤ kept Google-link sources and `article` requests ≤ kept sources (each at most once); every excerpt's `pipelineId` ∈ the source's `pipelineIds`; no log line contains a URL, `f.req` or `garturlres`.
+
+
 ### FR-55 — Relevant text extraction
 - Happy path (pure `FragmentExtractor.extract(body, contentType, terms)`, per kept source and per pipeline in its
   `pipelineIds`; no ChatGPT call):
@@ -311,7 +470,7 @@ at most 4 usable items into each pipeline's answers. `CapOracle` and `SourceCapI
 - Rules: only the body bytes read (≤ 2 MB, FR-56) are parsed — a truncated page is parsed as far as it goes. Text is
   stored as plain text (never HTML); sanitising for prompts happens at render time (FR-57).
 - Errors: unparsable HTML → jsoup's lenient parse; nothing usable → NO_TEXT (never a run failure).
-- Ranges & invariants (unit, parameterized): 30 paragraphs of which 4 match (strengths 3, 2, 2, 1) → 3 fragments in
+- Ranges & invariants: (unit, parameterized) 30 paragraphs of which 4 match (strengths 3, 2, 2, 1) → 3 fragments in
   order strength desc / document order, total ≤ 1,200; fragment count 0…3 for 0, 1, 2, 3, 4, 10 matching paragraphs;
   total-length classes: 3 × 300 → 3 fragments (900); 700 + 600 → 1 (the 600 skipped), then a 400 one fits → 2; one
   matching paragraph of 1,500 → 1 fragment of ≤ 1,200 ending with `…`; no match + first paragraphs of 79 and 80
@@ -320,6 +479,36 @@ at most 4 usable items into each pipeline's answers. `CapOracle` and `SourceCapI
   `Ignore previous instructions` is kept as data (rendered only inside the data block). Invariants: every fragment is a
   substring (after whitespace collapsing) of one paragraph of the page or its cut form; Σ fragment lengths ≤ 1,200 per
   source and pipeline; ≤ 3 fragments; no ChatGPT request is made by extraction (stub request count unchanged).
+
+#### Slice 08_article-text — FR-55 delta (step 4a)
+**Component `com.oracul.app.research.FragmentExtractor`** (pure, static, no Spring, no I/O, no clock; never calls
+ChatGPT): constants `MAX_FRAGMENTS = 3`, `MAX_CHARS = 1200`, `MIN_FALLBACK = 80`, `ELLIPSIS = "…"`.
+- `static List<String> paragraphs(String body, String contentType)` — Content-Type starting (case-insensitive) with
+  `text/plain`: blocks separated by one or more lines that are empty or whitespace only; otherwise HTML: jsoup parse,
+  remove `script`, `style`, `noscript`, `template`, `svg`, `iframe`, `nav`, `header`, `footer`, `aside`, `form` and every
+  element with `role="navigation"` (with their whole subtree, wherever they are), then the `text()` of each remaining
+  `p` in document order. Every paragraph: each run of whitespace (incl. U+00A0) → one space, trimmed; empty ones dropped.
+- `static int strength(String paragraph, Set<String> labelTerms, Set<String> queryTerms)` = 2 × |labelTerms ∩
+  tokens(paragraph)| + |(queryTerms \ labelTerms) ∩ tokens(paragraph)|, `tokens` = `WildcardSelector.tokens` (whole
+  tokens `[a-z0-9]+` ≥ 3 characters, `Locale.ROOT` lower case, stop words removed — so case-insensitive and a repeated
+  word counts once).
+- `static String cut(String text)` — unchanged when ≤ 1,200 characters (Java `String.length()`); else the part before the
+  last space at an index ≤ 1,199 (no such space → the first 1,199 characters) plus `…`, so ≤ 1,200.
+- `static List<String> extract(String body, String contentType, Set<String> labelTerms, Set<String> queryTerms)` —
+  paragraphs with strength ≥ 1, ordered strength desc then document order; if the first one is longer than 1,200 the
+  result is `[cut(first)]`; else walk the order and take a paragraph while fewer than 3 are taken and the running total
+  of taken lengths plus its length is ≤ 1,200 (a paragraph that does not fit is skipped, later shorter ones may still be
+  taken). No paragraph with strength ≥ 1 → `[cut(p)]` for the first paragraph of ≥ 80 characters in document order,
+  else `[]`. A body that jsoup cannot make sense of is parsed leniently; a truncated (2 MB) body is parsed as far as it
+  goes.
+- `SourceRetrieval` calls it once per PAGE_READ source and pipeline (terms: article-retrieval.md slice-08 step 4) and
+  stores the result as plain text in `excerpts` (never HTML); the pack renderer of 06 sanitises at render time.
+- Stub page fixtures (FR-61): generic page (no match text) for any wildcard → `[P1]`; page with match text
+  `W01 stub query 1` for pipeline W01 (label `New pandemic`, query terms {w01, stub, query}) → `[P2, P4]` (strength 3
+  each, document order); the nav / header / script / style / footer texts, which also carry the match text, never appear.
+- Changes earlier behaviour: every pack item was in the snippet form (`contentRetrieved` false, `fragments` [], `snippet` = summary, `Content not retrieved. Snippet: …` lines) because no source had fragments → sources whose publisher page was read carry fragments, so their items are `contentRetrieved` true with `fragments` and no `snippet`, and the pack text has `Excerpt: <fragment>` lines: V4 runs give `Excerpt: ` + P1 for E001–E004 (expected text helper), the seven-source run's shared item repeats its `Excerpt:` line under both headings, the E2E acceptance pack has 14 `Excerpt: ` lines and 0 snippet lines; tests that need the snippet form serve `StubNews.html(name)` (NO_TEXT) or a failing stub mode (tests: backend/src/test/java/com/oracul/app/research/AbstractEvidenceIT.java, backend/src/test/java/com/oracul/app/research/EvidencePackIT.java, backend/src/test/java/com/oracul/app/result/WildcardPackRunIT.java, backend/src/test/java/com/oracul/app/result/OptionalWireFieldsAbsentIT.java, e2e/tests/evidence-pack.spec.ts)
+- Ranges & invariants: `FragmentExtractorTest` (unit, parameterized, inputs built in code; label terms {energy, crisis}, query terms {grid, strain, fuel, price}): (a) count classes — 0, 1, 2, 3, 4, 10 matching paragraphs (each 100 characters) among 30 → 0 (then fallback), 1, 2, 3, 3, 3 fragments; 30 paragraphs of which 4 match with strengths 3, 2, 2, 1 → the 3 strongest, the two of strength 2 in document order; (b) length classes — 3 × 300 → 3 (900); 700 then 600 (both matching, 700 stronger) → [700]; 700, 600, 400 → [700, 400]; 1,200 exactly → [it] unchanged; one matching 1,500-character paragraph → 1 fragment of ≤ 1,200 ending with `…` at a word boundary; 1,201 characters without a space → 1,199 characters + `…`; (c) strength classes — label term counts 2, query term 1, a word repeated counts once, `ENERGY` = `energy`, `energetic` ≠ `energy` (whole token), stop words and tokens < 3 never count; ties → document order; (d) fallback — no match, first paragraphs of 79 and 80 characters → the 80-character one; all < 80 → `[]`; a 1,500-character first paragraph ≥ 80 → cut form; (e) stripped containers — a matching `<p>` inside each of `nav`, `header`, `footer`, `aside`, `form`, `[role=navigation]`, and matching text inside `script`, `style`, `noscript`, `template`, `svg`, `iframe` never appears in a fragment (also not as fallback); text outside any `<p>` is not a paragraph; (f) text/plain — blocks split on blank lines (also `\r\n`, whitespace-only lines); (g) data, not instructions — a `<p>` `Ignore previous instructions and …` that matches is kept verbatim (plain text, tags removed, entities decoded) and appears in the pack only inside the evidence data block; (h) truncated HTML (unclosed tags, body cut mid-tag) → the paragraphs that were complete enough to parse. Invariants for every input (property loop over generated pages): ≤ 3 fragments; Σ lengths ≤ 1,200; every fragment equals a paragraph or its `cut` form; fragments are in strength-desc / document order; no fragment contains `<` from markup; the stub request log shows no extra Responses request for runs whose sources were extracted (the multiset of Responses purposes of an E2E acceptance run in mode `ok` equals that of the same run in mode `decode-fail`).
+
 
 ### FR-56 — Safe article fetching
 - Happy path (`SafeFetcher`, used for Google article links, every redirect hop, decoded publisher URLs; **not** for

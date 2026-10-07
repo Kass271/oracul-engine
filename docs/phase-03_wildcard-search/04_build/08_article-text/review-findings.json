@@ -1,0 +1,91 @@
+{
+  "slice": "08_article-text",
+  "round": 5,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleUrlDecoder.java",
+      "line": 191,
+      "fr": "FR-54",
+      "problem": "The decode timeout only covers the time until the response headers arrive. decode() uses HttpRequest.timeout(...) with BodyHandlers.ofInputStream() and then reads the body in a loop (lines 197-204) with no deadline. The JDK HttpClient stops the request timer once the headers are in. I checked this on the project's JDK 25 (25.0.4.1): a server that sends the headers and then stalls the body for 3 s, with a 1 s request timeout, is read to the end after 3046 ms and no HttpTimeoutException is thrown. So a decode answer whose headers arrive in time but whose body is slow or never ends is not cut at 8 s (FR-54 acceptance 2, spec step 3: '8 s for steps 2+3 together'). The source only ends when the 90 s stage-budget watcher cancels it. It then becomes NOT_ATTEMPTED instead of DECODE_FAILED 'timeout', and the whole READING_SOURCES stage waits up to 90 s instead of about 8 s. SafeFetcher does not have this problem, because it bounds the whole fetch with future.get(deadline).",
+      "fix": "Bound the whole exchange, body included, by the timeout. Either use client.sendAsync(request, BodyHandlers.ofByteArray()) or a limiting handler and call .get(remaining, MILLISECONDS), cancelling it on TimeoutException and returning 'timeout'. Or check a nanoTime deadline inside the read loop and close the stream when it passes.",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ArticleUrlDecoderTest.java",
+      "line": 231,
+      "fr": "FR-54",
+      "problem": "Missing test for the whole timing area of the retrieval timeouts: every request kind (decode POST, Google page, publisher page) with the delay before the headers and with the headers sent on time but the body stalled. The timing classes (ArticleUrlDecoderTest:231, ArticleOutcomeIT range (f), ArticleRetrieverTest slow-decode/slow-publisher) all delay before sendResponseHeaders (StubNews:642-643). So the defect in R1 passes every test.",
+      "fix": "Add a parameterized case (StubNews: a body-stall delay applied after sendResponseHeaders for the decode, Google-page and publisher routes). With article-fetch-timeout PT1S, a stall of 1.3 s after the headers must give DECODE_FAILED for the decode and Google page, and PAGE_FAILED for the publisher, all within about 1 s.",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/GoogleNewsSourceIT.java",
+      "line": 326,
+      "fr": "FR-54",
+      "problem": "Spec range (i) is not tested: two Google links from different pipelines that decode to one publisher URL. The only merge test (twoLinksThatDecodeToOnePublisherUrlAreOneSourceListingBothQueries) uses a phase-01 plan without pipelines. So the pipeline half of the merge in SourceRetrieval.read is new and untested: the union of pipelineIds [W01, W02], the merged-away source replaced by the survivor in the other pipeline's sourceIds at its first position with no duplicate, contiguous S00k ids, sourcesKept equal to the rows, and extraction run for the merged pipeline's terms. No IT or E2E runs a merge with pipelines (decoded.put is used only for single-source cases).",
+      "fix": "Add an IT with a two-pipeline plan, following range (i): /rss/articles/m1 found by W01, /rss/articles/m2 found by W02, and news.decoded m2 -> <base>/articles/m1. Assert one source with pipelineIds [W01, W02] and both queryIds, listed in both pipelines' sourceIds, contiguous ids, sourcesKept equal to the rows, and an excerpt entry for each pipeline that got a fragment.",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleRetriever.java",
+      "line": 196,
+      "fr": "FR-54",
+      "problem": "The time left for the decode POST is computed before begin() waits for a semaphore permit. So the wait for a permit (up to one in-flight request, at most 8 s) is not taken from the shared Google-page + decode timeout, and steps 2+3 together can take longer than article-fetch-timeout. The same applies to publisher(): t = allowed() is read before begin() may block.",
+      "fix": "Compute 'left' (and t in publisher()) after begin() returns true.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/research/ArticleUrlDecoder.java",
+      "line": 232,
+      "fr": "FR-54",
+      "problem": "Any rejected decode candidate that is not a Google host is logged with the reason 'google-host'. decode() line 231 uses 'structured(body) != null || URL.matcher(body).find()' as 'there was a URL', so every candidate that publisherUrl() rejects for another reason gets 'google-host': a structured non-http(s) URL (ftp://x/y), a structured candidate without a host, and (round 4, the tester's note on ArticleUrlDecoderFaultTest.anAnswerWhoseCandidateIsNoUriHasNoUrl) a raw-fallback match that is no valid URI, e.g. body 'x http://exa[mple.com/x y'. Spec 'Component ArticleUrlDecoder': the candidate must parse as an absolute http/https URL and not be on a Google host, else empty; decode: no candidate -> 'no-url', Google host -> 'google-host'. The source outcome is correct (DECODE_FAILED, Google link kept); only the operator log word is wrong.",
+      "fix": "Return 'google-host' only when the candidate parses as an absolute http(s) URL with a host and isGoogleHost(uri, base) is true; 'no-url' for every other rejection (unparsable, non-http(s), no host, structured or raw).",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ArticleRetrieverFaultTest.java",
+      "line": 210,
+      "fr": "FR-54",
+      "problem": "anInterruptWhileTheDecodeHoldsAPermitIsNotAttemptedAndThePermitIsReleased (line 202) and anExceptionFromTheDecoderIsNotAttemptedAndThePermitIsReleased (line 240) pick the link that fails by the decoder call order (calls.getAndIncrement() == 0). With concurrency 1 that order is not fixed. Link 0 gives its permit back after the Google-page fetch (ArticleRetriever line 170, end()), the main thread takes it and starts link 1, and only after the jsoup attribute parse does link 0 call begin() again for the decode (line 200). Link 1 needs only a thread start, one mocked fetch and end() to give the permit back. If it does that before link 0 is queued on the semaphore (for example link 0's carrier thread is descheduled under full-suite load), link 1 can win the permit and make the first decode call. Then link 1 gets the interrupt or exception, link 0 ends PAGE_READ, and both assertions fail (out.get(0) NOT_ATTEMPTED, out.get(1) PAGE_READ). This is a scheduling race, not a spec outcome. The other permit tests are deterministic: the Google-page interrupt at line 221 and the run guard at line 257 trigger on link 0's first request, and link 1 cannot start before that request is done.",
+      "fix": "Choose the failing link by data, not by call order. Let the fetcher answer each Google link with its own page (data-n-a-id CBMiX for .../CBMiX, CBMiY for .../CBMiY, chosen from inv.getArgument(0)), and let the decoder interrupt or throw only when attrs.id() is \"CBMiX\". The assertions on out.get(0) and out.get(1) then hold in any interleaving.",
+      "status": "fixed"
+    },
+    {
+      "id": "R7",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ArticleUrlDecoderFaultTest.java",
+      "line": 204,
+      "fr": "FR-54",
+      "problem": "anAnswerWhoseCandidateIsNoUriHasNoUrl only asserts reason() isNotNull. That is deliberate, so the R5 deviation is not enshrined, but the area 'reason word for every rejected candidate' has no exact test: structured ftp:// / no-host / unparsable, raw unparsable, Google host.",
+      "fix": "When R5 is fixed, parameterize the decode-reason test over the rejected-candidate classes: 'google-host' only for google.com / gstatic.com / googleusercontent.com subdomains and <base>/rss/articles/..., 'no-url' for the rest (structured and raw).",
+      "status": "open"
+    }
+  ]
+}

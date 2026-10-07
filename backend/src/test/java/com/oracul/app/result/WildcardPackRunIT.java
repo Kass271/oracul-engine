@@ -22,7 +22,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * pipelines with one shared article, an empty pack), plus the Evidence Guard, the ALTERNATIVE run and the getFutureResult sources.
  * Talks HTTP only.
  */
-// @trace FR-57
+// @trace FR-55, FR-57
 class WildcardPackRunIT extends AbstractStoryIT {
 
     private static final String CRITIC = "SCENARIO_CRITIC";
@@ -131,9 +131,10 @@ class WildcardPackRunIT extends AbstractStoryIT {
                 assertThat(item.get("title")).isEqualTo(source.get("title"));
                 assertThat(item.get("publisher")).isEqualTo(source.get("publisher"));
                 assertThat(item.get("url")).isEqualTo(source.get("url"));
-                assertThat((List<?>) item.get("fragments")).isEmpty();
-                assertThat(item.get("contentRetrieved")).isEqualTo(false);
-                assertThat(item.get("snippet")).isEqualTo(source.get("summary"));
+                // FR-55: the stub's default publisher page is read; its fallback fragment P1 is the item's content, no snippet
+                assertThat((List<?>) item.get("fragments")).isEqualTo(List.of(StubNews.P1));
+                assertThat(item.get("contentRetrieved")).isEqualTo(true);
+                assertThat(item).doesNotContainKey("snippet");
                 listed.add((String) item.get("sourceId"));
             }
         }
@@ -202,9 +203,11 @@ class WildcardPackRunIT extends AbstractStoryIT {
         List<String> lines = List.of(((String) pack.get("promptText")).split("\n"));
         String itemLine = lines.stream().filter(l -> l.startsWith("[" + shared.get(0) + "] ")).findFirst().orElseThrow();
         assertThat(lines.stream().filter(itemLine::equals).count()).isEqualTo(2);
-        int snippetLine = lines.indexOf(itemLine) + 1;
-        assertThat(lines.get(snippetLine)).startsWith("Content not retrieved. Snippet: ");
-        assertThat(lines.get(lines.lastIndexOf(itemLine) + 1)).isEqualTo(lines.get(snippetLine));
+        // FR-55: the shared item repeats its Excerpt line under both headings
+        int excerptLine = lines.indexOf(itemLine) + 1;
+        assertThat(lines.get(excerptLine)).isEqualTo("Excerpt: " + StubNews.P1);
+        assertThat(lines.get(lines.lastIndexOf(itemLine) + 1)).isEqualTo(lines.get(excerptLine));
+        assertThat(lines).noneMatch(l -> l.startsWith("Content not retrieved"));
     }
 
     @Test

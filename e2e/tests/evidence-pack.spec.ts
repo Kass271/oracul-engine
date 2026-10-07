@@ -119,8 +119,9 @@ async function runToCompletion(page: Page): Promise<{ id: string; run: any; pack
 // @trace FR-50
 // @trace FR-53
 // @trace FR-57
+// @trace FR-55
 test.describe('FR-16 / FR-17 / FR-18 / FR-57 Ranking and the Evidence Pack grouped by wildcard', () => {
-  test('FR-57 acceptance run: one section per wildcard, shared article E001 in both, snippet form for every item', async ({ page }) => {
+  test('FR-57 / FR-55 acceptance run: one section per wildcard, shared article E001 in both, an Excerpt for every item', async ({ page }) => {
     test.setTimeout(90_000);
     const { id, run, pack } = await runToCompletion(page);
     // FR-53: 7 kept sources (W01 4, W02 4 with the shared article); the pack lists every kept source
@@ -148,7 +149,9 @@ test.describe('FR-16 / FR-17 / FR-18 / FR-57 Ranking and the Evidence Pack group
     expect(ids(w2)).toEqual(['E001', 'E005', 'E006', 'E007']);
     expect(w2.items[0]).toEqual(w1.items[0]);
 
-    // every item is the listRunSources source of its number; nothing was retrieved in this slice, so every item has its snippet
+    // every item is the listRunSources source of its number; the publisher pages are read (FR-54 / FR-55), so every item has fragments and no snippet
+    const fragmentsOf = (source: any, pipelineId: string): string[] =>
+      source.excerpts.find((e: any) => e.pipelineId === pipelineId)?.fragments ?? [];
     const sources = await listSources(page, id);
     expect(pack.sources).toEqual(sources);
     expect(sources).toHaveLength(7);
@@ -159,17 +162,22 @@ test.describe('FR-16 / FR-17 / FR-18 / FR-57 Ranking and the Evidence Pack group
       expect(item.title).toBe(source.title);
       expect(item.publisher).toBe(source.publisher);
       expect(item.url).toBe(source.url);
-      expect(item.contentRetrieved).toBe(false);
-      expect(item.fragments).toEqual([]);
-      expect(item.snippet).toBe(source.summary);
+      expect(item.contentRetrieved).toBe(true);
+      expect(item.fragments.length).toBeGreaterThan(0);
+      expect(item.snippet).toBeUndefined();
     }
+    // the fragments of an item are the excerpts of its pipeline: the shared article differs per pipeline only by pipeline, S002-S007 hold two paragraphs
+    for (const item of w1.items) expect(item.fragments).toEqual(fragmentsOf(sources.find((s) => s.id === item.sourceId), 'W01'));
+    for (const item of w2.items) expect(item.fragments).toEqual(fragmentsOf(sources.find((s) => s.id === item.sourceId), 'W02'));
+    expect(w1.items[0].fragments).toEqual(['Opening paragraph of this publisher page. It introduces the report in plain words for every reader.']);
+    for (const item of [...w1.items.slice(1), ...w2.items.slice(1)]) expect(item.fragments).toHaveLength(2);
 
     // no event has a selection any more
     const events = await listEvents(page, id);
     expect(events.length).toBeGreaterThan(0);
     for (const e of events) expect(e.selection).toBeUndefined();
 
-    // the prompt text: sections by wildcard, 8 snippet lines (E001 twice), no excerpt, no legacy sections
+    // the prompt text: sections by wildcard, 14 Excerpt lines (E001 twice with one, six more sources with two), no snippet line, no legacy sections
     const text: string = pack.promptText;
     expect(text.startsWith(`ORACUL EVIDENCE PACK\nGeneration: ${run.generationId}\nCutoff: `)).toBe(true);
     for (const part of [
@@ -181,8 +189,8 @@ test.describe('FR-16 / FR-17 / FR-18 / FR-57 Ranking and the Evidence Pack group
       expect(text).toContain(part);
     }
     const lines = text.split('\n');
-    expect(lines.filter((l) => l.startsWith('Content not retrieved. Snippet: '))).toHaveLength(8);
-    expect(lines.filter((l) => l.startsWith('Excerpt: '))).toHaveLength(0);
+    expect(lines.filter((l) => l.startsWith('Content not retrieved. Snippet: '))).toHaveLength(0);
+    expect(lines.filter((l) => l.startsWith('Excerpt: '))).toHaveLength(14);
     expect(lines.filter((l) => l.startsWith('[E001] '))).toHaveLength(2);
     expect(lines.filter((l) => l.startsWith('[E001] '))[0]).toBe(lines.filter((l) => l.startsWith('[E001] '))[1]);
     expect(text).not.toContain('CORE EVIDENCE');

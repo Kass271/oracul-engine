@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
  * constructors, and the join. Reached reflectively: the class does not exist while this test is written.
  */
 // @trace FR-52
+// @trace FR-54
 @Timeout(60)
 class GoogleNewsSearchConcurrencyTest {
 
@@ -297,6 +298,21 @@ class GoogleNewsSearchConcurrencyTest {
     @Test
     void theSearchWindowDefaultsToSixtySeconds() {
         assertThat(startupOfRetrieval(Map.of())).isNull();
+    }
+
+    // article-retrieval.md slice 08: oracul.search.stage-budget (PT90S) is read by SourceRetrieval like the search window
+    @ParameterizedTest(name = "oracul.search.stage-budget={0} fails startup naming it")
+    @ValueSource(strings = {"PT0S", "-PT1S"})
+    void aStageBudgetOfZeroOrLessFailsStartup(String value) {
+        Throwable failure = startupOfRetrieval(Map.of("oracul.search.stage-budget", value));
+        assertThat(failure).as("the context must not start").isNotNull();
+        assertThat(ParallelSearchSupport.chain(failure)).contains("oracul.search.stage-budget");
+    }
+
+    @ParameterizedTest(name = "oracul.search.stage-budget={0} starts")
+    @ValueSource(strings = {"PT0.001S", "PT90S"})
+    void aPositiveStageBudgetStarts(String value) {
+        assertThat(startupOfRetrieval(Map.of("oracul.search.stage-budget", value))).isNull();
     }
 
     // ---- the 429 retry re-takes a permit and re-checks the guard and the window (wildcard-search.md FR-52) ------------------

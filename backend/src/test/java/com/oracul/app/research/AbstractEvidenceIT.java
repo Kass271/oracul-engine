@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.ResultActions;
 /**
  * Shared driver of the Evidence Pack tests (research-pipeline.md "Slice 07_evidence-pack", wildcard-evidence.md "Slice
  * 06_wildcard-pack"): fixture V4 with the scripted answers N-V4 / C-V4, the Evidence Pack endpoint, and the expected V4 pack
- * text of fixture (a). Talks HTTP only.
+ * text of fixture (a): since slice 08 (FR-55) every item reads {@code Excerpt: <P1>}. Talks HTTP only.
  */
 public abstract class AbstractEvidenceIT extends AbstractEventIT {
 
@@ -123,7 +123,8 @@ public abstract class AbstractEvidenceIT extends AbstractEventIT {
             Map<String, Object> s = sources.get(k);
             lines.add(String.format("[E%03d] %s · %s · %s · %s", k + 1, V4_TITLES.get(k), s.get("publisher"),
                 s.get("publishedAt") == null ? "unknown" : utcDate(s.get("publishedAt")), s.get("url")));
-            lines.add("Content not retrieved. Snippet: " + s.get("summary"));
+            // FR-55: the stub's default publisher page is read, its fallback fragment P1 is the content (article-retrieval.md slice 08)
+            lines.add("Excerpt: " + StubNews.P1);
         }
         lines.add("Wildcard: Humanoid robot boom 6/10");
         lines.add("no current sources found");
