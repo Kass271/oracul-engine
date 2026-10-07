@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ORACUL API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     Contract between the Spring Boot backend and the Angular frontend. Both sides are generated from this file.
     Every request is tied to an anonymous browser session (HttpOnly cookie ORACUL_SID, created by the backend on the
@@ -11,19 +11,23 @@ tags:
   - name: system
     description: Liveness of the backend
   - name: scenario
-    description: Scenario Panel — catalogue, defaults and current configuration (spec scenario-panel.md)
+    description: Scenario Panel — catalogue, defaults and current configuration (specs scenario-panel.md, phase-04 writing-styles.md for output.writingStyle / output.language)
   - name: chatgpt
     description: Sign in with ChatGPT, connection status, sign-out and reset (specs phase-01 chatgpt-connection.md, phase-02 chatgpt-connection.md)
   - name: runs
-    description: Generation runs — start, progress, stop, alternative futures (specs generation-runs.md, phase-02 run-control.md)
+    description: Generation runs — start, progress, stop, alternative futures (specs generation-runs.md, phase-02 run-control.md, phase-04 story-rewrite.md for REWRITE parents)
   - name: research
     description: Research profile, search plan (wildcard pipelines), sources, events and Evidence Pack of a run (specs research-pipeline.md, phase-03 wildcard-search.md, article-retrieval.md, wildcard-evidence.md)
   - name: reasoning
     description: Structured scenario, Evidence Guard and critic reports of a run (spec scenario-reasoning.md)
   - name: result
-    description: The rendered future — story, metadata, WHY, SOURCES, WHY THESE NEWS (specs future-result.md, phase-03 wildcard-result-views.md)
+    description: The rendered future — story, metadata, WHY, SOURCES, WHY THESE NEWS (specs future-result.md, phase-03 wildcard-result-views.md, phase-04 styled-story.md and story-rewrite.md)
   - name: history
-    description: Recent futures of the browser session (spec recent-futures.md)
+    description: Recent futures of the browser session (specs recent-futures.md, phase-04 story-rewrite.md FR-68)
+  - name: writing-styles
+    description: Catalogue of writing modes, style profiles and story languages, loaded from the backend style file (spec phase-04 writing-styles.md)
+  - name: rewrite
+    description: Re-tell a completed future in another writing style or story language without a new search (spec phase-04 story-rewrite.md)
 paths:
   /api/ping:
     get:
@@ -65,6 +69,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScenarioConfiguration'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/writing-styles:
+    get:
+      tags: [writing-styles]
+      operationId: getWritingStyles
+      summary: Writing modes, style profiles and story languages for the Output section and "Rewrite as…"
+      description: |
+        Served from the backend style file (property oracul.writing-styles.location, default
+        classpath:writing-styles.json), which is validated once at startup — an invalid file stops the backend, so
+        this operation never answers with a partial catalogue. modes = OFFICIAL "Official / Briefing" (isDefault true)
+        then NARRATIVE "Narrative". profiles = the single OFFICIAL profile official-briefing first (isDefault true,
+        isModeDefault true), then every NARRATIVE profile in file order (neutral-narrative has isModeDefault true).
+        languages = en "English" (isDefault true) then uk "Ukrainian". The prompt instructions of a profile are never
+        sent. No parameters, no session data (phase-04 writing-styles.md FR-62).
+      responses:
+        '200':
+          description: The writing style catalogue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WritingStyleCatalogue'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -219,7 +246,10 @@ paths:
         be 1–40 characters"; label equal (trimmed, case-insensitive) to an earlier one → "This wildcard already
         exists"; intensity not an integer 1–10 → "wildcard intensity must be between 1 and 10". output: missing/null/
         not an object or story not true → "Story output is required"; illustration not false → "Illustration is not
-        available yet (MVP+1)". All 400 VALIDATION_FAILED.
+        available yet (MVP+1)"; then writingStyle (absent or null → Official / Briefing) not an object, mode not
+        OFFICIAL/NARRATIVE, profileId missing / not a string / not in the style file, or profile of the other mode →
+        "Unknown writing style"; then language (absent or null → en) not the JSON string "en" or "uk" → "Unknown
+        story language" (phase-04 writing-styles.md FR-63, FR-64). All 400 VALIDATION_FAILED.
       requestBody:
         required: true
         content:
@@ -231,7 +261,8 @@ paths:
           description: |
             Run accepted and started asynchronously. The body is the committed QUEUED row: status QUEUED, kind
             STANDARD, stageIndex 0, stageCount 10, no stage/stageLabel, configuration equal to the request (unknown
-            properties dropped), counts all 0.
+            properties dropped; an absent output.writingStyle / output.language stays absent and means Official /
+            Briefing / English), counts all 0.
           content:
             application/json:
               schema:
@@ -253,11 +284,13 @@ paths:
       operationId: listRecentRuns
       summary: Recent futures — the 20 newest COMPLETED or STOPPED runs of this session, newest first
       description: |
-        Runs of the caller's browser session (cookie ORACUL_SID; none/unknown → new session → empty list) with status
+        Runs of the caller's browser session (cookie ORACUL_SID; none/unknown → new session → empty list) of every kind
+        (STANDARD, ALTERNATIVE, REWRITE) with status
         COMPLETED and a headline, or with status STOPPED (phase-02 run-control.md FR-45), ordered by createdAt desc,
         ties by id desc, at most 20. FAILED, INSUFFICIENT_EVIDENCE, QUEUED and RUNNING runs, COMPLETED runs without a
         headline and runs of other sessions are never listed. Every item carries `status`; `headline` only when
-        COMPLETED. Older runs stay stored and reachable via getRun / getFutureResult. No parameters.
+        COMPLETED. Every item carries styleLabel and languageLabel (phase-04 story-rewrite.md FR-68). Older runs stay
+        stored and reachable via getRun / getFutureResult. No parameters.
       responses:
         '200':
           description: Recent futures
@@ -331,10 +364,12 @@ paths:
         invalid_client → 401 CHATGPT_REGISTRATION_INVALID; transient refresh failure → 503 CHATGPT_UNAVAILABLE); plan not
         eligible → 403 CHATGPT_PLAN_NOT_ELIGIBLE "Your ChatGPT plan is not eligible for ORACUL"; parent not COMPLETED
         with an accepted scenario and an Evidence Pack (FAILED, INSUFFICIENT_EVIDENCE, STOPPED, QUEUED, RUNNING, or
-        COMPLETED without them) → 409 RUN_NOT_COMPLETED "Only a completed future can have an alternative"; another run of the
+        COMPLETED without them; a COMPLETED REWRITE parent with a story counts as having the accepted scenario of its
+        scenarioRunId, phase-04 story-rewrite.md FR-68) → 409 RUN_NOT_COMPLETED "Only a completed future can have an alternative"; another run of the
         session QUEUED/RUNNING → 409 RUN_ALREADY_ACTIVE "A generation is already running". Nothing is stored on an error.
         202 body: kind ALTERNATIVE, parentRunId = runId, status QUEUED, stageIndex 0, configuration deep-equal to the
-        parent's, evidencePackId = the parent's, counts equal to the parent's, evidenceNote and suggestedRealism equal
+        parent's (so it keeps output.writingStyle and output.language), evidencePackId = the parent's, counts equal to
+        the parent's, evidenceNote and suggestedRealism equal
         to the parent's (phase-02 run-control.md FR-47). The run skips stages 1–6 (no search;
         it goes from QUEUED to EXPLORING_FUTURES), lists the parent's and every earlier future on the same Evidence Pack
         as futures to avoid, and ends FAILED ALTERNATIVE_NOT_DISTINCT when its future repeats one of them after one
@@ -348,6 +383,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenerationRun'
+        '401':
+          $ref: '#/components/responses/ChatGptRequired'
+        '403':
+          $ref: '#/components/responses/PlanNotEligible'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ChatGptUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/runs/{runId}/rewrites:
+    post:
+      tags: [rewrite]
+      operationId: startRewriteRun
+      summary: REWRITE AS… — new run that tells the same validated scenario in another writing style and/or language
+      description: |
+        Checks in this order; nothing is stored on an error: runId unknown, malformed or of another session → 404
+        RUN_NOT_FOUND "Future not found"; body not valid JSON → 400 VALIDATION_FAILED "Request body is not valid
+        JSON"; writingStyle missing / null / not an object, mode not OFFICIAL/NARRATIVE, profileId missing / not a
+        string / not in the style file, or a profile of the other mode → 400 VALIDATION_FAILED "Unknown writing
+        style"; language missing / null / not "en" or "uk" → 400 VALIDATION_FAILED "Unknown story language"; ChatGPT
+        not connected / expired / registration invalid / plan not eligible / transient refresh failure → 401 / 401 /
+        401 / 403 / 503 exactly as startAlternativeRun; parent not COMPLETED with a story (FAILED,
+        INSUFFICIENT_EVIDENCE, STOPPED, QUEUED, RUNNING, or COMPLETED without a story) → 409 RUN_NOT_COMPLETED "Only a
+        completed future can be rewritten"; another run of the session QUEUED/RUNNING → 409 RUN_ALREADY_ACTIVE "A
+        generation is already running". The same style and language as the parent's are accepted (the UI disables
+        that menu entry). 202 body: kind REWRITE, parentRunId = runId, scenarioRunId = the run whose accepted
+        scenario is told (the parent itself for a STANDARD / ALTERNATIVE parent, the parent's scenarioRunId for a
+        REWRITE parent), status QUEUED, stageIndex 0, configuration = the parent's with output.writingStyle and
+        output.language replaced by the request's, evidencePackId, counts, evidenceNote and suggestedRealism equal to
+        the parent's. The run skips stages 1–9 (no news, query-generation, event, scenario-generation or critic
+        request; QUEUED → WRITING_STORY) and sends only STORY_WRITING requests built from the scenario run's accepted
+        scenario (phase-04 story-rewrite.md FR-67).
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RewriteRequest'
+      responses:
+        '202':
+          description: Rewrite run accepted (kind REWRITE, same evidencePackId as the parent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/ChatGptRequired'
         '403':
@@ -486,7 +574,9 @@ paths:
         409 SCENARIO_NOT_READY "The scenario is not ready yet". Unknown, malformed or foreign runId → 404
         RUN_NOT_FOUND "Future not found". `criticReports` lists one report per critiqued attempt (the critic runs
         only on attempts whose Evidence Guard outcome is PASS / PASS_WITH_REMOVALS), attempt ascending; a critic
-        output that stays malformed after one retry is stored as verdict PASS with no issues.
+        output that stays malformed after one retry is stored as verdict PASS with no issues. A REWRITE run has no
+        attempts of its own: it answers the record of its scenarioRunId unchanged (runId = that run's id; phase-04
+        story-rewrite.md FR-67).
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -516,6 +606,10 @@ paths:
         "Future not found". All values come from the run snapshot, never from the current panel configuration.
         Runs whose search plan has wildcard pipelines (since phase 03) also carry wildcardGroups, which the SOURCES and
         WHY THESE NEWS? panels render grouped by wildcard (phase-03 wildcard-result-views.md FR-60).
+        Since phase 04 the story is written in the run's story language (dateline month in that language), labels
+        stay English, and metadata carries styleLabel, languageLabel and, for a REWRITE run, rewrittenFrom; a REWRITE
+        run's causalChain, usedInScenario flags and openCriticIssues are those of its scenarioRunId (phase-04
+        styled-story.md FR-66, story-rewrite.md FR-67, FR-68).
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -561,6 +655,10 @@ components:
               value: { code: VALIDATION_FAILED, message: unknown horizon }
             invalidJson:
               value: { code: VALIDATION_FAILED, message: Request body is not valid JSON }
+            unknownWritingStyle:
+              value: { code: VALIDATION_FAILED, message: Unknown writing style }
+            unknownStoryLanguage:
+              value: { code: VALIDATION_FAILED, message: Unknown story language }
     ChatGptRequired:
       description: CHATGPT_NOT_CONNECTED, CHATGPT_SESSION_EXPIRED or CHATGPT_REGISTRATION_INVALID (refresh answered invalid_client)
       content:
@@ -621,6 +719,8 @@ components:
               value: { code: RUN_ALREADY_ACTIVE, message: A generation is already running }
             runNotCompleted:
               value: { code: RUN_NOT_COMPLETED, message: Only a completed future can have an alternative }
+            runNotRewritable:
+              value: { code: RUN_NOT_COMPLETED, message: Only a completed future can be rewritten }
             researchNotReady:
               value: { code: RESEARCH_NOT_READY, message: Research has not started yet }
             evidencePackNotReady:
@@ -751,6 +851,139 @@ components:
         illustration:
           type: boolean
           description: Must be JSON false in this version (MVP+1); anything else → 400 VALIDATION_FAILED "Illustration is not available yet (MVP+1)" (checked after story)
+        writingStyle:
+          $ref: '#/components/schemas/WritingStyleSelection'
+        language:
+          $ref: '#/components/schemas/StoryLanguage'
+
+    WritingMode:
+      type: string
+      description: OFFICIAL = Official / Briefing (analytical report); NARRATIVE = literary prose (phase-04 writing-styles.md FR-62)
+      enum: [OFFICIAL, NARRATIVE]
+
+    StoryLanguage:
+      type: string
+      description: |
+        Language of the story headline and body (phase-04 writing-styles.md FR-64, styled-story.md FR-66) - en
+        English, uk Ukrainian. Optional in OutputSettings - absent means en; any other value → 400 VALIDATION_FAILED
+        "Unknown story language". The UI and the AI labels stay English.
+      enum: [en, uk]
+
+    WritingStyleSelection:
+      type: object
+      description: |
+        Writing style of the story (phase-04 writing-styles.md FR-63). Optional in OutputSettings - absent means
+        Official / Briefing (mode OFFICIAL, profileId official-briefing) and the result shows "Official / Briefing
+        (legacy)". mode not OFFICIAL/NARRATIVE, profileId not in the style file, or a profile whose mode differs from
+        mode → 400 VALIDATION_FAILED "Unknown writing style". The panel always sends it.
+      required: [mode, profileId]
+      properties:
+        mode:
+          $ref: '#/components/schemas/WritingMode'
+        profileId:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: '^[a-z0-9-]{1,40}$'
+          description: Id of a WritingStyleProfile from getWritingStyles whose mode equals mode (case-sensitive)
+          example: kafka
+
+    WritingStyleCatalogue:
+      type: object
+      description: Served by getWritingStyles from the validated backend style file (phase-04 writing-styles.md FR-62)
+      required: [modes, profiles, languages]
+      properties:
+        modes:
+          type: array
+          description: Always OFFICIAL then NARRATIVE
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/WritingModeOption'
+        profiles:
+          type: array
+          description: official-briefing first, then the NARRATIVE profiles in style-file order (9 shipped profiles)
+          minItems: 2
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/WritingStyleProfile'
+        languages:
+          type: array
+          description: Always en English then uk Ukrainian
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/StoryLanguageOption'
+
+    WritingModeOption:
+      type: object
+      required: [id, label, isDefault, defaultProfileId]
+      properties:
+        id:
+          $ref: '#/components/schemas/WritingMode'
+        label:
+          type: string
+          description: Official / Briefing · Narrative
+          example: Official / Briefing
+        isDefault:
+          type: boolean
+          description: True only for OFFICIAL
+        defaultProfileId:
+          type: string
+          description: official-briefing for OFFICIAL, neutral-narrative for NARRATIVE (the profile selected when the mode is chosen)
+          example: neutral-narrative
+
+    WritingStyleProfile:
+      type: object
+      required: [id, mode, label, characteristics, isDefault, isModeDefault]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z0-9-]{1,40}$'
+          example: kafka
+        mode:
+          $ref: '#/components/schemas/WritingMode'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Shown in the panel, the metadata and Recent futures; author profiles read "Narrative — inspired by <author>"
+          example: Narrative — inspired by Franz Kafka
+        characteristics:
+          type: string
+          minLength: 1
+          maxLength: 300
+          example: bureaucratic absurdity, alienation, impersonal systems, helplessness, surreal institutional logic, understated anxiety
+        isDefault:
+          type: boolean
+          description: True only for official-briefing (the default style of a fresh session)
+        isModeDefault:
+          type: boolean
+          description: True for official-briefing and neutral-narrative (the default of their mode)
+
+    StoryLanguageOption:
+      type: object
+      required: [code, label, isDefault]
+      properties:
+        code:
+          $ref: '#/components/schemas/StoryLanguage'
+        label:
+          type: string
+          description: English · Ukrainian
+          example: Ukrainian
+        isDefault:
+          type: boolean
+          description: True only for en
+
+    RewriteRequest:
+      type: object
+      description: Body of startRewriteRun - the style and language the same future is told in (phase-04 story-rewrite.md FR-67). Unknown properties are ignored.
+      required: [writingStyle, language]
+      properties:
+        writingStyle:
+          $ref: '#/components/schemas/WritingStyleSelection'
+        language:
+          $ref: '#/components/schemas/StoryLanguage'
 
     ScenarioCatalogue:
       type: object
@@ -859,7 +1092,8 @@ components:
     # ---------- runs ----------
     RunKind:
       type: string
-      enum: [STANDARD, ALTERNATIVE]
+      description: STANDARD = startRun; ALTERNATIVE = startAlternativeRun (same pack, new scenario); REWRITE = startRewriteRun (same pack and scenario, new story only - phase-04 story-rewrite.md FR-67)
+      enum: [STANDARD, ALTERNATIVE, REWRITE]
 
     RunStatus:
       type: string
@@ -1018,7 +1252,11 @@ components:
         parentRunId:
           type: string
           format: uuid
-          description: Set iff kind is ALTERNATIVE — the run the alternative was started from (startAlternativeRun runId)
+          description: Set iff kind is ALTERNATIVE or REWRITE — the run it was started from (runId of startAlternativeRun / startRewriteRun)
+        scenarioRunId:
+          type: string
+          format: uuid
+          description: Set iff kind is REWRITE — the STANDARD or ALTERNATIVE run whose accepted scenario this run tells (a rewrite of a rewrite keeps the original run; phase-04 story-rewrite.md FR-67)
         status:
           $ref: '#/components/schemas/RunStatus'
         stage:
@@ -1173,6 +1411,16 @@ components:
           description: Present iff status is COMPLETED (STOPPED items have none; the UI shows "Stopped")
         configuration:
           $ref: '#/components/schemas/ScenarioConfiguration'
+        styleLabel:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Always sent since phase 04; same rule as ScenarioMetadata.styleLabel
+          example: Official / Briefing (legacy)
+        languageLabel:
+          type: string
+          description: Always sent since phase 04; English or Ukrainian (same rule as ScenarioMetadata.languageLabel)
+          example: English
 
     # ---------- research ----------
     ResearchTopic:
@@ -2274,8 +2522,11 @@ components:
           description: Single line, trimmed, whitespace collapsed
         dateline:
           type: string
-          pattern: '^ORACUL FUTURE — (January|February|March|April|May|June|July|August|September|October|November|December) [1-9][0-9]?, [0-9]{4}$'
-          description: Built by ORACUL from futureDate (the model's dateline is ignored)
+          pattern: '^ORACUL FUTURE — ((January|February|March|April|May|June|July|August|September|October|November|December) [1-9][0-9]?, [0-9]{4}|[1-9][0-9]? (січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня) [0-9]{4})$'
+          description: |
+            Built by ORACUL from futureDate in the run's story language (the model's dateline is ignored) - en
+            "ORACUL FUTURE — September 12, 2032", uk "ORACUL FUTURE — 12 вересня 2032" (Ukrainian genitive month name;
+            phase-04 styled-story.md FR-66)
           example: ORACUL FUTURE — March 14, 2031
         futureDate:
           type: string
@@ -2285,7 +2536,7 @@ components:
         body:
           type: string
           minLength: 1
-          description: Plain text, 150–900 words, paragraphs separated by exactly one blank line ("\n\n"), no HTML or Markdown
+          description: Plain text, 150–900 words (whitespace-separated tokens in every language), paragraphs separated by exactly one blank line ("\n\n"), no HTML or Markdown; headline and body are in the run's story language
 
     WildcardDisplay:
       type: object
@@ -2327,6 +2578,38 @@ components:
           maxLength: 128
           description: Model slug actually used for this run, chosen from the signed-in account's GET /v1/models catalogue (phase-02 chatgpt-inference.md FR-38). Absent for runs created before phase 02.
           example: gpt-5
+        styleLabel:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: |
+            Always sent since phase 04 (phase-04 story-rewrite.md FR-68). Label of configuration.output.writingStyle's
+            profile from the style file; "Official / Briefing (legacy)" when the configuration has no writingStyle;
+            the profileId itself when the profile is no longer in the style file. UI "Style: <styleLabel>".
+          example: Narrative — inspired by Franz Kafka
+        languageLabel:
+          type: string
+          description: |
+            Always sent since phase 04: "English" (language en or absent) or "Ukrainian" (uk). UI "Language: <languageLabel>".
+          example: Ukrainian
+        rewrittenFrom:
+          $ref: '#/components/schemas/RewriteOrigin'
+
+    RewriteOrigin:
+      type: object
+      description: |
+        Present in ScenarioMetadata iff the run's kind is REWRITE: the run it was rewritten from (its parentRunId).
+        UI "Rewritten from: <headline>".
+      required: [runId, headline]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        headline:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: Story headline of the parent run
 
     ResultSource:
       type: object
