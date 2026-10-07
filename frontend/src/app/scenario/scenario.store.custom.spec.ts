@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
 import { ScenarioStore } from './scenario.store';
+import { PANEL_OUTPUT } from './testing/panel-fixtures';
 
 interface CustomWildcard {
   label: string;
@@ -196,6 +197,6 @@ describe('ScenarioStore custom wildcards', () => {
     };
     store.load(config);
     expect(cw.customWildcards()).toEqual([{ label: 'Mars colony', intensity: 8 }]);
-    expect(store.configuration()).toEqual(config);
+    expect(store.configuration()).toEqual({ ...config, output: PANEL_OUTPUT });
   });
 });

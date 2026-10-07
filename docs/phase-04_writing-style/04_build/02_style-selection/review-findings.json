@@ -1,0 +1,67 @@
+{
+  "slice": "02_style-selection",
+  "round": 4,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "frontend/src/app/runs/insufficient-evidence.spec.ts",
+      "line": 130,
+      "fr": "FR-63",
+      "problem": "The spec invariant says every UI-sent startRun body, including LOWER REALISM in both views (insufficient view and evidence note), has output.writingStyle and output.language equal to the store's. insufficient-evidence.spec.ts and evidence-note.spec.ts only check LOWER REALISM with a run stored without style or language, which normalises to the default PANEL_OUTPUT. No test opens a NARRATIVE / kafka / uk run and presses LOWER REALISM. quick-actions.spec.ts has that matrix for the four quick buttons, but not for LOWER REALISM. The code is correct (both lower() handlers do scenario.load(run.configuration) and then start from scenario.configuration()), so this is a coverage gap.",
+      "fix": "In insufficient-evidence.spec.ts and evidence-note.spec.ts, add a parameterized case over a few (mode, profile, language) triples, e.g. OFFICIAL/en, NARRATIVE kafka/uk and NARRATIVE harrison/en. Use a stored run configuration that carries the triple, press LOWER REALISM and assert that the POST body's output equals panelOutput(mode, profile, language).",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/StartRunWritingStyleDickensIT.java",
+      "line": 24,
+      "fr": "FR-63",
+      "problem": "The @DynamicPropertySource for oracul.writing-styles.location gives this IT its own full @SpringBootTest context, one more full application start in every backend run. The spec asks for '202 with one' for dickens, so the class has a reason to exist. StartRunWritingStyleDickensTest (@WebMvcTest) already proves the validation part.",
+      "fix": "Optionally keep only the single 202 + stored assertion here and leave the rest to StartRunWritingStyleDickensTest. Or check whether the slice-03 dickens ITs can share this exact configuration, so that the extra context is started only once.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/StartRunWritingStyleIT.java",
+      "line": 214,
+      "fr": "FR-63",
+      "problem": "The 'no run stored' assertions use runCount(), a global count over generation_run (select count(*)). testing-rules 'Own data' says to assert on the test's own rows, not on global counts. The pattern exists in earlier ITs and is stable with sequential tests, but it breaks under retries or parallel runs.",
+      "fix": "Where a session id exists, count the rows of that session (where session_id = ...). Keep the global count only for the requests without any session.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "frontend/src/app/scenario/panel-fixtures-sanity.spec.ts",
+      "line": 3,
+      "fr": "FR-63",
+      "problem": "This spec checks only the test fixture constants (profile count, default flags, language codes). It proves no FR-63 behaviour, yet it is tagged @trace FR-63, so the trace overstates FR coverage.",
+      "fix": "Remove the @trace tag, or delete the spec. The fixture shape is already exercised by every spec that uses it.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "ui",
+      "file": "frontend/src/app/scenario/output-settings.ts",
+      "line": 23,
+      "fr": "FR-63",
+      "problem": "The Writing Style section sits in '@defer (on immediate)' with no @placeholder and no @error block. While the chunk loads, the Output section has no style or language controls, which causes a small layout shift. If the lazy chunk fails to load (stale index after a redeploy, network error), the controls never appear and nothing tells the user, while GENERATE still works with the default style and English.",
+      "fix": "Add an @error block (e.g. a short 'Writing style options could not be loaded' note) and a @placeholder of the section's height. Or drop the @defer if the initial bundle budget allows it.",
+      "status": "open"
+    }
+  ]
+}

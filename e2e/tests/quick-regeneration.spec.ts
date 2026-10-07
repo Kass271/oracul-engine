@@ -13,7 +13,8 @@ const B = {
   horizon: '1y',
   wildcards: [],
   customWildcards: [],
-  output: { story: true, illustration: false },
+  // slice 02_style-selection: the panel always sends the writing style and the story language
+  output: { story: true, illustration: false, writingStyle: { mode: 'OFFICIAL', profileId: 'official-briefing' }, language: 'en' },
 };
 
 async function resetStub(page: Page): Promise<void> {

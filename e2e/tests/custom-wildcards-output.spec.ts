@@ -76,7 +76,13 @@ test.describe('FR-5 custom wildcards', () => {
     const req = await requestPromise;
     const body = req.postDataJSON();
     expect(body.customWildcards).toEqual([{ label: 'Ocean desalination boom', intensity: 7 }]);
-    expect(body.output).toEqual({ story: true, illustration: false });
+    // slice 02_style-selection: the panel always sends the writing style and the story language as well
+    expect(body.output).toEqual({
+      story: true,
+      illustration: false,
+      writingStyle: { mode: 'OFFICIAL', profileId: 'official-briefing' },
+      language: 'en',
+    });
     await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
 
     // Never leave the run in flight: it would pollute the shared stub log of later specs.

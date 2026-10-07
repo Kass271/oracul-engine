@@ -90,6 +90,17 @@ describe('slice 11_run-failures: RunFailure component', () => {
     expect(req.request.body).toEqual(C);
   });
 
+  // @trace FR-32, FR-63, FR-64
+  it.each([
+    ['carries style and language', { story: true, illustration: false, writingStyle: { mode: 'NARRATIVE', profileId: 'kafka' }, language: 'uk' }],
+    ['has neither style nor language', { story: true, illustration: false }],
+  ])('Try again re-submits the stored configuration verbatim when it %s (no defaults are added)', (_name, output) => {
+    const stored = { ...C, output } as ScenarioConfiguration;
+    create({ message: MESSAGE, configuration: stored });
+    click();
+    expect(http.expectOne(isRunsPost).request.body).toEqual(stored);
+  });
+
   // @trace FR-32
   it('Try again is disabled while the start request is pending, then 202 navigates to the new run with replaceUrl', async () => {
     const nav = vi.spyOn(router, 'navigate').mockResolvedValue(true);

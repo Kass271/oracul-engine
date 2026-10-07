@@ -18,9 +18,15 @@ public class RunsController implements RunsApi {
     private final ObjectProvider<CurrentSession> session;
 
     private final ObjectProvider<RunService> runs;
+    private final ObjectProvider<com.oracul.app.style.WritingStyles> styles;
+
+    private ObjectProvider<com.oracul.app.style.WritingStyles> styles() {
+        return styles;
+    }
 
     RunsController(ObjectProvider<ChatGptAuthService> auth, ObjectProvider<CurrentSession> session,
-                   ObjectProvider<RunService> runs) {
+                   ObjectProvider<RunService> runs, ObjectProvider<com.oracul.app.style.WritingStyles> styles) {
+        this.styles = styles;
         this.runs = runs;
         this.auth = auth;
         this.session = session;
@@ -31,6 +37,14 @@ public class RunsController implements RunsApi {
         com.oracul.app.scenario.WildcardRules.firstViolation(scenarioConfiguration).ifPresent(m -> {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", m);
         });
+        if (scenarioConfiguration.getOutput() instanceof com.oracul.app.scenario.ParsedOutputSettings parsed) {
+            if (parsed.styleInvalid() || !styleKnown(parsed.getWritingStyle())) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Unknown writing style");
+            }
+            if (parsed.languageInvalid()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Unknown story language");
+            }
+        }
         // Body is validated by bean validation first, then the ChatGPT connection is checked.
         ChatGptAuthService service = auth.getIfAvailable();
         CurrentSession current = session.getIfAvailable();
@@ -39,6 +53,14 @@ public class RunsController implements RunsApi {
         }
         service.requireUsableCredentials(current.id());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(runs.getObject().start(current.id(), scenarioConfiguration));
+    }
+
+    private boolean styleKnown(com.oracul.app.api.model.WritingStyleSelection sel) {
+        if (sel == null) return true;
+        com.oracul.app.style.WritingStyles styles = styles().getIfAvailable();
+        if (styles == null) return false;
+        return styles.find(sel.getProfileId())
+            .filter(p -> p.mode().name().equals(sel.getMode().getValue())).isPresent();
     }
 
     @Override

@@ -11,6 +11,7 @@ import { routes } from '../app.routes';
 import type { RecentRunSummary } from '../api/models/recent-run-summary';
 import type { ScenarioCatalogue } from '../api/models/scenario-catalogue';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
+import { flushWritingStyles } from '../scenario/testing/panel-fixtures';
 
 const DEFAULTS: ScenarioConfiguration = {
   realism: 8,
@@ -80,6 +81,7 @@ describe('slice 15_recent-futures: Recent futures menu', () => {
     fixture.detectChanges();
     http.match((r) => r.url.endsWith('/api/scenario/catalogue')).forEach((r) => r.flush(CATALOGUE));
     http.match((r) => r.url.endsWith('/api/scenario/configuration')).forEach((r) => r.flush(DEFAULTS));
+    flushWritingStyles(http);
     http.match((r) => r.url.endsWith('/api/auth/chatgpt/connection')).forEach((r) => r.flush({ state: 'CONNECTED', canGenerate: true }));
     await settle();
   }

@@ -12,6 +12,7 @@ import type { GenerationRun } from '../api/models/generation-run';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
 import { ConnectionStore } from '../chatgpt/connection.store';
 import { ScenarioStore } from '../scenario/scenario.store';
+import { PANEL_OUTPUT, panelOutput } from '../scenario/testing/panel-fixtures';
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
 const NEW_ID = '99999999-8888-7777-6666-555555555555';
@@ -298,17 +299,43 @@ describe('run-control FR-47: the evidence note below the result', () => {
     harness.detectChanges();
     button().click(); // a second click while the start is pending sends nothing
     const post = http.expectOne(isRunsPost);
-    expect(post.request.body).toEqual({ ...CONFIG10, realism: 8 });
+    expect(post.request.body).toEqual({ ...CONFIG10, output: PANEL_OUTPUT, realism: 8 });
     expect(TestBed.inject(ScenarioStore).realism()).toBe(8);
-    expect(TestBed.inject(ScenarioStore).configuration()).toEqual({ ...CONFIG10, realism: 8 });
+    expect(TestBed.inject(ScenarioStore).configuration()).toEqual({ ...CONFIG10, output: PANEL_OUTPUT, realism: 8 });
     expect(button().disabled).toBe(true);
   });
+
+  // Ranges & invariants: LOWER REALISM keeps the stored writing style and language.
+  // @trace FR-63, FR-64
+  it.each([
+    ['OFFICIAL', 'official-briefing', 'en'],
+    ['NARRATIVE', 'kafka', 'uk'],
+    ['NARRATIVE', 'harrison', 'en'],
+  ] as const)(
+    'LOWER REALISM from a run stored as %s / %s / %s posts that style and language',
+    async (mode, profileId, language) => {
+      const output = panelOutput(mode, profileId, language);
+      await open(
+        completed({
+          evidenceNote: insufficientNote(10, 2, 5),
+          suggestedRealism: 8,
+          configuration: { ...CONFIG10, realism: 10, output },
+        }),
+      );
+      button().click();
+      harness.detectChanges();
+      const body = http.expectOne(isRunsPost).request.body as { realism: number; output: unknown };
+      expect(body.realism).toBe(8);
+      expect(body.output).toEqual(output);
+      expect(TestBed.inject(ScenarioStore).configuration().output).toEqual(output);
+    },
+  );
 
   it('a suggestedRealism of 1 starts a run with realism 1', async () => {
     await open(completed({ evidenceNote: insufficientNote(3, 0, 1), suggestedRealism: 1 }, 3));
     button().click();
     harness.detectChanges();
-    expect(http.expectOne(isRunsPost).request.body).toEqual({ ...CONFIG10, realism: 1 });
+    expect(http.expectOne(isRunsPost).request.body).toEqual({ ...CONFIG10, output: PANEL_OUTPUT, realism: 1 });
   });
 
   it('202 navigates to the new run with replaceUrl', async () => {

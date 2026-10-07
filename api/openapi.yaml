@@ -62,6 +62,10 @@ paths:
       tags: [scenario]
       operationId: getScenarioConfiguration
       summary: Current configuration of this session (configuration of the newest run, else the defaults)
+      description: |
+        The newest run's configuration exactly as stored, so output.writingStyle / output.language are present only
+        when that run was started with them (absent for a fresh session and for runs started without them). The
+        panel treats absent as Official / Briefing and English (phase-04 writing-styles.md FR-63, FR-64).
       responses:
         '200':
           description: The configuration the panel starts with
@@ -875,7 +879,10 @@ components:
         Writing style of the story (phase-04 writing-styles.md FR-63). Optional in OutputSettings - absent means
         Official / Briefing (mode OFFICIAL, profileId official-briefing) and the result shows "Official / Briefing
         (legacy)". mode not OFFICIAL/NARRATIVE, profileId not in the style file, or a profile whose mode differs from
-        mode → 400 VALIDATION_FAILED "Unknown writing style". The panel always sends it.
+        mode → 400 VALIDATION_FAILED "Unknown writing style". Every violation inside writingStyle (not an object,
+        mode or profileId missing / null / wrong type / wrong case, profileId pattern or length) answers exactly this
+        message - never a bean-validation text. Unknown keys inside it are ignored and not stored. The panel always
+        sends it.
       required: [mode, profileId]
       properties:
         mode:

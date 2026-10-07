@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import type { HorizonCode } from '../api/models/horizon-code';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
 import { ScenarioStore } from './scenario.store';
+import { PANEL_OUTPUT } from './testing/panel-fixtures';
 
 const snapshot = (s: ScenarioStore) => ({
   realism: s.realism(),
@@ -39,7 +40,7 @@ describe('ScenarioStore', () => {
     };
     store.load(config);
     expect(snapshot(store)).toEqual({ realism: 2, darkness: 9, optimism: 1, horizon: '20y' });
-    expect(store.configuration()).toEqual(config);
+    expect(store.configuration()).toEqual({ ...config, output: { ...PANEL_OUTPUT, story: false, illustration: true } });
   });
 
   // @trace FR-2

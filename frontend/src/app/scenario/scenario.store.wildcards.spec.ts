@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
 import { ScenarioStore } from './scenario.store';
+import { PANEL_OUTPUT } from './testing/panel-fixtures';
 
 interface WildcardSetting {
   wildcardId: string;
@@ -118,7 +119,7 @@ describe('ScenarioStore wildcards', () => {
     wc.setWildcardIntensity(PANDEMIC, 3);
     const c = store.configuration();
     expect(c).toMatchObject({ realism: 8, darkness: 9, optimism: 5, horizon: '1y', customWildcards: [] });
-    expect(c.output).toEqual({ story: true, illustration: false });
+    expect(c.output).toEqual(PANEL_OUTPUT);
     store.setRealism(2);
     store.setHorizon('5y');
     expect(wc.wildcards()).toEqual([{ wildcardId: PANDEMIC, intensity: 3 }]);

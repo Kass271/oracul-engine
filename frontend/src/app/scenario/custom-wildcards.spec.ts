@@ -7,6 +7,7 @@ import { App } from '../app';
 import type { ScenarioCatalogue } from '../api/models/scenario-catalogue';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
 import { ScenarioStore } from './scenario.store';
+import { flushWritingStyles } from './testing/panel-fixtures';
 
 const DEFAULTS: ScenarioConfiguration = {
   realism: 8,
@@ -75,6 +76,7 @@ describe('Custom wildcards in the Scenario Panel (slice 18_custom-wildcards-outp
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush(CATALOGUE);
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush(config);
+    flushWritingStyles(http);
     await settle();
   }
 

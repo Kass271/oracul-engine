@@ -6,6 +6,7 @@ import { provideRouter } from '@angular/router';
 import { App } from '../app';
 import type { ScenarioCatalogue } from '../api/models/scenario-catalogue';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
+import { PANEL_OUTPUT, flushWritingStyles } from './testing/panel-fixtures';
 import { ScenarioStore } from './scenario.store';
 
 const DEFAULTS: ScenarioConfiguration = {
@@ -50,6 +51,7 @@ describe('Output settings in the Scenario Panel (slice 18_custom-wildcards-outpu
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush(CATALOGUE);
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush(config);
+    flushWritingStyles(http);
     await settle();
   }
 
@@ -96,7 +98,7 @@ describe('Output settings in the Scenario Panel (slice 18_custom-wildcards-outpu
       expect(box('output-story').checked).toBe(true);
       expect(box('output-illustration').checked).toBe(false);
       expect(box('output-illustration').disabled).toBe(true);
-      expect(store.configuration().output).toEqual({ story: true, illustration: false });
+      expect(store.configuration().output).toEqual(PANEL_OUTPUT);
     }
   });
 
@@ -106,6 +108,10 @@ describe('Output settings in the Scenario Panel (slice 18_custom-wildcards-outpu
     expect(box('output-story').checked).toBe(true);
     expect(box('output-illustration').checked).toBe(false);
     expect(box('output-illustration').disabled).toBe(true);
-    expect(TestBed.inject(ScenarioStore).configuration().output).toEqual({ story: false, illustration: true });
+    expect(TestBed.inject(ScenarioStore).configuration().output).toEqual({
+      ...PANEL_OUTPUT,
+      story: false,
+      illustration: true,
+    });
   });
 });

@@ -12,6 +12,8 @@ import { RunStore } from './run.store';
 import { ScenarioStore } from '../scenario/scenario.store';
 import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-state';
 import type { GenerationRun } from '../api/models/generation-run';
+import { PANEL_OUTPUT, flushWritingStyles, panelOutput } from '../scenario/testing/panel-fixtures';
+
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
 const GENERATION_ID = 'ORC-2026-10-02-1842';
@@ -103,6 +105,7 @@ describe('slice 04_run-start', () => {
     fixture.detectChanges();
     http.match((r) => r.url.endsWith('/api/scenario/catalogue')).forEach((r) => r.flush(CATALOGUE));
     http.match((r) => r.url.endsWith('/api/scenario/configuration')).forEach((r) => r.flush(CATALOGUE.defaults));
+    flushWritingStyles(http);
     http.match(isConnectionGet).forEach((r) => r.flush({ state, canGenerate: state === 'CONNECTED' }));
     await settle();
     if (url) {
@@ -151,7 +154,7 @@ describe('slice 04_run-start', () => {
     await boot();
     click('generate-button');
     const req = http.expectOne(isRunsPost);
-    expect(req.request.body).toEqual(CATALOGUE.defaults);
+    expect(req.request.body).toEqual({ ...CATALOGUE.defaults, output: PANEL_OUTPUT });
     expect(disabled('generate-button')).toBe(true);
     req.flush(queued(), { status: 202, statusText: 'Accepted' });
     await tick(0);
@@ -420,7 +423,28 @@ describe('slice 15_recent-futures: reopening a run loads its configuration into 
     http.expectOne(isRunGet).flush(runWith(9, 'COMPLETED'));
     expect(panel.darkness()).toBe(9);
     expect(panel.horizon()).toBe('5y');
-    expect(panel.configuration()).toEqual(config(9));
+    expect(panel.configuration()).toEqual({ ...config(9), output: PANEL_OUTPUT });
+  });
+
+  // @trace FR-63, FR-64
+  it('open() restores the style and language stored in the run configuration', () => {
+    const panel = TestBed.inject(ScenarioStore);
+    TestBed.inject(RunStore).open(ID);
+    const stored = { ...config(9), output: panelOutput('NARRATIVE', 'kafka', 'uk') };
+    http.expectOne(isRunGet).flush({ ...runWith(9, 'COMPLETED'), configuration: stored });
+    expect(panel.configuration().output).toEqual(panelOutput('NARRATIVE', 'kafka', 'uk'));
+  });
+
+  // @trace FR-63, FR-64
+  it.each([
+    ['without style and language', { story: true, illustration: false }],
+    ['with a style of the other mode', { story: true, illustration: false, writingStyle: { mode: 'OFFICIAL', profileId: 'kafka' }, language: 'de' }],
+    ['with an unknown mode and language', { story: true, illustration: false, writingStyle: { mode: 'narrative', profileId: 'kafka' }, language: 'EN' }],
+  ])('open() normalises a run configuration %s to Official / Briefing and English', (_name, output) => {
+    const panel = TestBed.inject(ScenarioStore);
+    TestBed.inject(RunStore).open(ID);
+    http.expectOne(isRunGet).flush({ ...runWith(9, 'COMPLETED'), configuration: { ...config(9), output } });
+    expect(panel.configuration().output).toEqual(PANEL_OUTPUT);
   });
 
   // @trace FR-33

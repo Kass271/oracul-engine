@@ -19,7 +19,8 @@ const A = {
     { wildcardId: 'robotics-humanoid-boom', intensity: 6 },
   ],
   customWildcards: [],
-  output: { story: true, illustration: false },
+  // slice 02_style-selection: the panel always sends the writing style and the story language
+  output: { story: true, illustration: false, writingStyle: { mode: 'OFFICIAL', profileId: 'official-briefing' }, language: 'en' },
 };
 const A10 = { ...A, realism: 10 };
 /** The one-wildcard bodies of the "Realism 10 with 4 items" test: A10 and A (realism 8) with only New pandemic 8. */

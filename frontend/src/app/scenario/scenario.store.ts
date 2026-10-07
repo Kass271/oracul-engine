@@ -2,6 +2,13 @@ import { Injectable, computed, signal } from '@angular/core';
 
 import type { HorizonCode } from '../api/models/horizon-code';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
+import type { StoryLanguage } from '../api/models/story-language';
+import type { WritingMode } from '../api/models/writing-mode';
+import type { WritingStyleCatalogue } from '../api/models/writing-style-catalogue';
+import type { WritingStyleSelection } from '../api/models/writing-style-selection';
+
+const OFFICIAL_ID = 'official-briefing';
+const OFFICIAL_SELECTION: WritingStyleSelection = { mode: 'OFFICIAL', profileId: OFFICIAL_ID };
 
 export const HORIZON_CODES: readonly HorizonCode[] = ['1d', '1w', '1m', '1y', '5y', '10y', '20y'];
 
@@ -12,7 +19,12 @@ export const DEFAULT_CONFIGURATION: ScenarioConfiguration = {
   horizon: '1y',
   wildcards: [],
   customWildcards: [],
-  output: { story: true, illustration: false },
+  output: {
+    story: true,
+    illustration: false,
+    writingStyle: { ...OFFICIAL_SELECTION },
+    language: 'en',
+  },
 };
 
 function validIntensity(n: unknown): n is number {
@@ -29,8 +41,67 @@ export class ScenarioStore {
   readonly horizon = computed<HorizonCode>(() => this.state().horizon);
   readonly configuration = computed<ScenarioConfiguration>(() => this.state());
 
+  readonly writingStyle = computed<WritingStyleSelection>(
+    () => this.state().output.writingStyle ?? { ...OFFICIAL_SELECTION },
+  );
+  readonly language = computed<StoryLanguage>(() => this.state().output.language ?? 'en');
+
+  private readonly styleCatalogue = signal<WritingStyleCatalogue | null>(null);
+  readonly writingStyles = this.styleCatalogue.asReadonly();
+
+  setWritingStyles(catalogue: WritingStyleCatalogue): void {
+    this.styleCatalogue.set(catalogue);
+  }
+
+  private normaliseStyle(raw: unknown): WritingStyleSelection {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { ...OFFICIAL_SELECTION };
+    const { mode, profileId } = raw as { mode?: unknown; profileId?: unknown };
+    if (mode === 'OFFICIAL' && profileId === OFFICIAL_ID) return { mode, profileId };
+    if (mode === 'NARRATIVE' && typeof profileId === 'string' && profileId !== '') {
+      const cat = this.styleCatalogue();
+      const ok = cat
+        ? cat.profiles.some((p) => p.id === profileId && p.mode === 'NARRATIVE')
+        : profileId !== OFFICIAL_ID;
+      if (ok) return { mode, profileId };
+    }
+    return { ...OFFICIAL_SELECTION };
+  }
+
   load(config: ScenarioConfiguration): void {
-    this.state.set({ ...config });
+    const out = (config.output ?? {}) as Partial<ScenarioConfiguration['output']>;
+    const lang = out.language as unknown;
+    this.state.set({
+      ...config,
+      output: {
+        ...config.output,
+        writingStyle: this.normaliseStyle(out.writingStyle),
+        language: lang === 'en' || lang === 'uk' ? lang : 'en',
+      },
+    });
+  }
+
+  setWritingMode(mode: WritingMode): void {
+    if (mode !== 'OFFICIAL' && mode !== 'NARRATIVE') return;
+    if (this.writingStyle().mode === mode) return;
+    const profileId =
+      mode === 'OFFICIAL'
+        ? OFFICIAL_ID
+        : (this.styleCatalogue()?.modes.find((m) => m.id === 'NARRATIVE')?.defaultProfileId ?? 'neutral-narrative');
+    this.setOutput({ writingStyle: { mode, profileId } });
+  }
+
+  setNarrativeProfile(id: string): void {
+    if (this.writingStyle().mode !== 'NARRATIVE') return;
+    if (!this.styleCatalogue()?.profiles.some((p) => p.id === id && p.mode === 'NARRATIVE')) return;
+    this.setOutput({ writingStyle: { mode: 'NARRATIVE', profileId: id } });
+  }
+
+  setLanguage(code: StoryLanguage): void {
+    if (code === 'en' || code === 'uk') this.setOutput({ language: code });
+  }
+
+  private setOutput(patch: Partial<ScenarioConfiguration['output']>): void {
+    this.state.update((s) => ({ ...s, output: { ...s.output, ...patch } }));
   }
 
   setRealism(n: number): void {

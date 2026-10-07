@@ -11,6 +11,7 @@ import { routes } from '../app.routes';
 import type { FutureResult } from '../api/models/future-result';
 import type { GenerationRun } from '../api/models/generation-run';
 import { ConnectionStore } from '../chatgpt/connection.store';
+import { PANEL_OUTPUT, panelOutput } from '../scenario/testing/panel-fixtures';
 import { ScenarioStore } from '../scenario/scenario.store';
 import { RunStore } from './run.store';
 
@@ -55,6 +56,9 @@ function config(overrides: Cfg = {}): Cfg {
     ...overrides,
   };
 }
+
+/** What the panel holds (and sends) for a stored configuration without writing style / language. */
+const withPanel = (cfg: Cfg): Cfg => ({ ...cfg, output: PANEL_OUTPUT });
 
 function completed(cfg: Cfg): GenerationRun {
   return {
@@ -183,12 +187,12 @@ describe('slice 16_quick-regeneration: quick actions bar', () => {
     const store = TestBed.inject(ScenarioStore);
     if (target === null) {
       http.expectNone(isRunsPost);
-      expect(store.configuration()).toEqual(before);
+      expect(store.configuration()).toEqual(withPanel(before));
       return;
     }
     const reqs = http.match(isRunsPost);
     expect(reqs).toHaveLength(1);
-    const expected = { ...before, [def.control]: target };
+    const expected = { ...withPanel(before), [def.control]: target };
     expect(reqs[0].request.body).toEqual(expected);
     expect(store.configuration()).toEqual(expected);
   });
@@ -203,7 +207,7 @@ describe('slice 16_quick-regeneration: quick actions bar', () => {
     expect(btn('quick-more-realistic').disabled).toBe(true);
     expect(btn('quick-more-extreme').disabled).toBe(false);
     await click('quick-more-extreme');
-    expect(http.expectOne(isRunsPost).request.body).toEqual(config({ realism: 7 }));
+    expect(http.expectOne(isRunsPost).request.body).toEqual(withPanel(config({ realism: 7 })));
   });
 
   // @trace FR-29
@@ -214,7 +218,7 @@ describe('slice 16_quick-regeneration: quick actions bar', () => {
     store.setOptimism(2);
     await render();
     await click('quick-darker');
-    expect(http.expectOne(isRunsPost).request.body).toEqual(config({ horizon: '1m', optimism: 2, darkness: 7 }));
+    expect(http.expectOne(isRunsPost).request.body).toEqual(withPanel(config({ horizon: '1m', optimism: 2, darkness: 7 })));
   });
 
   // @trace FR-29
@@ -225,7 +229,7 @@ describe('slice 16_quick-regeneration: quick actions bar', () => {
       await click(a.testid);
     }
     http.expectNone(isRunsPost);
-    expect(TestBed.inject(ScenarioStore).configuration()).toEqual(config());
+    expect(TestBed.inject(ScenarioStore).configuration()).toEqual(withPanel(config()));
   });
 
   // @trace FR-29
@@ -425,7 +429,11 @@ describe('slice 17_alternative-future: ALTERNATIVE FUTURE button', () => {
     harness.detectChanges();
     expect(TestBed.inject(Router).url).toBe(`/futures/${NEW_ID}`);
     expect(TestBed.inject(RunStore).run()?.id).toBe(NEW_ID);
-    expect(TestBed.inject(ScenarioStore).configuration()).toEqual(config());
+    // The store normalises style/language on load (writing-styles.md: supersedes 'keeps output exactly as given').
+    expect(TestBed.inject(ScenarioStore).configuration()).toEqual({
+      ...config(),
+      output: { story: true, illustration: false, writingStyle: PANEL_OUTPUT.writingStyle, language: PANEL_OUTPUT.language },
+    });
   });
 
   // @trace FR-30
@@ -468,5 +476,83 @@ describe('slice 17_alternative-future: ALTERNATIVE FUTURE button', () => {
     harness.detectChanges();
     expect(snackText()).toBe('Something went wrong — try again');
     expect(alt().disabled).toBe(false);
+  });
+});
+
+// @trace FR-63, FR-64
+describe('slice 02_style-selection: quick regeneration sends the panel style and language', () => {
+  let http: HttpTestingController;
+  let harness: RouterTestingHarness;
+
+  type Req = { url: string; method: string };
+  const isRunsPost = (r: Req): boolean => r.method === 'POST' && r.url.endsWith('/api/runs');
+  const isRunGet = (r: Req): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${RUN_ID}`);
+  const isResultGet = (r: Req): boolean => r.method === 'GET' && r.url.endsWith(`/api/runs/${RUN_ID}/result`);
+  const el = (): HTMLElement => harness.routeNativeElement as HTMLElement;
+  const btn = (id: string): HTMLButtonElement => el().querySelector(`[data-testid="${id}"]`) as HTMLButtonElement;
+
+  async function render(): Promise<void> {
+    harness.detectChanges();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+  }
+
+  async function openCompleted(cfg: Cfg): Promise<void> {
+    harness = await RouterTestingHarness.create(`/futures/${RUN_ID}`);
+    http.expectOne(isRunGet).flush(completed(cfg));
+    await render();
+    http.expectOne(isResultGet).flush(result(cfg));
+    await render();
+    TestBed.inject(ScenarioStore).load(cfg as never);
+    TestBed.inject(ConnectionStore).canGenerate.set(true);
+    await render();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.match(() => true);
+    TestBed.inject(RunStore).stop();
+    TestBed.inject(MatSnackBar).dismiss();
+    document.querySelectorAll('.mat-mdc-snack-bar-container').forEach((e) => e.remove());
+    vi.useRealTimers();
+  });
+
+  const STYLES: [string, string, 'en' | 'uk'][] = [
+    ['OFFICIAL', 'official-briefing', 'en'],
+    ['OFFICIAL', 'official-briefing', 'uk'],
+    ['NARRATIVE', 'neutral-narrative', 'en'],
+    ['NARRATIVE', 'poe', 'uk'],
+    ['NARRATIVE', 'kafka', 'en'],
+    ['NARRATIVE', 'harrison', 'uk'],
+  ];
+  const CASES = ACTIONS.flatMap((a) => STYLES.map((st) => [a.action, ...st] as const));
+
+  // Ranges & invariants: every quick action x six (mode, profile, language) combinations keeps style and language.
+  // @trace FR-63, FR-64
+  it.each(CASES)('%s from a %s / %s / %s run sends that style and language', async (action, mode, profileId, language) => {
+    const def = ACTIONS.find((a) => a.action === action)!;
+    const stored = config({ [def.control]: 3, output: panelOutput(mode as 'OFFICIAL' | 'NARRATIVE', profileId, language) });
+    await openCompleted(stored);
+    btn(def.testid).click();
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    const body = http.expectOne(isRunsPost).request.body as { output: unknown };
+    expect(body.output).toEqual(panelOutput(mode as 'OFFICIAL' | 'NARRATIVE', profileId, language));
+    expect(TestBed.inject(ScenarioStore).configuration().output).toEqual(body.output);
+  });
+
+  // @trace FR-63, FR-64
+  it('a run stored without style and language is quick-regenerated as Official / Briefing in English', async () => {
+    await openCompleted(config());
+    btn('quick-darker').click();
+    await vi.advanceTimersByTimeAsync(0);
+    harness.detectChanges();
+    const body = http.expectOne(isRunsPost).request.body as { output: unknown };
+    expect(body.output).toEqual(PANEL_OUTPUT);
   });
 });

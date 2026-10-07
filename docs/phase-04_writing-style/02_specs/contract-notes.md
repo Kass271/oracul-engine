@@ -116,3 +116,9 @@ E2E stub only gains the per-style STORY_WRITING answers (`styled-story.md` "Stub
     futures need no catalogue lookup in the browser; a profile later removed from the file shows its id.
 14. **The writing-styles catalogue is loaded with the panel** (`ScenarioLoader`, third parallel request); if it fails
     the panel shows the existing "backend unavailable" state, like a failed catalogue.
+
+## Slice deltas (step 4a)
+- 02_style-selection: description-only precision in `api/openapi.yaml` — `WritingStyleSelection` (every violation
+  inside `writingStyle` answers exactly "Unknown writing style", unknown inner keys are not stored) and
+  `getScenarioConfiguration` (returns the newest run's configuration as stored; absent style / language = Official /
+  Briefing, English). No operation, schema, property or enum value added, renamed or removed; no `Renamed:` line.

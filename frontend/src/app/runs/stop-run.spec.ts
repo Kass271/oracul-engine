@@ -15,6 +15,7 @@ import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-s
 import type { GenerationRun } from '../api/models/generation-run';
 import { ConnectionStore } from '../chatgpt/connection.store';
 import { ScenarioStore } from '../scenario/scenario.store';
+import { PANEL_OUTPUT, flushWritingStyles } from '../scenario/testing/panel-fixtures';
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
 const NEW_ID = '99999999-8888-7777-6666-555555555555';
@@ -154,6 +155,7 @@ describe('run-control FR-45: stop a generation and start a new one', () => {
     http
       .match((r) => r.url.endsWith('/api/scenario/configuration'))
       .forEach((r) => r.flush(CATALOGUE.defaults));
+    flushWritingStyles(http);
     http
       .match(isConnectionGet)
       .forEach((r) => r.flush({ state, canGenerate: state === 'CONNECTED' }));
@@ -374,7 +376,7 @@ describe('run-control FR-45: stop a generation and start a new one', () => {
     TestBed.inject(ScenarioStore).setDarkness(9);
     click('generate-button');
     const post = http.expectOne(isRunsPost);
-    expect(post.request.body).toEqual({ ...CATALOGUE.defaults, darkness: 9 });
+    expect(post.request.body).toEqual({ ...CATALOGUE.defaults, output: PANEL_OUTPUT, darkness: 9 });
     post.flush({ ...queued(), id: NEW_ID }, { status: 202, statusText: 'Accepted' });
     await tick(0);
     await tick(0);

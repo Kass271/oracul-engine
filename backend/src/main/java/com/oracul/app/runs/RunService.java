@@ -132,7 +132,17 @@ public class RunService {
             custom.add(new CustomWildcard(w.getLabel().trim(), w.getIntensity()));
         }
         return new ScenarioConfiguration(c.getRealism(), c.getDarkness(), c.getOptimism(), c.getHorizon(),
-            new ArrayList<>(c.getWildcards()), custom, c.getOutput());
+            new ArrayList<>(c.getWildcards()), custom, outputSnapshot(c.getOutput()));
+    }
+
+    private static com.oracul.app.api.model.OutputSettings outputSnapshot(com.oracul.app.api.model.OutputSettings o) {
+        var out = new com.oracul.app.api.model.OutputSettings(o.getStory(), o.getIllustration());
+        if (o.getWritingStyle() != null) {
+            out.setWritingStyle(new com.oracul.app.api.model.WritingStyleSelection(
+                o.getWritingStyle().getMode(), o.getWritingStyle().getProfileId()));
+        }
+        out.setLanguage(o.getLanguage());
+        return out;
     }
 
     static GenerationRun toApi(GenerationRunRepository.Row r) {

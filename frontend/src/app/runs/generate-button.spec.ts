@@ -9,6 +9,7 @@ import { App } from '../app';
 import { routes } from '../app.routes';
 import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-state';
 import type { GenerationRun } from '../api/models/generation-run';
+import { flushWritingStyles } from '../scenario/testing/panel-fixtures';
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
 const GENERATION_ID = 'ORC-2026-10-02-1842';
@@ -100,6 +101,7 @@ describe('slice 04_run-start', () => {
     fixture.detectChanges();
     http.match((r) => r.url.endsWith('/api/scenario/catalogue')).forEach((r) => r.flush(CATALOGUE));
     http.match((r) => r.url.endsWith('/api/scenario/configuration')).forEach((r) => r.flush(CATALOGUE.defaults));
+    flushWritingStyles(http);
     http.match(isConnectionGet).forEach((r) => r.flush({ state, canGenerate: state === 'CONNECTED' }));
     await settle();
     if (url) {

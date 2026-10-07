@@ -14,7 +14,8 @@ const A = {
     { wildcardId: 'robotics-humanoid-boom', intensity: 6 },
   ],
   customWildcards: [],
-  output: { story: true, illustration: false },
+  // slice 02_style-selection: the panel always sends the writing style and the story language
+  output: { story: true, illustration: false, writingStyle: { mode: 'OFFICIAL', profileId: 'official-briefing' }, language: 'en' },
 };
 
 const STAGES: [string, string][] = [

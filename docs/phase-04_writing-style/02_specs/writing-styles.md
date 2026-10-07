@@ -183,8 +183,9 @@ Languages are fixed in code: `en` "English", `uk` "Ukrainian".
   `neutral-narrative`.
 - Rules:
   - The selection is part of `ScenarioStore.configuration().output.writingStyle` (`{"mode":"OFFICIAL","profileId":
-    "official-briefing"}` or `{"mode":"NARRATIVE","profileId":"<id>"}`), sent with every `startRun` (generate, quick
-    regeneration, Try again, LOWER REALISM) and therefore snapshotted into the run's configuration.
+    "official-briefing"}` or `{"mode":"NARRATIVE","profileId":"<id>"}`), sent with every `startRun` built from the panel (generate, quick
+    regeneration, LOWER REALISM) and therefore snapshotted into the run's configuration; Try again re-submits the
+    failed run's stored configuration verbatim (FR-32), which for a UI-started run already holds the choice.
   - Desktop (viewport ≥ 768 px): the Narrative Style choice is a `mat-radio-group` `narrative-style-group`
     (`aria-label` "Narrative Style") with `narrative-style-option-<profileId>`. Mobile (`MOBILE_QUERY`
     `(max-width: 767.98px)` of `src/app/layout.ts`): a `mat-select` `narrative-style-select` (`aria-label`
@@ -203,13 +204,111 @@ Languages are fixed in code: `en` "English", `uk` "Ukrainian".
     "Unknown writing style"; no run is stored.
   - `output.writingStyle` absent or `null` → accepted (Official / Briefing); unknown keys inside it are ignored.
   - writing styles request fails in the UI → the panel's existing error state (`backend-unavailable`, `backend-retry`).
-- Ranges & invariants: valid class = the 9 (mode, profileId) pairs of the shipped file → 202; invalid classes above →
-  400 "Unknown writing style" (each tested); precedence: a custom wildcard violation, `story` false or
-  `illustration` true together with an unknown style → that earlier message; an unknown style together with an unknown
-  language → "Unknown writing style". Invariants: `configuration.output.writingStyle` of the 202 / `getRun` deep-equals
-  the request's; the panel shows `narrative-style-section` ⇔ mode NARRATIVE; exactly one option checked in each
-  visible group; the store's profile always belongs to the store's mode; every `startRun` body sent by the UI has
-  `output.writingStyle` and `output.language`.
+#### Slice 02_style-selection — precise delta (step 4a, covers FR-63 and FR-64)
+Transitional state: the style and the language are validated, stored and restored, but they do not change the pipeline
+yet (03_styled-story). Tests of this slice must not assert STORY_WRITING prompt text or story content. No stub change,
+no migration, no stack change.
+
+Backend — `POST /api/runs` (`startRun`):
+- Complete check order (first failure wins): JSON syntax → realism → darkness → optimism → horizon → wildcards →
+  customWildcards → output (missing / not an object / story) → output.illustration → **output.writingStyle** →
+  **output.language** → ChatGPT connection (401 / 403 / 503) → single active run (409). So both new 400s come
+  without a ChatGPT connection: a `@WebMvcTest` sees 400 for an invalid class and the existing 401
+  `CHATGPT_NOT_CONNECTED` "Connect ChatGPT to generate" for a valid one (the technique of `StartRunOutputValidationTest`),
+  and E2E can call the API without connecting.
+- 400 bodies are exactly `{"code":"VALIDATION_FAILED","message":"Unknown writing style"}` and
+  `{"code":"VALIDATION_FAILED","message":"Unknown story language"}` (two keys, `Content-Type: application/json`). No
+  bean-validation text (`must not be null`, pattern, size) may reach the client for anything inside `writingStyle`
+  or for `language`. Nothing is stored: no `generation_run` row, `GET /api/runs` (`listRecentRuns`) unchanged.
+- `writingStyle` is valid exactly when: absent, or JSON `null`, or a JSON object whose `mode` is the JSON string
+  `OFFICIAL` or `NARRATIVE` (case-sensitive) and whose `profileId` is a JSON string equal (case-sensitive, no trimming)
+  to the id of a profile of the loaded style file (`WritingStyles.find`) **with that same mode**. Other keys inside the
+  object are ignored.
+- `language` is valid exactly when absent, JSON `null`, or the JSON string `"en"` or `"uk"`.
+- Stored configuration (202 body, `GET /api/runs/{runId}`, `GET /api/scenario/configuration` while it is the newest
+  run): `output.writingStyle` = `{"mode":…,"profileId":…}` (exactly these two keys, unknown inner keys dropped) when a
+  valid object was sent; key absent when absent or `null` was sent. `output.language` = the sent string; key absent
+  when absent or `null` was sent. Unknown keys of `output` stay dropped (unchanged). Requests without the two keys
+  therefore keep their configuration deep-equal to the request (contract-notes decision 2).
+- Shape: the style lookup goes through `ObjectProvider<WritingStyles>` (`com.oracul.app.style.WritingStyles` of slice
+  01) and runs only when `writingStyle` is present and not `null`, so the existing `@WebMvcTest` classes (they declare
+  no `WritingStyles` bean and send no style) keep their results. New `@WebMvcTest` tests for the style classes use
+  `@Import(WritingStyles.class)` (shipped file, default location) or `@MockitoBean WritingStyles`.
+- FR-62 "usable without any other code change": a context started with the slice-01 `dickens` file
+  (`oracul.writing-styles.location`) accepts `{"mode":"NARRATIVE","profileId":"dickens"}` (passes validation → 401
+  without connection, 202 with one); with the shipped file the same body → 400 "Unknown writing style".
+- `startAlternativeRun` and quick regeneration are not changed by this slice (ALTERNATIVE copies the parent's stored
+  configuration as before, including the two keys when present).
+
+Frontend (`src/app/scenario/`):
+- `ScenarioLoader.load()` issues three GETs synchronously and in parallel: `/api/scenario/catalogue`,
+  `/api/scenario/configuration` and `/api/writing-styles` (generated `WritingStylesService.getWritingStyles()`).
+  New signal `ScenarioLoader.writingStyles: Signal<WritingStyleCatalogue | null>`. `state()` is `'ready'` only after
+  all three succeeded (any arrival order), `'error'` as soon as any one fails (`backend-unavailable` + `backend-retry`,
+  existing texts), `'loading'` otherwise. `backend-retry` re-issues all three. The store is fed once the
+  configuration **and** the writing styles have arrived: `ScenarioStore.setWritingStyles(catalogue)` then
+  `ScenarioStore.load(config)`.
+- `ScenarioStore`:
+  - `DEFAULT_CONFIGURATION.output` = `{"story":true,"illustration":false,"writingStyle":{"mode":"OFFICIAL",
+    "profileId":"official-briefing"},"language":"en"}` (so even a never-loaded store sends both fields).
+  - New computed signals `writingStyle()` (`WritingStyleSelection`) and `language()` (`StoryLanguage`).
+  - `load(config)`: realism … customWildcards, `output.story`, `output.illustration` as before (kept as given);
+    `output.writingStyle` normalised: kept as `{mode, profileId}` (other inner keys dropped) when it is an object with
+    `mode` `OFFICIAL` and `profileId` `official-briefing`, or `mode` `NARRATIVE` and `profileId` the id of a NARRATIVE
+    profile of the known catalogue (when no catalogue was set yet: any non-empty string other than
+    `official-briefing`); everything else (absent, `null`, non-object, unknown mode, cross-mode, unknown profile) →
+    `{"mode":"OFFICIAL","profileId":"official-briefing"}`. `output.language` kept when `"en"` / `"uk"`, else `"en"`.
+  - `setWritingMode(mode)`: `OFFICIAL` → `{OFFICIAL, official-briefing}`; `NARRATIVE` → `{NARRATIVE, <NARRATIVE
+    mode's defaultProfileId, i.e. neutral-narrative>}`; selecting the current mode again changes nothing; anything
+    else is ignored. `setNarrativeProfile(id)`: only when the mode is NARRATIVE and `id` is a NARRATIVE profile of the
+    catalogue, else ignored. `setLanguage(code)`: only `"en"` / `"uk"`, else ignored. No setter touches any other field,
+    and no other setter touches `writingStyle` / `language`.
+- Every `startRun` the UI sends takes its body from `ScenarioStore.configuration()` — GENERATE, the four quick
+  regeneration buttons, LOWER REALISM (insufficient view and evidence note) — so it always has `output.writingStyle`
+  and `output.language`. **Try again** on the failure view (FR-32) is unchanged: it re-submits the failed run's
+  stored configuration verbatim (a UI-started run carries both fields; a run started through the API without them is
+  retried without them). Opening a run (`RunStore` `panel.load(run.configuration)`) normalises like `load`.
+- `OutputSettings` (`app-output-settings`) DOM inside `output-section`, in this order: `output-story`, the
+  illustration row, `writing-style-section`, `narrative-style-section` (only when mode NARRATIVE),
+  `story-language-select`'s form field.
+  - `writing-style-section`: sub-heading text `Writing Style`, `mat-radio-group` `data-testid="writing-style-group"`
+    `aria-label="Writing Style"`, `mat-radio-button`s `data-testid="writing-style-option-OFFICIAL"` /
+    `"writing-style-option-NARRATIVE"` (the test id is on the `mat-radio-button` host; checked state = its inner
+    `input[type="radio"]`), labels = `modes[].label` (`Official / Briefing`, `Narrative`).
+  - `narrative-style-section`: sub-heading text `Narrative Style`; desktop (`BreakpointObserver.observe(MOBILE_QUERY)`
+    not matching): `mat-radio-group` `narrative-style-group` (`aria-label="Narrative Style"`) with one `mat-radio-button`
+    `narrative-style-option-<profileId>` per NARRATIVE profile in catalogue order, label = profile `label`
+    (shipped: `neutral-narrative`, `poe`, `kafka`, `wells`, `verne`, `orwell`, `clarke`, `harrison`). Mobile (matching):
+    `mat-select` `narrative-style-select` (`aria-label="Narrative Style"`, shows the selected profile's label) whose
+    overlay holds `mat-option`s `narrative-style-select-option-<profileId>` in the same order and labels; then there is
+    no `narrative-style-group` in the DOM. A breakpoint change keeps the selected profile.
+  - `mat-form-field` with `mat-label` `Story language` and `mat-select` `data-testid="story-language-select"`
+    (shows `English` / `Ukrainian`); its overlay holds `mat-option`s `story-language-option-en` `English` and
+    `story-language-option-uk` `Ukrainian` (labels from `languages`).
+  - All labels are rendered by interpolation from the catalogue; nothing is hard-coded except the two sub-headings
+    and `Story language`.
+- Reload (FR-63 / FR-64 acceptance 4 / 3): the panel shows the newest run's stored choice after `page.reload()`, both on
+  `/` and on `/futures/<thatRunId>`.
+
+E2E (new spec, e.g. `e2e/tests/writing-style.spec.ts`, desktop 1280 px unless stated):
+1. Fresh context, `/`: `writing-style-option-OFFICIAL` checked, `-NARRATIVE` not, `narrative-style-section` count 0,
+   `story-language-select` text `English`.
+2. Click NARRATIVE: `narrative-style-section` visible, the 8 `narrative-style-option-*` in shipped order with their
+   labels, `narrative-style-option-neutral-narrative` checked; click OFFICIAL → section count 0.
+3. Connect, NARRATIVE + `narrative-style-option-kafka` + `story-language-option-uk`, GENERATE: the POST body's `output`
+   equals `{"story":true,"illustration":false,"writingStyle":{"mode":"NARRATIVE","profileId":"kafka"},"language":"uk"}`;
+   `GET /api/runs/<id>` `configuration.output` equals the same; wait until the run is terminal.
+4. `page.reload()`: NARRATIVE checked, `narrative-style-option-kafka` checked, `story-language-select` text `Ukrainian`;
+   `GET /api/scenario/configuration` `output` equals the body of 3.
+5. Width 390 px: open the drawer, click NARRATIVE: `narrative-style-select` visible, `narrative-style-group` count 0;
+   open it, choose `narrative-style-select-option-kafka` → the select shows `Narrative — inspired by Franz Kafka`.
+6. API without connection: every invalid `writingStyle` and `language` class (lists below) → 400 with the exact body;
+   `GET /api/runs` length unchanged.
+
+- Changes earlier behaviour: the panel's `startRun` body and `ScenarioStore.configuration()` gain `output.writingStyle` + `output.language` (default `{OFFICIAL, official-briefing}` / `"en"`, `load` normalises), so every deep-equal of a UI-sent body or of the store's configuration against a config without them breaks (tests: frontend/src/app/runs/quick-actions.spec.ts, frontend/src/app/runs/run.store.spec.ts, frontend/src/app/runs/run-view.spec.ts, frontend/src/app/runs/stop-run.spec.ts, frontend/src/app/runs/evidence-note.spec.ts, frontend/src/app/runs/insufficient-evidence.spec.ts, frontend/src/app/scenario/scenario.store.spec.ts, frontend/src/app/scenario/scenario.store.custom.spec.ts, frontend/src/app/scenario/scenario.store.wildcards.spec.ts, frontend/src/app/scenario/output-settings.spec.ts, frontend/src/app/app.mobile.spec.ts, e2e/tests/run-start.spec.ts, e2e/tests/quick-regeneration.spec.ts, e2e/tests/run-failures.spec.ts, e2e/tests/insufficient-evidence.spec.ts, e2e/tests/custom-wildcards-output.spec.ts)
+- Changes earlier behaviour: the panel is ready after catalogue + configuration → after catalogue + configuration + `GET /api/writing-styles` (third parallel load request; failure → `backend-unavailable`), so every App-level unit test that flushes only two load requests never reaches the ready panel, and `run-view.spec.ts`'s `http.verify()` sees the open request (tests: frontend/src/app/app.spec.ts, frontend/src/app/app.mobile.spec.ts, frontend/src/app/scenario/output-settings.spec.ts, frontend/src/app/scenario/custom-wildcards.spec.ts, frontend/src/app/scenario/wildcard-catalogue.spec.ts, frontend/src/app/history/recent-futures.spec.ts, frontend/src/app/chatgpt/chatgpt-connection.spec.ts, frontend/src/app/runs/run-view.spec.ts, frontend/src/app/runs/stop-run.spec.ts, frontend/src/app/runs/run.store.spec.ts, frontend/src/app/runs/progress-view.spec.ts, frontend/src/app/runs/generate-button.spec.ts)
+- Changes earlier behaviour: `startRun` output validation story → illustration becomes story → illustration → writingStyle → language; requests without the new keys keep every earlier result and stored configuration (grep: no backend test, E2E or stub sends `writingStyle` / `language` in a run body; `StartRunOutputValidationTest`, `StartRunValidationTest`, the wildcard / custom-wildcard validation tests and all `AbstractRunIT` ITs stay green; E2E `scenario-controls.spec.ts` routes only `**/api/scenario/**` and uses `toMatchObject`, `run-failure.spec.ts` passes its configuration in directly, Try again stays verbatim) (tests: none)
+- Ranges & invariants: writingStyle (backend, each class its own parameterized case): valid → passes validation (401 in `@WebMvcTest` without connection, 202 + stored in an IT): every one of the 9 shipped (mode, profileId) pairs, absent, `null` (both stored absent), `{"mode":"NARRATIVE","profileId":"kafka","foo":1}` (stored without `foo`); exhaustive mode × profile grid: all 2 × 9 combinations, valid iff the mode equals the profile's mode (9 valid, 9 → 400); invalid → 400 "Unknown writing style": not an object (`"kafka"`, `""`, `5`, `true`, `[]`, `[{"mode":"OFFICIAL","profileId":"official-briefing"}]`), `{}`, mode missing / `null` / `"official"` / `"Narrative"` / `"POETIC"` / `""` / `1`, profileId missing / `null` / `""` / `5` / `"Kafka"` / `" kafka"` / `"kafka "` / `"dickens"` (shipped file) / 41 × `a`, cross-mode `{OFFICIAL, kafka}` / `{OFFICIAL, neutral-narrative}` / `{NARRATIVE, official-briefing}`; `dickens` file context: `{NARRATIVE, dickens}` valid, `{OFFICIAL, dickens}` → 400. Precedence (one case each): realism 11 + bad style → realism message; unknown wildcard + bad style → wildcard message; 4 custom wildcards + bad style → "At most 3 custom wildcards"; story false + bad style → "Story output is required"; illustration true + bad style → illustration message; bad style + bad language → "Unknown writing style"; bad style without connection → 400 not 401; valid style + an active run (connected) → 409 `RUN_ALREADY_ACTIVE` unchanged. Store normalisation (frontend, parameterized): absent, `null`, `"kafka"`, `{}`, `{mode:"narrative",profileId:"kafka"}`, `{OFFICIAL, kafka}`, `{NARRATIVE, official-briefing}`, `{NARRATIVE, dickens}` (not in catalogue) → `{OFFICIAL, official-briefing}`; each of the 9 valid pairs kept; `{NARRATIVE, kafka, foo:1}` → `{NARRATIVE, kafka}`. Invariants: the configuration of the 202 / `getRun` / `getScenarioConfiguration` has `output.writingStyle` deep-equal to the request's (minus unknown inner keys) or absent when not sent; `narrative-style-section` present ⇔ store mode NARRATIVE; exactly one checked radio in each visible group, and it is the store's value; the store's profile always has the store's mode after any sequence of `load` / `setWritingMode` / `setNarrativeProfile` (parameterized over both modes × every profile id + an unknown id); narrative option count = number of NARRATIVE catalogue profiles (8 shipped) in catalogue order with the catalogue labels; desktop shows only the radio group, mobile only the select, never both; every UI-sent `startRun` body (GENERATE, MORE REALISTIC, DARKER, MORE OPTIMISTIC, MORE EXTREME, LOWER REALISM in both views) has `output.writingStyle` and `output.language` equal to the store's; a style change leaves every other configuration field unchanged and every other setter (realism, darkness, optimism, horizon, wildcard on/off/intensity, custom add/remove/intensity, language) leaves `writingStyle` unchanged; the panel becomes ready only with all three load responses, for each of the 6 arrival orders, and goes to the error state when any one of the three fails (3 cases).
 
 ### FR-64 — Story language select
 - Happy path (panel, below the Writing Style group): `mat-form-field` with label "Story language" and `mat-select`
@@ -222,9 +321,10 @@ Languages are fixed in code: `en` "English", `uk` "Ukrainian".
 - Errors (backend, `POST /api/runs`, checked after `output.writingStyle`): `output.language` present, not `null` and
   not exactly the JSON string `"en"` or `"uk"` (`"EN"`, `"ua"`, `"uk-UA"`, `"de"`, `""`, `1`, `true`, `["uk"]`, `{}`)
   → 400 `VALIDATION_FAILED` → "Unknown story language"; no run is stored. Absent / `null` → accepted (`en`).
-- Ranges & invariants: valid classes `en`, `uk`, absent, `null` → 202 (absent and `null` stored as absent); every
-  invalid class above → 400 (each tested); invariants: the select shows exactly one of English / Ukrainian; the
-  language of `getRun.configuration` equals the request's.
+- Slice 02_style-selection delta: see "Slice 02_style-selection — precise delta" under FR-63 (validation order, stored
+  configuration, `ScenarioStore.setLanguage` / normalisation, `story-language-select` DOM, E2E cases 1, 3, 4, 6).
+- Changes earlier behaviour: none — the `output.language` part of the panel body / store change and the third load request are one change with `output.writingStyle` and are listed (with their test files) under FR-63, so each file is rewritten once
+- Ranges & invariants: language (backend, each class its own parameterized case): valid → passes validation (401 in `@WebMvcTest` without connection, 202 + stored in an IT): `"en"`, `"uk"` (stored as sent), absent, `null` (both stored absent); invalid → 400 "Unknown story language": `"EN"`, `"Uk"`, `"UK"`, `"ua"`, `"uk-UA"`, `"en-US"`, `"de"`, `""`, `" en"`, `"uk "`, `1`, `0`, `true`, `["uk"]`, `{}`, `{"code":"uk"}`. Precedence: story false + bad language → "Story output is required"; illustration true + bad language → illustration message; bad style + bad language → "Unknown writing style"; valid style + bad language → "Unknown story language"; bad language without connection → 400 not 401. Store (frontend, parameterized): `load` with language absent, `null`, `"de"`, `"EN"`, `"ua"`, `1` → `"en"`; `"en"`, `"uk"` kept; `setLanguage` with anything but `"en"` / `"uk"` ignored. Invariants: `story-language-select` shows exactly one of `English` / `Ukrainian`, equal to the store's language; the overlay has exactly the 2 options in order en, uk; `getRun.configuration.output.language` equals the request's (absent when not sent); a language change leaves every other configuration field (including `writingStyle`) unchanged and no other setter changes the language; every UI-sent `startRun` body carries the store's language.
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |

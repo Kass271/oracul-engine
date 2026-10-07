@@ -11,6 +11,7 @@ import type { GenerationRun } from '../api/models/generation-run';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
 import { ConnectionStore } from '../chatgpt/connection.store';
 import { ScenarioStore } from '../scenario/scenario.store';
+import { PANEL_OUTPUT, panelOutput } from '../scenario/testing/panel-fixtures';
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
 const NEW_ID = '99999999-8888-7777-6666-555555555555';
@@ -126,9 +127,29 @@ describe('slice 12_insufficient-evidence: insufficient view', () => {
     harness.detectChanges();
     expect(TestBed.inject(ScenarioStore).realism()).toBe(8);
     const post = http.expectOne(isRunsPost);
-    expect(post.request.body).toEqual({ ...CONFIG10, realism: 8 });
-    expect(TestBed.inject(ScenarioStore).configuration()).toEqual({ ...CONFIG10, realism: 8 });
+    expect(post.request.body).toEqual({ ...CONFIG10, output: PANEL_OUTPUT, realism: 8 });
+    expect(TestBed.inject(ScenarioStore).configuration()).toEqual({ ...CONFIG10, output: PANEL_OUTPUT, realism: 8 });
   });
+
+  // Ranges & invariants: LOWER REALISM keeps the stored writing style and language.
+  // @trace FR-63, FR-64
+  it.each([
+    ['OFFICIAL', 'official-briefing', 'en'],
+    ['NARRATIVE', 'kafka', 'uk'],
+    ['NARRATIVE', 'harrison', 'en'],
+  ] as const)(
+    'LOWER REALISM from a run stored as %s / %s / %s posts that style and language',
+    async (mode, profileId, language) => {
+      const output = panelOutput(mode, profileId, language);
+      await open(insufficient(10, { suggestedRealism: 8, configuration: { ...CONFIG10, realism: 10, output } }));
+      button().click();
+      harness.detectChanges();
+      const body = http.expectOne(isRunsPost).request.body as { realism: number; output: unknown };
+      expect(body.realism).toBe(8);
+      expect(body.output).toEqual(output);
+      expect(TestBed.inject(ScenarioStore).configuration().output).toEqual(output);
+    },
+  );
 
   // @trace FR-31
   it('the button is disabled while the start request is pending, then 202 navigates to the new run with replaceUrl', async () => {

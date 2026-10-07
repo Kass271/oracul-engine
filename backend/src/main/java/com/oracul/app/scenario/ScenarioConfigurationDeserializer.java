@@ -4,6 +4,9 @@ import com.oracul.app.api.model.CustomWildcard;
 import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.OutputSettings;
 import com.oracul.app.api.model.ScenarioConfiguration;
+import com.oracul.app.api.model.StoryLanguage;
+import com.oracul.app.api.model.WritingMode;
+import com.oracul.app.api.model.WritingStyleSelection;
 import com.oracul.app.api.model.WildcardSetting;
 import java.util.ArrayList;
 import java.util.List;
@@ -96,7 +99,39 @@ public class ScenarioConfigurationDeserializer extends ValueDeserializer<Scenari
 
     private static OutputSettings output(JsonNode n) {
         if (n == null || !n.isObject()) return null;
-        return new OutputSettings(bool(n.get("story")), bool(n.get("illustration")));
+        boolean styleInvalid = false;
+        boolean languageInvalid = false;
+        WritingStyleSelection style = null;
+        JsonNode ws = n.get("writingStyle");
+        if (ws != null && !ws.isNull()) {
+            JsonNode mode = ws.isObject() ? ws.get("mode") : null;
+            JsonNode id = ws.isObject() ? ws.get("profileId") : null;
+            WritingMode m = null;
+            if (mode != null && mode.isString()) {
+                for (WritingMode c : WritingMode.values()) {
+                    if (c.getValue().equals(mode.stringValue())) m = c;
+                }
+            }
+            if (m != null && id != null && id.isString() && id.stringValue().matches("[a-z0-9-]{1,40}")) {
+                style = new WritingStyleSelection(m, id.stringValue());
+            } else {
+                styleInvalid = true;
+            }
+        }
+        StoryLanguage language = null;
+        JsonNode ln = n.get("language");
+        if (ln != null && !ln.isNull()) {
+            if (ln.isString() && ("en".equals(ln.stringValue()) || "uk".equals(ln.stringValue()))) {
+                language = StoryLanguage.fromValue(ln.stringValue());
+            } else {
+                languageInvalid = true;
+            }
+        }
+        ParsedOutputSettings out = new ParsedOutputSettings(bool(n.get("story")), bool(n.get("illustration")),
+            styleInvalid, languageInvalid);
+        out.setWritingStyle(style);
+        out.setLanguage(language);
+        return out;
     }
 
     private static Boolean bool(JsonNode n) {

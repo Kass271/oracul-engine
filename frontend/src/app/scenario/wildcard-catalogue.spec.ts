@@ -6,6 +6,7 @@ import { provideRouter } from '@angular/router';
 import { App } from '../app';
 import type { ScenarioCatalogue } from '../api/models/scenario-catalogue';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
+import { flushWritingStyles } from './testing/panel-fixtures';
 
 const DEFAULTS: ScenarioConfiguration = {
   realism: 8,
@@ -77,6 +78,7 @@ describe('Wildcard catalogue in the Scenario Panel (slice 03_wildcards)', () => 
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush(CATALOGUE);
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush(config);
+    flushWritingStyles(http);
     await settle();
   }
 

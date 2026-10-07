@@ -13,6 +13,8 @@ import type { FutureResult } from '../api/models/future-result';
 import type { GenerationRun } from '../api/models/generation-run';
 import { ConnectionStore } from '../chatgpt/connection.store';
 import { ScenarioStore } from '../scenario/scenario.store';
+import { PANEL_OUTPUT, flushWritingStyles } from '../scenario/testing/panel-fixtures';
+
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555';
 const GENERATION_ID = 'ORC-2026-10-02-1842';
@@ -104,6 +106,7 @@ describe('slice 04_run-start', () => {
     fixture.detectChanges();
     http.match((r) => r.url.endsWith('/api/scenario/catalogue')).forEach((r) => r.flush(CATALOGUE));
     http.match((r) => r.url.endsWith('/api/scenario/configuration')).forEach((r) => r.flush(CATALOGUE.defaults));
+    flushWritingStyles(http);
     http.match(isConnectionGet).forEach((r) => r.flush({ state, canGenerate: state === 'CONNECTED' }));
     await settle();
     if (url) {
@@ -698,7 +701,7 @@ describe('slice 16_quick-regeneration', () => {
     (el().querySelector('[data-testid="quick-darker"]') as HTMLButtonElement).click();
     await vi.advanceTimersByTimeAsync(0);
     const req = http.expectOne(runsPost);
-    expect(req.request.body).toEqual(cfg(7));
+    expect(req.request.body).toEqual({ ...cfg(7), output: PANEL_OUTPUT });
     req.flush({ ...queued(), id: NEW_ID, configuration: cfg(7) }, { status: 202, statusText: 'Accepted' });
     await vi.advanceTimersByTimeAsync(0);
     harness.detectChanges();

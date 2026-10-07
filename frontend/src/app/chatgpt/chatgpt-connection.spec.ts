@@ -6,6 +6,7 @@ import { Router, provideRouter } from '@angular/router';
 
 import { App } from '../app';
 import type { ChatGptConnectionState } from '../api/models/chat-gpt-connection-state';
+import { flushWritingStyles } from '../scenario/testing/panel-fixtures';
 
 const CONNECTION_URL = '/api/auth/chatgpt/connection';
 const ANIMATIONS_OFF = { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } };
@@ -63,6 +64,7 @@ describe('ChatGPT connection header (slice 02_chatgpt-connection)', () => {
   function flushScenario(): void {
     http.match((r) => r.url.endsWith('/api/scenario/catalogue')).forEach((r) => r.flush(CATALOGUE));
     http.match((r) => r.url.endsWith('/api/scenario/configuration')).forEach((r) => r.flush(CATALOGUE.defaults));
+    flushWritingStyles(http);
   }
 
   /** Answers every pending GET connection request; at least one must be pending. */
@@ -149,6 +151,7 @@ describe('ChatGPT connection header (slice 02_chatgpt-connection)', () => {
     fixture.detectChanges();
     http.match((r) => r.url.endsWith('/api/scenario/catalogue')).forEach((r) => r.flush('', { status: 503, statusText: 'Unavailable' }));
     http.match((r) => r.url.endsWith('/api/scenario/configuration')).forEach((r) => r.flush('', { status: 503, statusText: 'Unavailable' }));
+    flushWritingStyles(http);
     flushConnection('NOT_CONNECTED');
     await settle();
     expect(byId('backend-unavailable')).not.toBeNull();

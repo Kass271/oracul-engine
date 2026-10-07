@@ -8,6 +8,7 @@ import type { GenerationRun } from './api/models/generation-run';
 import { RunStore } from './runs/run.store';
 import type { ScenarioCatalogue } from './api/models/scenario-catalogue';
 import type { ScenarioConfiguration } from './api/models/scenario-configuration';
+import { WRITING_STYLES } from './scenario/testing/panel-fixtures';
 
 const DEFAULTS: ScenarioConfiguration = {
   realism: 8,
@@ -62,11 +63,15 @@ describe('App shell (slice 01_scenario-controls)', () => {
   function flushConfiguration(config: ScenarioConfiguration = DEFAULTS): void {
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush(config);
   }
+  function flushStyles(): void {
+    http.expectOne((r) => r.url.endsWith('/api/writing-styles')).flush(WRITING_STYLES);
+  }
 
   async function startLoaded(config: ScenarioConfiguration = DEFAULTS): Promise<void> {
     fixture.detectChanges();
     flushCatalogue();
     flushConfiguration(config);
+    flushStyles();
     await settle();
   }
 
@@ -89,23 +94,28 @@ describe('App shell (slice 01_scenario-controls)', () => {
   // ---- FR-1 ----
 
   // @trace FR-1
-  it('shows app-loading and no panel while catalogue and configuration are pending', () => {
+  it('shows app-loading and no panel while catalogue, configuration and writing styles are pending', () => {
     fixture.detectChanges();
     expect(http.match((r) => r.url.endsWith('/api/scenario/catalogue')).length).toBe(1);
     expect(http.match((r) => r.url.endsWith('/api/scenario/configuration')).length).toBe(1);
+    expect(http.match((r) => r.url.endsWith('/api/writing-styles')).length).toBe(1);
     expect(byId('app-loading')).not.toBeNull();
     expect(byId('scenario-panel')).toBeNull();
     expect(byId('welcome-view')).toBeNull();
   });
 
   // @trace FR-1
-  it('keeps the panel absent until both calls have arrived', async () => {
+  it('keeps the panel absent until all three calls have arrived', async () => {
     fixture.detectChanges();
     flushCatalogue();
     await settle();
     expect(byId('app-loading')).not.toBeNull();
     expect(byId('scenario-panel')).toBeNull();
     flushConfiguration();
+    await settle();
+    expect(byId('app-loading')).not.toBeNull();
+    expect(byId('scenario-panel')).toBeNull();
+    flushStyles();
     await settle();
     expect(byId('app-loading')).toBeNull();
     expect(byId('scenario-panel')).not.toBeNull();
@@ -141,6 +151,7 @@ describe('App shell (slice 01_scenario-controls)', () => {
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush('', { status: 503, statusText: 'Unavailable' });
     flushConfiguration();
+    flushStyles();
     await settle();
     expect(text('backend-unavailable')).toContain('ORACUL is unavailable — try again shortly');
     expect(text('backend-retry')).toBe('Try again');
@@ -157,6 +168,7 @@ describe('App shell (slice 01_scenario-controls)', () => {
     http
       .expectOne((r) => r.url.endsWith('/api/scenario/configuration'))
       .flush({ code: 'INTERNAL_ERROR', message: 'Something went wrong' }, { status: 500, statusText: 'Server Error' });
+    flushStyles();
     await settle();
     expect(text('backend-unavailable')).toContain('ORACUL is unavailable — try again shortly');
     expect(el().textContent).not.toContain('INTERNAL_ERROR');
@@ -168,16 +180,18 @@ describe('App shell (slice 01_scenario-controls)', () => {
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).error(new ProgressEvent('error'));
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).error(new ProgressEvent('error'));
+    http.expectOne((r) => r.url.endsWith('/api/writing-styles')).error(new ProgressEvent('error'));
     await settle();
     expect(text('backend-unavailable')).toContain('ORACUL is unavailable — try again shortly');
     expect(byId('scenario-panel')).toBeNull();
   });
 
   // @trace FR-1
-  it('retry shows app-loading, repeats both calls and renders the panel on success', async () => {
+  it('retry shows app-loading, repeats all three calls and renders the panel on success', async () => {
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush('', { status: 502, statusText: 'Bad Gateway' });
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush('', { status: 502, statusText: 'Bad Gateway' });
+    http.expectOne((r) => r.url.endsWith('/api/writing-styles')).flush('', { status: 502, statusText: 'Bad Gateway' });
     await settle();
     expect(byId('backend-retry')).not.toBeNull();
 
@@ -188,6 +202,7 @@ describe('App shell (slice 01_scenario-controls)', () => {
 
     flushCatalogue();
     flushConfiguration();
+    flushStyles();
     await settle();
     expect(byId('backend-unavailable')).toBeNull();
     expect(byId('app-loading')).toBeNull();
@@ -349,6 +364,7 @@ describe('slice 11_run-failures: the panel stays usable', () => {
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush(CATALOGUE);
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush(DEFAULTS);
+    http.expectOne((r) => r.url.endsWith('/api/writing-styles')).flush(WRITING_STYLES);
     await settle();
     TestBed.inject(RunStore).run.set(runWith(status));
     await settle();

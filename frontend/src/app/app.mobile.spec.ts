@@ -9,6 +9,7 @@ import { BehaviorSubject } from 'rxjs';
 import { App } from './app';
 import type { ScenarioCatalogue } from './api/models/scenario-catalogue';
 import type { ScenarioConfiguration } from './api/models/scenario-configuration';
+import { PANEL_OUTPUT, flushWritingStyles } from './scenario/testing/panel-fixtures';
 import { ScenarioStore } from './scenario/scenario.store';
 
 const DEFAULTS: ScenarioConfiguration = {
@@ -79,6 +80,7 @@ describe('App mobile layout (slice 19_mobile-layout)', () => {
     fixture.detectChanges();
     http.expectOne((r) => r.url.endsWith('/api/scenario/catalogue')).flush(CATALOGUE);
     http.expectOne((r) => r.url.endsWith('/api/scenario/configuration')).flush(DEFAULTS);
+    flushWritingStyles(http);
     await settle();
   }
 
@@ -137,6 +139,7 @@ describe('App mobile layout (slice 19_mobile-layout)', () => {
     http
       .match((r) => r.url.endsWith('/api/scenario/configuration'))
       .forEach((r) => r.flush('x', { status: 500, statusText: 'err' }));
+    flushWritingStyles(http);
     await settle();
     expect(byId('backend-unavailable')).not.toBeNull();
     expect(byId('scenario-drawer-toggle')).toBeNull();
@@ -172,7 +175,7 @@ describe('App mobile layout (slice 19_mobile-layout)', () => {
     byId('scenario-drawer-close')!.click();
     await settle();
     expect(store.darkness()).toBe(9);
-    expect(store.configuration()).toEqual({ ...DEFAULTS, darkness: 9 });
+    expect(store.configuration()).toEqual({ ...DEFAULTS, darkness: 9, output: PANEL_OUTPUT });
     byId('scenario-drawer-toggle')!.click();
     await settle();
     expect((byId('value-darkness')!.textContent ?? '').trim()).toBe('9');
