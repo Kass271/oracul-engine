@@ -85,11 +85,6 @@ public class EvidenceConfig {
         return new EventRanker(weights, properties.minSourceQuality());
     }
 
-    @Bean
-    EvidenceSelector evidenceSelector(EvidenceProperties properties) {
-        return new EvidenceSelector(properties);
-    }
-
     private static void nonNegative(String name, double v) {
         if (!(v >= 0)) {
             throw new IllegalStateException(name + " must be >= 0");

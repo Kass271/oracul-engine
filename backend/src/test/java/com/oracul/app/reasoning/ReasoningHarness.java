@@ -9,6 +9,9 @@ import com.oracul.app.api.model.GuardReport;
 import com.oracul.app.api.model.GuardViolation;
 import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.OutputSettings;
+import com.oracul.app.api.model.PackSourceItem;
+import com.oracul.app.api.model.PackWildcardSection;
+import com.oracul.app.api.model.WildcardPipelineKind;
 import com.oracul.app.api.model.ResearchProfile;
 import com.oracul.app.api.model.ResearchTopic;
 import com.oracul.app.api.model.ScenarioConfiguration;
@@ -423,6 +426,34 @@ public final class ReasoningHarness {
     /** Fixture GP: V4 pack with the given horizon (profile and configuration agree). */
     public static EvidencePack gp(HorizonCode horizon) {
         return pack(configA(horizon), profile(horizon, PANDEMIC, HUMANOID), v4PromptText("Dock workers strike over humanoid robots."));
+    }
+
+    /**
+     * A phase-03 pack (wildcard-evidence.md slice 06): core / supporting / counterSignals empty, one wildcard section per entry of
+     * {@code itemsPerSection} holding that many items numbered E001... in section order (distinct sources S001...).
+     */
+    public static EvidencePack wildcardPack(int... itemsPerSection) {
+        EvidencePack p = gp(HorizonCode._5Y);
+        p.getCore().clear();
+        p.getSupporting().clear();
+        p.getCounterSignals().clear();
+        List<PackWildcardSection> sections = new ArrayList<>();
+        int next = 1;
+        for (int j = 0; j < itemsPerSection.length; j++) {
+            List<PackSourceItem> items = new ArrayList<>();
+            for (int k = 0; k < itemsPerSection[j]; k++, next++) {
+                PackSourceItem i = new PackSourceItem(String.format("E%03d", next), String.format("S%03d", next), "Title " + next,
+                    "Publisher " + next, java.net.URI.create("https://www.reuters.com/s" + next), false, new ArrayList<>());
+                i.setSnippet("Summary " + next);
+                items.add(i);
+            }
+            PackWildcardSection s = new PackWildcardSection(String.format("W%02d", j + 1), WildcardPipelineKind.CATALOGUE, "Wildcard " + (j + 1),
+                "Wildcard " + (j + 1) + " 5/10", items);
+            s.setLevel(5);
+            sections.add(s);
+        }
+        p.setWildcardSections(sections);
+        return p;
     }
 
     public static EvidencePack withCustom(String label, int intensity) {

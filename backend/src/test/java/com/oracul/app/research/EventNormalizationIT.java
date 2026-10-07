@@ -18,7 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
 /** Rows 1-5, 18-20 of research-pipeline.md "Slice 06_events" integration tests: event normalisation (stage CONNECTING_SIGNALS). */
-// @trace FR-14, FR-38, FR-39, FR-47
+// @trace FR-14, FR-38, FR-39, FR-47, FR-57
 class EventNormalizationIT extends AbstractEventIT {
 
     private static final String TASK_LINE =
@@ -59,16 +59,16 @@ class EventNormalizationIT extends AbstractEventIT {
         // R7: the keys are omitted from the JSON (an explicit null would be a contract violation)
         assertThat(ev2).as("EV002 has no disagreement").doesNotContainKey("disagreement");
         for (Map<String, Object> e : events) {
-            // slice 07: every classified event is ranked and (default pack limits) selected
+            // slice 07: every classified event is ranked; wildcard-evidence.md slice 06 (FR-57): no event is selected any more
             assertThat(e).as(e.get("id") + " ranking").containsKey("ranking");
-            assertThat(e).as(e.get("id") + " selection").containsKey("selection");
+            assertThat(e).as(e.get("id") + " selection").doesNotContainKey("selection");
             assertThat(e).as(e.get("id") + " excludedReason").doesNotContainKey("excludedReason");
             assertThat(e).as(e.get("id") + " is classified").containsKey("classification");
         }
 
-        // slice 07 (spec acceptance #1, body A): EV001 is the counter-signal, EV002 the core item
-        assertThat(ev1.get("selection")).isEqualTo(Map.of("evidenceId", "E002", "section", "COUNTER_SIGNAL"));
-        assertThat(ev2.get("selection")).isEqualTo(Map.of("evidenceId", "E001", "section", "CORE"));
+        // wildcard-evidence.md slice 06: the pack holds the sources by wildcard, events carry no selection
+        assertThat(ev1).doesNotContainKey("selection");
+        assertThat(ev2).doesNotContainKey("selection");
 
         for (String s : List.of("S001", "S002", "S003")) {
             assertThat(source(r, s).get("entities")).as(s).isEqualTo(List.of("WHO", "Pandemic vaccine"));

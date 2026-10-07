@@ -1,0 +1,142 @@
+{
+  "slice": "06_wildcard-pack",
+  "round": 5,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/WildcardPackRendererTest.java",
+      "line": 472,
+      "fr": "FR-57",
+      "problem": "theRenderedSnippetIsCutAfterSanitisingTo600Characters only asserts length <= 600 with input \"x\\t\" x 400, where sanitising does not shrink the text. A renderer that cut before sanitising would pass too, so the test does not prove the spec order 'cut to 600 characters after sanitising'. The render-time cut (WildcardPackRenderer.render -> cut(PromptText.sanitize(snippet))) also has no surrogate-pair case; only the sections() cut is tested at 599/600.",
+      "fix": "Use input that shrinks when sanitised, e.g. \"x\\t\\t\" x 400, and assert the snippet is exactly 600 characters (\"x x x ...\" cut to 600). Add one render-level case with a surrogate pair at 599-600 after sanitising, and assert the pair is not split.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/EvidenceGuard.java",
+      "line": 48,
+      "fr": "FR-57",
+      "problem": "Style only. WildcardPackRenderer.evidenceIds(pack) is called twice by its fully qualified name, and the same shared 'empty pack' rule is also used by fully qualified name in ScenarioGenerationPrompt and FutureResultService (com.oracul.app.api.model.PackSourceItem, java.util.TreeMap). The rule lives in a prompt-renderer class even though the reasoning layer uses it.",
+      "fix": "Import the class, compute the id set once (Set<String> packIds = WildcardPackRenderer.evidenceIds(pack)) and reuse it for known and speculative. Optionally move evidenceIds to a small EvidencePacks helper.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "e2e/tests/evidence-pack.spec.ts",
+      "line": 121,
+      "fr": "FR-57",
+      "problem": "The rewritten acceptance test no longer asserts run.counts.articlesConsidered (25) and run.counts.uniqueEvents (4). The spec says both stay unchanged in this slice ('searches, articlesRetrieved, articlesConsidered, uniqueEvents, sourcesUsed, sourcesKept unchanged'), so E2E would no longer catch a regression there. The new second test also adds a serial E2E with two full acceptance runs (timeout 150 s). The spec (d) requires that comparison, but it adds time to the serial suite.",
+      "fix": "Put back expect(run.counts.articlesConsidered).toBe(25) and expect(run.counts.uniqueEvents).toBe(4) in the acceptance test.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/RankingSelectionIT.java",
+      "line": 1,
+      "fr": "FR-17",
+      "problem": "The class still has '@trace FR-17' (evidence selection), but for new runs it now only proves that no selection happens. FR-17 behaviour is deleted for new runs (EvidenceSelector removed), so the trace overstates what is covered.",
+      "fix": "Drop FR-17 from the @trace line, or note that FR-17 is superseded by FR-57 for new runs.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/result/FutureResultIT.java",
+      "line": 17,
+      "fr": "FR-57",
+      "problem": "Nothing tests the legacy-pack branch of FutureResultService.getFutureResult (FutureResultService.java lines 92-103) any more. The spec requires it: wildcard-evidence.md says 'Stored packs keep their sections', and contract-notes.md item 15 says legacy results keep the phase-01 layout. Before this slice, real runs built core/supporting/counterSignals packs and exercised this branch. Now every run builds a wildcard pack with empty legacy lists. aCompletedRunServesTheFullFutureResult still asserts counterSignal == (section == COUNTER_SIGNAL), but that check passes trivially on a list with no counter-signal items. The check-coverage gate is RED because of this gap.",
+      "fix": "Add a getFutureResult case on a stored legacy pack, inserted through EvidencePackRepository.insert with wildcardSections null and non-empty core, supporting and counterSignals. Include one item with empty sourceIds (expect title, publisher and url all \"\") and one COUNTER_SIGNAL item (expect counterSignal true). Expect one ResultSource per item in Evidence ID order, with the item's section and the first source's publishedAt.",
+      "status": "fixed",
+      "verification": "Fixed: FutureResultIT.aStoredLegacyPackKeepsThePhaseOneLayoutOfTheResultSources inserts a legacy pack (wildcardSections null; core/supporting/counterSignals out of order; E003 without sources) and asserts Evidence ID order, sections, counterSignal only for COUNTER_SIGNAL, usedInScenario, first-source title/publisher/url/publishedAt and the empty-source case."
+    },
+    {
+      "id": "R6",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/reasoning/EvidenceGuardTest.java",
+      "line": 32,
+      "fr": "FR-57",
+      "problem": "The guard fixture GP is now a wildcard pack, so no test proves EvidenceGuard on a stored legacy pack. EvidenceGuard.java lines 41-42 and 121 are uncovered: supporting IDs are known, and a counter-signal entry whose ID is in pack.counterSignals is kept. The spec says ALTERNATIVE runs reuse the parent's pack unchanged, including a stored legacy pack (wildcard-evidence.md:95), so the guard must still accept supporting IDs and keep real counter-signals. g9 and g19 only cover the removal path. This gap also keeps the coverage gate RED.",
+      "fix": "Add a case on a legacy pack with core, supporting and counterSignals items. A fact citing a supporting ID passes unchanged. A counterSignalsConsidered entry with a pack.counterSignals ID is kept with no violation. Keep the existing removal case as the negative partner.",
+      "status": "fixed",
+      "verification": "Fixed: EvidenceGuardTest g22 (supporting ID of a legacy pack passes unchanged), g23 (legacy counter-signal entry kept, no violation), g24 (supporting ID is not a counter-signal, removed) on legacyPack() with wildcardSections asserted null."
+    },
+    {
+      "id": "R7",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/StopRunIT.java",
+      "line": 1,
+      "fr": "FR-57",
+      "problem": "The RANKING pack commit in ResearchPipeline (lines 221-239) has no race test. Two paths are untested: guard.lockAndCheck fails inside the transaction (setRollbackOnly, no pack, no events and no storePack committed), and packed is not TRUE (the run is abandoned and RUN_TIMEOUT is committed if the deadline has passed). This slice rewrote the block (new packService.build, total, decision), but only the success path is tested (EvidencePackAtomicIT has one success case). The coverage margin the gate needs depends on this case.",
+      "fix": "Add stage tests in the existing pattern for the guard races at lines 134, 158 and 202, in StopRunIT/RunDeadlineIT or a new RankingCommitRaceIT. (1) Stop or expire the run so lockAndCheck fails at the RANKING commit. Assert no evidence_pack row, evidence_pack_id null, and no ranking update. (2) Assert the abandoned run ends RUN_TIMEOUT past its deadline and stays STOPPED otherwise.",
+      "status": "fixed",
+      "verification": "Fixed: RankingCommitRaceIT holds EvidencePackService.build, then stops (deadline passed or not) or expires the run, and asserts no evidence_pack row, evidence_pack_id null, no event ranking, no evidence note, STOPPED kept / RUN_TIMEOUT at RANKING via ResearchPipeline.abandon (scheduler interval PT1H, so the pipeline path is the one committing)."
+    },
+    {
+      "id": "R8",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/RankingCommitRaceIT.java",
+      "line": 29,
+      "fr": "FR-57",
+      "problem": "The new class is the only one with @MockitoSpyBean EvidencePackService, so it starts its own Spring context (a new context-cache key). It also spends about 7.5 s on fixed real-time waits (watchUnchanged 2500 ms in each of 3 cases). In the last run it was the second-slowest class (9.3 s). This follows the existing StopRunIT/RunDeadlineIT pattern and does not block.",
+      "fix": "Put the spy into a shared base context (for example AbstractDeadlineIT, with the hold enabled per test) so it reuses the deadline context. Shorten the watch window, or replace it with a check that the pipeline thread has finished.",
+      "status": "open"
+    },
+    {
+      "id": "R9",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ParallelSearchWindowIT.java",
+      "line": 26,
+      "fr": "FR-52",
+      "problem": "The deflaked parameters (search-window PT5S, stub delay 3.3 s, bound < 6 s, rate-limit-wait PT10S, bound < 3000 ms) no longer match the literal recipe of wildcard-search.md range (c): 'search-window PT2S, concurrency 8, 20 queries, every answer delayed 1.5 s ... call returns in < 2.5 s'. The invariant is the same: 16 requests, Q01-Q08 EMPTY, Q09-Q20 FAILED, 4 window lines, a 429 whose wait ends after the window is FAILED after 1 request with no retry. Margins checked: wave 2 has 1.7 s of slack before the window end. Wave 3 cannot start, because wave-2 answers come at >= 6.6 s. The duration bound of 6 s still separates a cut call (about 5 s) from an uncut one (>= 6.6 s). The 10 s wait vs about 5 s left still hits the 'wait >= left' branch, and an implementation that slept would take >= 5 s, which the < 3000 ms bound catches. The retry side of the rule stays covered by ParallelSearchIT (window PT60S, wait PT2S: 2 requests, gap >= 1.9 s). Only the spec text and the test disagree.",
+      "fix": "Update range (c) in wildcard-search.md to the new numbers (PT5S window, 3.3 s delay, < 6 s, rate-limit-wait PT10S), or state there that the numbers are an example and the invariant is what counts.",
+      "status": "open"
+    },
+    {
+      "id": "R10",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/research/ParallelSearchWindowIT.java",
+      "line": 40,
+      "fr": "FR-52",
+      "problem": "The class was already the slowest one (retro: 11 s) and is now slower. Test 1 takes about 5 s and test 3 about 5 s. Their leftover stub handlers stay open until 6.6 s (wave 2) and 6.5 s (window + 1.5 s), so AbstractNewsSearchIT.resetNews hits its 1.5 s wire-wait cap before the next test. Leftover handlers are epoch-guarded in StubNews, so the wait is harmless for correctness, but it adds about 3 s per class run. The reason (a flake under 2 Gradle forks) is documented, so this does not block.",
+      "fix": "Optional: in everyAnswerOutlastingTheWindowFailsEveryQueryNeverEmpty, use a delay of window + 0.7 s so the handlers end inside the 1.5 s wire wait. Accept the class as the slowest, with the reason given in its Javadoc.",
+      "status": "open"
+    },
+    {
+      "id": "R11",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "e2e/tests/events.spec.ts",
+      "line": 76,
+      "fr": "FR-57",
+      "problem": "The rewritten FR-15 malformed-classification test gets its values right. They match wildcard-evidence.md fixture (d) and the slice-06 rule that the pack is the same whatever the classification or exclusion: W01 [E001..E004], W02 [E001,E005,E006,E007], eventsSelected 7, counterSignals 0, core/counterSignals [], no note at Realism 8 (needed 3). All FR-15 assertions are kept: uniqueEvents 4, 4 events CLASSIFICATION_FAILED without classification, 2 EVENT_CLASSIFICATION requests. The empty-pack speculative path is still covered E2E in insufficient-evidence.spec.ts:170, and the negative string check matches ScenarioGenerationPrompt.java:94. Two small issues remain. (1) The test adds \"@trace FR-59\" and cites FR-59 in a comment, but FR-59 (EvidenceNotes decision table, MISSING_WILDCARD_SOURCES) belongs to slice 09_wildcard-results. In this slice the no-note outcome comes from the FR-47 decision 5 of slice-06 RANKING step 4, so the trace claims coverage of an FR that is not built yet. (2) Fixture (d) / step 2 also requires supporting [], and that is not asserted here. evidence-pack.spec.ts covers it.",
+      "fix": "Drop \"@trace FR-59\" (or leave it to slice 09) and refer to \"slice-06 RANKING step 4 (FR-47 decision 5)\" in the comment. Optionally add expect(pack.supporting).toEqual([]).",
+      "status": "open"
+    }
+  ]
+}

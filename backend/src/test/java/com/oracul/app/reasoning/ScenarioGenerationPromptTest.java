@@ -23,7 +23,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import tools.jackson.databind.JsonNode;
 
 /** scenario-reasoning.md "Slice 08_validated-scenario" "Prompt unit rows": pure tests of the SCENARIO_GENERATION request. */
-// @trace FR-19
+// @trace FR-19, FR-57
 class ScenarioGenerationPromptTest {
 
     private static final String START = "<<<ORACUL_UNTRUSTED_DATA name=\"";
@@ -472,5 +472,26 @@ class ScenarioGenerationPromptTest {
         v.setClaimId(claimId);
         v.setEvidenceId(evidenceId);
         return v;
+    }
+
+    // ---- phase-03 packs (wildcard-evidence.md slice 06): "empty" means no item in any wildcard section ---------------------------
+
+    private static final String SPECULATIVE_LINE_START = "The Evidence Pack is empty: no current news could be used.";
+
+    @ParameterizedTest(name = "sections with {0} items")
+    @CsvSource({"1,0", "0,1", "2,2", "4,0", "0,4", "3,1"})
+    void aPackWithAnItemInASectionGetsNoSpeculativeTaskLine(int first, int second) {
+        EvidencePack pack = ReasoningHarness.wildcardPack(first, second);
+        String text = inputText(pack, initial());
+        assertThat(text).doesNotContain(SPECULATIVE_LINE_START);
+        assertThat(text).contains(START + "evidence-pack\">>>\n" + pack.getPromptText() + "\n" + END);
+    }
+
+    @Test
+    void aPackWhoseSectionsAreAllEmptyGetsTheSpeculativeTaskLine() {
+        EvidencePack pack = ReasoningHarness.wildcardPack(0, 0);
+        String text = inputText(pack, initial());
+        assertThat(text.split(java.util.regex.Pattern.quote(SPECULATIVE_LINE_START), -1)).hasSize(2);
+        assertThat(text).contains("\n" + SPECULATIVE_LINE_START);
     }
 }

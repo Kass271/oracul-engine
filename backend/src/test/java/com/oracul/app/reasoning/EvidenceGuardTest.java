@@ -15,14 +15,17 @@ import com.oracul.app.api.model.StructuredScenario;
 import com.oracul.app.reasoning.ReasoningHarness.Checked;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /** scenario-reasoning.md "Slice 08_validated-scenario" FR-21: unit rows G1-G16 of the deterministic Evidence Guard. */
-// @trace FR-21
+// @trace FR-21, FR-57
 class EvidenceGuardTest {
 
     private static final String D = ScenarioFixtures.DEFAULT_D;
@@ -164,7 +167,9 @@ class EvidenceGuardTest {
 
     @Test
     void g9_aCounterSignalEntryThatIsNoCounterSignalIsRemoved() {
-        StructuredScenario in = v4(n -> el(n, "counterSignalsConsidered", 0).put("evidenceId", "E001"));
+        // fixture (e): SC-V4 answers counterSignalsConsidered [], so the entry is appended
+        StructuredScenario in = v4(n -> ((ArrayNode) n.get("counterSignalsConsidered")).addObject()
+            .put("evidenceId", "E001").put("howAddressed", "x"));
         Checked r = check(in, GP, 1, false);
         assertSingle(r, "PASS_WITH_REMOVALS@1", v("UNKNOWN_EVIDENCE_ID", null, "E001",
             "counter-signal E001 is not a counter-signal of the Evidence Pack", "REMOVED"));
@@ -276,5 +281,117 @@ class EvidenceGuardTest {
         assertThat(comparable(r.cleaned().getSpeculations())).isEqualTo(comparable(in.getSpeculations()));
         assertThat(comparable(r.cleaned().getFutureEvent())).isEqualTo(comparable(in.getFutureEvent()));
         assertThat(comparable(r.cleaned().getCandidateFutures())).isEqualTo(comparable(in.getCandidateFutures()));
+    }
+
+    // ---- phase-03 packs (wildcard-evidence.md slice 06): the known Evidence IDs come from the wildcard sections ----------------
+
+    /** Layouts of the 4 items E001...E004 over the sections of a plan. */
+    static Stream<Arguments> layouts() {
+        return Stream.of(Arguments.of("one section", new int[] {4}), Arguments.of("two sections", new int[] {2, 2}),
+            Arguments.of("empty last", new int[] {4, 0}), Arguments.of("empty first", new int[] {0, 4}),
+            Arguments.of("three sections", new int[] {1, 1, 2}));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("layouts")
+    void g17_aScenarioCitingItemsOfTheSectionsPassesUnchanged(String name, int[] layout) {
+        EvidencePack pack = ReasoningHarness.wildcardPack(layout);
+        StructuredScenario in = sc(ScenarioFixtures.scV4(D));
+        Checked r = check(in, pack, 1, false);
+        assertThat(r.head()).isEqualTo("PASS@1");
+        assertThat(r.violations()).isEmpty();
+        assertThat(comparable(r.cleaned())).isEqualTo(comparable(ScenarioFixtures.scV4(D)));
+    }
+
+    @ParameterizedTest(name = "cites {0}")
+    @CsvSource({"E001", "E002", "E003", "E004"})
+    void g18_everyIdOfTheSectionsIsKnown(String id) {
+        EvidencePack pack = ReasoningHarness.wildcardPack(2, 2);
+        Checked r = check(sc(ScenarioFixtures.sc(D, "[\"" + id + "\"]", "[\"" + id + "\"]", "[\"E001\"]", "[\"E001\"]")), pack, 1, false);
+        assertThat(r.head()).isEqualTo("PASS@1");
+        assertThat(r.violations()).isEmpty();
+    }
+
+    @ParameterizedTest(name = "cites {0}")
+    @CsvSource({"E005", "E006", "E099", "E000"})
+    void g18_anIdOutsideTheSectionsIsRemoved(String id) {
+        EvidencePack pack = ReasoningHarness.wildcardPack(2, 2);
+        Checked r = check(sc(ScenarioFixtures.sc(D, "[\"E001\"]", "[\"E001\"]", "[\"" + id + "\"]", "[\"" + id + "\"]")), pack, 1, false);
+        assertSingle(r, "PASS_WITH_REMOVALS@1", v("UNKNOWN_EVIDENCE_ID", "F2", id, "F2 cites " + id + NOT_IN_PACK, "REMOVED"));
+        assertThat(factIds(r.cleaned())).containsExactly("F1");
+    }
+
+    @Test
+    void g19_aCounterSignalEntryIsRemovedBecauseANewPackHasNoCounterSignal() {
+        EvidencePack pack = ReasoningHarness.wildcardPack(2, 2);
+        StructuredScenario in = v4(n -> ((ArrayNode) n.get("counterSignalsConsidered")).addObject()
+            .put("evidenceId", "E002").put("howAddressed", "x"));
+        Checked r = check(in, pack, 1, false);
+        assertSingle(r, "PASS_WITH_REMOVALS@1", v("UNKNOWN_EVIDENCE_ID", null, "E002",
+            "counter-signal E002 is not a counter-signal of the Evidence Pack", "REMOVED"));
+        assertThat(r.cleaned().getCounterSignalsConsidered()).isEmpty();
+    }
+
+    @Test
+    void g20_aPackWithItemsInASectionIsNotSpeculative() {
+        EvidencePack pack = ReasoningHarness.wildcardPack(0, 2);
+        // normal mode: the first step must be a FACT (speculative mode drops the rule)
+        StructuredScenario in = v4(n -> step(n, 0).put("informationClass", "INFERENCE").put("claimId", "I1"));
+        Checked r = check(in, pack, 1, false);
+        assertSingle(r, "FAIL@1", v("CAUSAL_CHAIN_INVALID", null, null, "causal chain: first step must be FACT", "REGENERATION_REQUESTED"));
+    }
+
+    @Test
+    void g21_aPackWhoseSectionsAreAllEmptyIsSpeculative() {
+        EvidencePack pack = ReasoningHarness.wildcardPack(0, 0);
+        Checked r = check(sc(ScenarioFixtures.scV4(D)), pack, 1, false);
+        assertThat(r.head()).isEqualTo("PASS_WITH_REMOVALS@1");
+        assertThat(r.cleaned().getFactsUsed()).isEmpty();
+        assertThat(r.cleaned().getInferences()).isEmpty();
+        assertThat(r.cleaned().getCausalChain().stream().map(s -> s.getInformationClass().name()).toList())
+            .containsExactly("SPECULATION", "FUTURE_EVENT");
+    }
+
+    // ---- stored legacy packs (core / supporting / counterSignals; ALTERNATIVE runs reuse them, wildcard-evidence.md) -----
+
+    /** GP plus a SUPPORTING item E003: a legacy pack with core E001, supporting E003 and counter-signal E002. */
+    private static EvidencePack legacyPack() {
+        EvidencePack pack = ReasoningHarness.gp(HorizonCode._5Y);
+        pack.getSupporting().add(ReasoningHarness.item("E003", com.oracul.app.api.model.EvidenceSection.SUPPORTING, "Supporting detail."));
+        assertThat(pack.getWildcardSections()).as("a legacy pack has no wildcard sections").isNullOrEmpty();
+        return pack;
+    }
+
+    @Test
+    void g22_aFactCitingASupportingIdOfALegacyPackPassesUnchanged() {
+        StructuredScenario in = sc(ScenarioFixtures.sc(D, "[\"E001\"]", "[\"E001\"]", "[\"E003\"]", "[\"E003\"]"));
+        Checked r = check(in, legacyPack(), 1, false);
+        assertThat(r.head()).isEqualTo("PASS@1");
+        assertThat(r.violations()).isEmpty();
+        assertThat(factIds(r.cleaned())).containsExactly("F1", "F2");
+        assertThat(r.cleaned().getFactsUsed().get(1).getEvidenceIds()).containsExactly("E003");
+        assertThat(comparable(r.cleaned())).isEqualTo(comparable(in));
+    }
+
+    @Test
+    void g23_aCounterSignalEntryOfALegacyPackCounterSignalIsKept() {
+        StructuredScenario in = v4(n -> ((ArrayNode) n.get("counterSignalsConsidered")).addObject()
+            .put("evidenceId", "E002").put("howAddressed", "handled"));
+        Checked r = check(in, legacyPack(), 1, false);
+        assertThat(r.head()).isEqualTo("PASS@1");
+        assertThat(r.violations()).isEmpty();
+        assertThat(r.cleaned().getCounterSignalsConsidered()).hasSize(1);
+        assertThat(r.cleaned().getCounterSignalsConsidered().get(0).getEvidenceId()).isEqualTo("E002");
+        assertThat(r.cleaned().getCounterSignalsConsidered().get(0).getHowAddressed()).isEqualTo("handled");
+    }
+
+    @Test
+    void g24_aSupportingIdOfALegacyPackIsNotACounterSignal() {
+        StructuredScenario in = v4(n -> ((ArrayNode) n.get("counterSignalsConsidered")).addObject()
+            .put("evidenceId", "E003").put("howAddressed", "x"));
+        Checked r = check(in, legacyPack(), 1, false);
+        assertSingle(r, "PASS_WITH_REMOVALS@1", v("UNKNOWN_EVIDENCE_ID", null, "E003",
+            "counter-signal E003 is not a counter-signal of the Evidence Pack", "REMOVED"));
+        assertThat(r.cleaned().getCounterSignalsConsidered()).isEmpty();
     }
 }

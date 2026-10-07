@@ -90,7 +90,7 @@ public final class ScenarioGenerationPrompt {
         lines.add("Construct one scenario from the Evidence Pack in evidence-pack under the settings above.");
         lines.add("Cite Evidence IDs exactly as written in the pack. Use claim ids F1, F2, … for facts, I1, I2, … "
             + "for inferences and P1, P2, … for speculations.");
-        if (pack.getCore().isEmpty() && pack.getSupporting().isEmpty() && pack.getCounterSignals().isEmpty()) {
+        if (com.oracul.app.research.WildcardPackRenderer.evidenceIds(pack).isEmpty()) {
             lines.add("The Evidence Pack is empty: no current news could be used. Write a fully speculative scenario: "
                 + "factsUsed, inferences and counterSignalsConsidered are empty arrays, the causal chain has only "
                 + "SPECULATION steps followed by the single FUTURE_EVENT, and no Evidence ID appears anywhere.");

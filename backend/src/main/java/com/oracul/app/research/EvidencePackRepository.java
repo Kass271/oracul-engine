@@ -2,6 +2,7 @@ package com.oracul.app.research;
 
 import com.oracul.app.api.model.EvidenceItem;
 import com.oracul.app.api.model.EvidencePack;
+import com.oracul.app.api.model.PackWildcardSection;
 import com.oracul.app.api.model.ResearchProfile;
 import com.oracul.app.api.model.ScenarioConfiguration;
 import com.oracul.app.api.model.Source;
@@ -40,12 +41,13 @@ public class EvidencePackRepository {
             sourceIds.add(s.getId());
         }
         jdbc.update("insert into evidence_pack (id, run_id, generation_id, cutoff, configuration, profile, items, "
-                + "source_ids, prompt_text, created_at) values (?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), "
-                + "cast(? as jsonb), cast(? as jsonb), ?, ?)",
+                + "source_ids, prompt_text, created_at, sections) values (?, ?, ?, ?, cast(? as jsonb), "
+                + "cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb))",
             pack.getId(), runId, pack.getGenerationId(), pack.getCutoff(), json.writeValueAsString(pack.getConfiguration()),
             json.writeValueAsString(pack.getProfile()),
             json.writeValueAsString(new Items(pack.getCore(), pack.getSupporting(), pack.getCounterSignals())),
-            json.writeValueAsString(sourceIds), pack.getPromptText(), createdAt);
+            json.writeValueAsString(sourceIds), pack.getPromptText(), createdAt,
+            pack.getWildcardSections() == null ? null : json.writeValueAsString(pack.getWildcardSections()));
     }
 
     /** The run that built the pack (owner of its sources and events). */
@@ -56,7 +58,7 @@ public class EvidencePackRepository {
 
     public Optional<EvidencePack> findById(UUID packId) {
         List<EvidencePack> rows = jdbc.query("select id, run_id, generation_id, cutoff, configuration, profile, items, "
-                + "source_ids, prompt_text from evidence_pack where id = ?",
+                + "source_ids, prompt_text, sections from evidence_pack where id = ?",
             (rs, i) -> {
                 UUID runId = rs.getObject("run_id", UUID.class);
                 Items items = json.readValue(rs.getString("items"), Items.class);
@@ -72,10 +74,16 @@ public class EvidencePackRepository {
                     }
                 }
                 OffsetDateTime cutoff = rs.getObject("cutoff", OffsetDateTime.class).withOffsetSameInstant(ZoneOffset.UTC);
-                return new EvidencePack(rs.getObject("id", UUID.class), rs.getString("generation_id"), cutoff,
+                String sectionsJson = rs.getString("sections");
+                EvidencePack built = new EvidencePack(rs.getObject("id", UUID.class), rs.getString("generation_id"), cutoff,
                     json.readValue(rs.getString("configuration"), ScenarioConfiguration.class),
                     json.readValue(rs.getString("profile"), ResearchProfile.class),
                     items.core(), items.supporting(), items.counterSignals(), referenced, rs.getString("prompt_text"));
+                if (sectionsJson != null) {
+                    built.setWildcardSections(json.readValue(sectionsJson,
+                        new TypeReference<List<PackWildcardSection>>() { }));
+                }
+                return built;
             }, packId);
         return rows.stream().findFirst();
     }

@@ -4,11 +4,15 @@ const STUB = 'http://localhost:4010';
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeEach(async ({ request }) => {
-  const r = await request.post(`${STUB}/__control/reset`);
+async function beforeEachReset(page: Page): Promise<void> {
+  const r = await page.request.post(`${STUB}/__control/reset`);
   expect(r.status()).toBe(204);
-  const events = await request.post(`${STUB}/__control/events`, { data: { mode: 'ok' } });
+  const events = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'ok' } });
   expect(events.status()).toBe(204);
+}
+
+test.beforeEach(async ({ page }) => {
+  await beforeEachReset(page);
 });
 
 async function connect(page: Page): Promise<void> {
@@ -60,8 +64,52 @@ async function getPack(page: Page, id: string): Promise<any> {
   return res.json();
 }
 
-function allItems(pack: any): any[] {
-  return [...pack.core, ...pack.supporting, ...pack.counterSignals];
+async function listSources(page: Page, id: string): Promise<any[]> {
+  const res = await page.request.get(`/api/runs/${id}/sources`);
+  expect(res.status()).toBe(200);
+  return (await res.json()).items;
+}
+
+async function recorded(page: Page): Promise<any[]> {
+  const res = await page.request.get(`${STUB}/__control/requests?kind=responses`);
+  expect(res.status()).toBe(200);
+  const body = await res.json();
+  return Array.isArray(body) ? body : body.requests;
+}
+
+function inputText(request: any): string {
+  return (request.input ?? [])
+    .flatMap((m: any) => (Array.isArray(m.content) ? m.content : []))
+    .map((c: any) => c.text ?? '')
+    .join('\n');
+}
+
+/** Content of the named ORACUL_UNTRUSTED_DATA block ('' when missing). */
+function block(text: string, name: string): string {
+  const open = `<<<ORACUL_UNTRUSTED_DATA name="${name}">>>`;
+  const start = text.indexOf(open);
+  if (start < 0) return '';
+  const from = start + open.length + (text[start + open.length] === '\n' ? 1 : 0);
+  const end = text.indexOf('<<<END_ORACUL_UNTRUSTED_DATA>>>', from);
+  return end < 0 ? '' : text.slice(from, end).trimEnd();
+}
+
+function ids(section: any): string[] {
+  return section.items.map((i: any) => i.evidenceId);
+}
+
+/** The sections of a pack without the fields that depend on the time of the run. */
+function stable(pack: any): any[] {
+  return pack.wildcardSections.map((s: any) => ({
+    ...s,
+    items: s.items.map(({ publishedAt: _publishedAt, ...rest }: any) => rest),
+  }));
+}
+
+async function runToCompletion(page: Page): Promise<{ id: string; run: any; pack: any }> {
+  const id = await startAcceptanceRun(page);
+  const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
+  return { id, run, pack: await getPack(page, id) };
 }
 
 // @trace FR-16
@@ -70,84 +118,102 @@ function allItems(pack: any): any[] {
 // @trace FR-46
 // @trace FR-50
 // @trace FR-53
-test.describe('FR-16 / FR-17 / FR-18 Ranking, evidence selection and the Evidence Pack', () => {
-  test('mode evidence: 4 events from the 7 kept sources give 3 core + 1 counter-signal item with diversity caps and the exact prompt text', async ({ page }) => {
+// @trace FR-57
+test.describe('FR-16 / FR-17 / FR-18 / FR-57 Ranking and the Evidence Pack grouped by wildcard', () => {
+  test('FR-57 acceptance run: one section per wildcard, shared article E001 in both, snippet form for every item', async ({ page }) => {
     test.setTimeout(90_000);
-    const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'evidence' } });
-    expect(mode.status()).toBe(204);
-    const id = await startAcceptanceRun(page);
-    const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    // FR-53: 7 kept sources -> 4 events (EV004 = [S007]); EV n mod 3 = 1 dark (EV001, EV004), = 2 mid (EV002), = 0 bright (EV003).
-    // Darkness 9 / optimism 2: the bright one is the counter-signal candidate, the other 3 fill the core, nothing is left for SUPPORTING.
-    expect(run.counts.articlesConsidered).toBe(25);
+    const { id, run, pack } = await runToCompletion(page);
+    // FR-53: 7 kept sources (W01 4, W02 4 with the shared article); the pack lists every kept source
     expect(run.counts.sourcesKept).toBe(7);
-    expect(run.counts.uniqueEvents).toBe(4);
-    expect(run.counts.eventsSelected).toBe(4);
-    expect(run.counts.counterSignals).toBe(1);
+    expect(run.counts.eventsSelected).toBe(7);
+    expect(run.counts.counterSignals).toBe(0);
     expect(run.evidencePackId).toBeTruthy();
-
-    const pack = await getPack(page, id);
     expect(pack.id).toBe(run.evidencePackId);
-    expect(pack.core).toHaveLength(3);
-    expect(pack.supporting).toHaveLength(0);
-    expect(pack.counterSignals).toHaveLength(1);
-    const items = allItems(pack);
-    expect(items.map((i) => i.evidenceId)).toEqual(['E001', 'E002', 'E003', 'E004']);
-    expect(pack.core.every((i: any) => i.section === 'CORE')).toBe(true);
-    expect(pack.supporting.every((i: any) => i.section === 'SUPPORTING')).toBe(true);
-    expect(pack.counterSignals.every((i: any) => i.section === 'COUNTER_SIGNAL')).toBe(true);
-
-    const events = await listEvents(page, id);
-    const byId = new Map<string, any>(events.map((e) => [e.id, e]));
-    for (const item of pack.core) expect([1.0, 0.5]).toContain(byId.get(item.eventId).classification.risk);
-    expect(pack.core.filter((i: any) => byId.get(i.eventId).classification.risk === 1.0)).toHaveLength(2);
-    for (const item of pack.counterSignals) expect(byId.get(item.eventId).classification.opportunity).toBe(0.8);
-
-    // diversity: at most 2 per primary entity, at most 3 per publisher
-    const sources = new Map<string, any>(pack.sources.map((s: any) => [s.id, s]));
-    const perEntity = new Map<string, number>();
-    const perPublisher = new Map<string, number>();
-    for (const item of items) {
-      const entity = (item.entities[0] ?? '').trim().toLowerCase();
-      if (entity) perEntity.set(entity, (perEntity.get(entity) ?? 0) + 1);
-      const primary = [...item.sourceIds]
-        .map((sid: string) => sources.get(sid))
-        .sort((a: any, b: any) => b.sourceQuality - a.sourceQuality || a.id.localeCompare(b.id))[0];
-      const publisher = primary.publisher.trim().toLowerCase();
-      perPublisher.set(publisher, (perPublisher.get(publisher) ?? 0) + 1);
-    }
-    for (const n of perEntity.values()) expect(n).toBeLessThanOrEqual(2);
-    for (const n of perPublisher.values()) expect(n).toBeLessThanOrEqual(3);
-
     expect(pack.generationId).toBe(run.generationId);
-    expect(pack.promptText.startsWith(`ORACUL EVIDENCE PACK\nGeneration: ${run.generationId}\nCutoff: `)).toBe(true);
+    expect(pack.core).toEqual([]);
+    expect(pack.supporting).toEqual([]);
+    expect(pack.counterSignals).toEqual([]);
+
+    const [w1, w2] = pack.wildcardSections;
+    expect(pack.wildcardSections).toHaveLength(2);
+    expect([w1.pipelineId, w1.kind, w1.label, w1.level, w1.heading]).toEqual(['W01', 'CATALOGUE', 'New pandemic', 8, 'New pandemic 8/10']);
+    expect([w2.pipelineId, w2.kind, w2.label, w2.level, w2.heading]).toEqual([
+      'W02',
+      'CATALOGUE',
+      'Humanoid robot boom',
+      6,
+      'Humanoid robot boom 6/10',
+    ]);
+    expect(ids(w1)).toEqual(['E001', 'E002', 'E003', 'E004']);
+    expect(ids(w2)).toEqual(['E001', 'E005', 'E006', 'E007']);
+    expect(w2.items[0]).toEqual(w1.items[0]);
+
+    // every item is the listRunSources source of its number; nothing was retrieved in this slice, so every item has its snippet
+    const sources = await listSources(page, id);
+    expect(pack.sources).toEqual(sources);
+    expect(sources).toHaveLength(7);
+    for (const item of [...w1.items, ...w2.items]) {
+      const source = sources.find((s) => s.id === item.sourceId);
+      expect(source, `source ${item.sourceId}`).toBeTruthy();
+      expect(item.evidenceId).toBe(`E${item.sourceId.slice(1)}`);
+      expect(item.title).toBe(source.title);
+      expect(item.publisher).toBe(source.publisher);
+      expect(item.url).toBe(source.url);
+      expect(item.contentRetrieved).toBe(false);
+      expect(item.fragments).toEqual([]);
+      expect(item.snippet).toBe(source.summary);
+    }
+
+    // no event has a selection any more
+    const events = await listEvents(page, id);
+    expect(events.length).toBeGreaterThan(0);
+    for (const e of events) expect(e.selection).toBeUndefined();
+
+    // the prompt text: sections by wildcard, 8 snippet lines (E001 twice), no excerpt, no legacy sections
+    const text: string = pack.promptText;
+    expect(text.startsWith(`ORACUL EVIDENCE PACK\nGeneration: ${run.generationId}\nCutoff: `)).toBe(true);
     for (const part of [
       'Realism: 8 | Darkness: 9 | Optimism: 2 | Horizon: 5 years',
       'New pandemic: 8 | Humanoid robot boom: 6',
-      '[E001] ',
-      '[E004] ',
-      'COUNTER-SIGNALS',
+      'Wildcard: New pandemic 8/10\n[E001] ',
+      'Wildcard: Humanoid robot boom 6/10\n[E001] ',
     ]) {
-      expect(pack.promptText).toContain(part);
+      expect(text).toContain(part);
     }
+    const lines = text.split('\n');
+    expect(lines.filter((l) => l.startsWith('Content not retrieved. Snippet: '))).toHaveLength(8);
+    expect(lines.filter((l) => l.startsWith('Excerpt: '))).toHaveLength(0);
+    expect(lines.filter((l) => l.startsWith('[E001] '))).toHaveLength(2);
+    expect(lines.filter((l) => l.startsWith('[E001] '))[0]).toBe(lines.filter((l) => l.startsWith('[E001] '))[1]);
+    expect(text).not.toContain('CORE EVIDENCE');
+    expect(text).not.toContain('SUPPORTING EVIDENCE');
+    expect(text).not.toContain('COUNTER-SIGNALS');
+    expect(text).not.toContain('<<<');
 
-    const selected = events.filter((e) => e.selection);
-    expect(selected).toHaveLength(4);
-    expect(new Map(selected.map((e) => [e.id, e.selection.evidenceId]))).toEqual(
-      new Map(items.map((i) => [i.eventId, i.evidenceId])),
-    );
+    // the evidence-pack block of the scenario request is exactly the promptText
+    const generation = (await recorded(page)).filter((r) => /ORACUL REQUEST SCENARIO_GENERATION/.test(inputText(r)));
+    expect(generation).toHaveLength(1);
+    expect(block(inputText(generation[0]), 'evidence-pack')).toBe(text);
   });
 
-  test('default classification: every one of the 4 events is bright, so only counter-signals are selected', async ({ page }) => {
-    test.setTimeout(90_000);
-    const id = await startAcceptanceRun(page);
-    const run = await awaitStatus(page, id, 'COMPLETED', 40_000);
-    const pack = await getPack(page, id);
-    expect(pack.core).toHaveLength(0);
-    expect(pack.supporting).toHaveLength(0);
-    expect(pack.counterSignals).toHaveLength(4);
-    expect(run.counts.counterSignals).toBe(4);
-    expect(run.counts.eventsSelected).toBe(4);
+  test('FR-57 the classification no longer changes the pack: events modes ok and evidence give the same wildcardSections', async ({ page }) => {
+    test.setTimeout(150_000);
+    const first = await runToCompletion(page);
+    expect(first.run.counts.eventsSelected).toBe(7);
+
+    await beforeEachReset(page);
+    await page.context().clearCookies(); // second run in one test: start from a fresh, not connected session
+    const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'evidence' } });
+    expect(mode.status()).toBe(204);
+    const second = await runToCompletion(page);
+    expect(second.run.counts.sourcesKept).toBe(7);
+    expect(second.run.counts.eventsSelected).toBe(7);
+    expect(second.run.counts.counterSignals).toBe(0);
+    expect(second.pack.core).toEqual([]);
+    expect(second.pack.counterSignals).toEqual([]);
+    for (const e of await listEvents(page, second.id)) expect(e.selection).toBeUndefined();
+    expect(stable(second.pack)).toEqual(stable(first.pack));
+    expect(second.pack.promptText.includes('CORE EVIDENCE') || second.pack.promptText.includes('COUNTER-SIGNALS')).toBe(false);
   });
 
   test('FR-18 an unknown run has no Evidence Pack', async ({ page }) => {

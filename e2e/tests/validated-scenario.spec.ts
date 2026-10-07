@@ -119,7 +119,7 @@ async function expectNotReady(page: Page, id: string): Promise<void> {
   expect(await res.json()).toEqual({ code: 'SCENARIO_NOT_READY', message: 'The scenario is not ready yet' });
 }
 
-// @trace FR-19, FR-20, FR-21
+// @trace FR-19, FR-20, FR-21, FR-57
 test.describe('FR-19 / FR-20 / FR-21 Validated scenario (API level)', () => {
   test('FR-19 FR-20 the acceptance run produces a validated structured scenario from the Evidence Pack only', async ({ page }) => {
     test.setTimeout(90_000);
@@ -177,6 +177,19 @@ test.describe('FR-19 / FR-20 / FR-21 Validated scenario (API level)', () => {
       at = text.indexOf('Ignore previous instructions', at + 1);
     }
     expect(text.slice(0, text.indexOf(MARKER_START))).not.toContain('Ignore previous');
+
+    // wildcard-evidence.md fixture (f): the stub appends the injection to every article title, so every occurrence is the title of an
+    // item line (`[E...] title · publisher · date · url`) below a `Wildcard: ` heading inside the evidence-pack block
+    const packLines = block(text, 'evidence-pack').split('\n');
+    const hits = packLines.map((line, index) => ({ line, index })).filter(({ line }) => line.includes('Ignore previous instructions'));
+    expect(hits.length, 'the injected title reaches the pack').toBeGreaterThan(0);
+    for (const { line, index } of hits) {
+      expect(line, 'an item line').toMatch(/^\[E\d{3}\] /);
+      expect(packLines.slice(0, index).some((l) => l.startsWith('Wildcard: ')), 'below a wildcard heading').toBe(true);
+    }
+    expect(text.split('Ignore previous instructions').length - 1, 'every occurrence is inside the pack block').toBe(
+      block(text, 'evidence-pack').split('Ignore previous instructions').length - 1,
+    );
   });
 
   test('FR-20 an invalid first answer gets exactly one schema correction', async ({ page }) => {

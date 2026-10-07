@@ -1711,7 +1711,7 @@ components:
 
     EventSelection:
       type: object
-      description: Set on events that are in the Evidence Pack (FR-17); evidenceId E001… in order CORE, SUPPORTING, COUNTER_SIGNAL
+      description: Set on events that are in a phase-01/02 Evidence Pack (FR-17); evidenceId E001… in order CORE, SUPPORTING, COUNTER_SIGNAL. Never set for runs created since phase 03 - the pack is built from sources per wildcard (phase-03 wildcard-evidence.md FR-57)
       required: [evidenceId, section]
       properties:
         evidenceId:
@@ -1862,7 +1862,7 @@ components:
             $ref: '#/components/schemas/EvidenceItem'
         sources:
           type: array
-          description: Every source referenced by any evidence item, by id ascending
+          description: Every source referenced by any evidence item, by id ascending. Packs built since phase 03 - every kept source of the run (each is listed in at least one wildcard section), by id ascending
           items:
             $ref: '#/components/schemas/Source'
         promptText:
@@ -1941,7 +1941,8 @@ components:
             type: string
         snippet:
           type: string
-          description: Present iff contentRetrieved is false - the RSS snippet (else the title) that stands in for the article text
+          maxLength: 600
+          description: Present iff contentRetrieved is false - the stored source summary (else its title), at most 600 characters, that stands in for the article text
 
     # ---------- reasoning ----------
     InformationClass:
@@ -2398,7 +2399,7 @@ components:
             $ref: '#/components/schemas/CausalStep'
         sources:
           type: array
-          description: One entry per Evidence Pack item (core, supporting, counter-signals) in Evidence ID order
+          description: One entry per Evidence Pack item (core, supporting, counter-signals) in Evidence ID order. Packs with wildcardSections (since phase 03) - one entry per distinct Evidence ID of the sections, section CORE, counterSignal false
           items:
             $ref: '#/components/schemas/ResultSource'
         research:

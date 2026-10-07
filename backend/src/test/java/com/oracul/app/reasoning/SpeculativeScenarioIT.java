@@ -24,7 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
  * fully speculatively. The TASK line, the Evidence Guard differences and the invariant "an accepted speculative scenario
  * never cites evidence", all through HTTP and scripted SCENARIO_GENERATION answers.
  */
-// @trace FR-47
+// @trace FR-47, FR-57
 class SpeculativeScenarioIT extends AbstractStoryIT {
 
     static final String SPECULATIVE_TASK = "The Evidence Pack is empty: no current news could be used. Write a fully speculative "
@@ -158,7 +158,9 @@ class SpeculativeScenarioIT extends AbstractStoryIT {
         assertThat(lines.get(cite + 1)).isEqualTo(SPECULATIVE_TASK);
         assertThat(lines.get(cite + 2)).isEqualTo("<<<ORACUL_UNTRUSTED_DATA name=\"evidence-pack\">>>");
         assertThat(StubResponses.dataBlock(req.inputText(), "evidence-pack"))
-            .contains("CORE EVIDENCE\nnone\nSUPPORTING EVIDENCE\nnone\nCOUNTER-SIGNALS\nnone");
+            .endsWith("WILDCARDS\nNew pandemic: 8 | Humanoid robot boom: 6\nWildcard: New pandemic 8/10\nno current sources found\n"
+                + "Wildcard: Humanoid robot boom 6/10\nno current sources found")
+            .doesNotContain("CORE EVIDENCE").doesNotContain("COUNTER-SIGNALS");
         assertThat(instructionsOf(req)).as("instructions are unchanged").isEqualTo(ScenarioFixtures.INSTRUCTIONS);
         assertThat(req.inputText().split(java.util.regex.Pattern.quote(SPECULATIVE_TASK), -1)).hasSize(2);
         assertThat(requests(CRITIC)).as("critic as in normal mode").hasSize(1);

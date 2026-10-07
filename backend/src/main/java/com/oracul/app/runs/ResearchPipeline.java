@@ -15,7 +15,7 @@ import com.oracul.app.research.EventClassifier;
 import com.oracul.app.research.EventRanker;
 import com.oracul.app.research.EvidencePackRepository;
 import com.oracul.app.research.EvidencePackService;
-import com.oracul.app.research.EvidenceSelector;
+import com.oracul.app.research.WildcardPackRenderer;
 import com.oracul.app.research.MinCoreThresholds;
 import com.oracul.app.research.EventNormalizer;
 import com.oracul.app.research.EventRepository;
@@ -53,7 +53,6 @@ public class ResearchPipeline {
     private final EventClassifier classifier;
     private final EventRepository events;
     private final EventRanker ranker;
-    private final EvidenceSelector selector;
     private final MinCoreThresholds minCore;
     private final EvidencePackService packService;
     private final EvidencePackRepository packs;
@@ -64,7 +63,7 @@ public class ResearchPipeline {
 
     ResearchPipeline(GenerationRunRepository runs, SourceRepository sources, SearchPlanner planner,
                      QueryGenerator generator, SourceRetrieval retrieval, EventNormalizer normalizer,
-                     EventClassifier classifier, EventRepository events, EventRanker ranker, EvidenceSelector selector,
+                     EventClassifier classifier, EventRepository events, EventRanker ranker,
                      MinCoreThresholds minCore, EvidencePackService packService, EvidencePackRepository packs, RunGuard guard, TransactionTemplate tx,
                      Clock clock,
                      @Value("${oracul.run.min-stage-duration:PT0S}") Duration minStageDuration) {
@@ -77,7 +76,6 @@ public class ResearchPipeline {
         this.classifier = classifier;
         this.events = events;
         this.ranker = ranker;
-        this.selector = selector;
         this.minCore = minCore;
         this.packService = packService;
         this.packs = packs;
@@ -209,27 +207,17 @@ public class ResearchPipeline {
             byId.put(st.source().getId(), st.source());
         }
         List<NormalizedEvent> ranked = ranker.rank(normalized, byId, profile, cutoff);
-        EvidenceSelector.Result selection = selector.select(ranked, byId, profile);
-        Map<String, NormalizedEvent> selected = new LinkedHashMap<>();
-        for (List<NormalizedEvent> section : List.of(selection.core(), selection.supporting(),
-            selection.counterSignals())) {
-            for (NormalizedEvent e : section) {
-                selected.put(e.getId(), e);
-            }
-        }
-        List<NormalizedEvent> finalEvents = new ArrayList<>();
-        for (NormalizedEvent e : ranked) {
-            finalEvents.add(selected.getOrDefault(e.getId(), e));
-        }
+        List<NormalizedEvent> finalEvents = ranked;
         String generationId = runs.find(runId, sessionId).orElseThrow().generationId();
         UUID packId = UUID.randomUUID();
-        EvidencePack pack = packService.build(packId, generationId, cutoff, cfg, profile, selection, byId);
+        EvidencePack pack = packService.build(packId, generationId, cutoff, cfg, profile, read0.plan(),
+            found.stream().map(SourceRepository.Stored::source).toList());
+        int total = WildcardPackRenderer.evidenceIds(pack).size();
         ResearchCounts withPack = new ResearchCounts(withEvents.getSearches(), withEvents.getArticlesRetrieved(),
-            withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), selected.size(),
-            selection.counterSignals().size(), 0).sourcesKept(found.size());
+            withEvents.getArticlesConsidered(), withEvents.getUniqueEvents(), total, 0, 0)
+            .sourcesKept(found.size());
         int realism = cfg.getRealism();
-        int total = selection.core().size() + selection.supporting().size() + selection.counterSignals().size();
-        var decision = EvidenceNotes.decide(selection.core().size(), total, realism, minCore);
+        var decision = EvidenceNotes.decide(total, total, realism, minCore);
         Boolean packed = tx.execute(s -> {
             if (!guard.lockAndCheck(runId)) {
                 s.setRollbackOnly();

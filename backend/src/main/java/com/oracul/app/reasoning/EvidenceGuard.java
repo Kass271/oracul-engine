@@ -45,8 +45,8 @@ public final class EvidenceGuard {
             counterIds.add(i.getEvidenceId());
         }
         // FR-47: an empty pack means speculative mode (three differences, see below)
-        boolean speculative = pack.getCore().isEmpty() && pack.getSupporting().isEmpty()
-            && pack.getCounterSignals().isEmpty();
+        known.addAll(com.oracul.app.research.WildcardPackRenderer.evidenceIds(pack));
+        boolean speculative = com.oracul.app.research.WildcardPackRenderer.evidenceIds(pack).isEmpty();
         ScenarioWindow window = ScenarioWindow.of(pack);
         List<GuardViolation> violations = new ArrayList<>();
         boolean regeneration = false;

@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { evidence } from './evidence';
 
 const STUB = 'http://localhost:4010';
-const NOTE10 = "Realism 10 couldn't be fully met: only 2 core evidence items (needs 5). This future is less grounded.";
+// wildcard-evidence.md slice 06: every kept source counts - one wildcard (New pandemic 8) keeps 4 sources, 5 are needed at Realism 10
+const NOTE10 = "Realism 10 couldn't be fully met: only 4 core evidence items (needs 5). This future is less grounded.";
 const NO_EVIDENCE = 'No current news could be used — this future is speculative, not grounded in evidence.';
 const MESSAGE1 = 'ORACUL found insufficient current evidence to construct this scenario at Realism 1.';
 const FIXED_ID = '22222222-2222-2222-2222-222222222222';
@@ -21,6 +22,10 @@ const A = {
   output: { story: true, illustration: false },
 };
 const A10 = { ...A, realism: 10 };
+/** The one-wildcard bodies of the "Realism 10 with 4 items" test: A10 and A (realism 8) with only New pandemic 8. */
+const PANDEMIC = { wildcardId: 'biology-new-pandemic', intensity: 8 };
+const ONE10 = { ...A10, wildcards: [PANDEMIC] };
+const ONE8 = { ...A, wildcards: [PANDEMIC] };
 
 test.describe.configure({ mode: 'serial' });
 
@@ -43,16 +48,17 @@ async function connect(page: Page): Promise<void> {
   await expect(page.getByTestId('chatgpt-status')).toHaveText('ChatGPT connected');
 }
 
-/** Acceptance configuration A10 through the panel. */
-async function configureA10(page: Page): Promise<void> {
+/** Acceptance configuration A10 through the panel; `onlyPandemic`: just New pandemic 8 (one pipeline). */
+async function configureA10(page: Page, onlyPandemic = false): Promise<void> {
   await page.getByTestId('slider-realism-input').fill('10');
   await page.getByTestId('slider-darkness-input').fill('9');
   await page.getByTestId('slider-optimism-input').fill('2');
   await page.getByTestId('horizon-option-5y').click();
-  for (const [category, id, intensity] of [
+  const wildcards = [
     ['biology', 'biology-new-pandemic', '8'],
     ['robotics', 'robotics-humanoid-boom', '6'],
-  ]) {
+  ];
+  for (const [category, id, intensity] of onlyPandemic ? wildcards.slice(0, 1) : wildcards) {
     await page.getByTestId(`wildcard-category-header-${category}`).click();
     await page.getByTestId(`wildcard-toggle-${id}`).getByRole('switch').click();
     await page.getByTestId(`wildcard-intensity-${id}-input`).fill(intensity);
@@ -74,14 +80,15 @@ function purposeOf(request: any): string | undefined {
   return /ORACUL REQUEST ([A-Z_]+)/.exec(text)?.[1];
 }
 
-// @trace FR-47, FR-50, FR-52
+// @trace FR-47, FR-50, FR-52, FR-57
 test.describe('FR-47 Always generate, note insufficient evidence at the end', () => {
-  test('FR-47 Realism 10 with 2 core items completes with the note and LOWER REALISM starts a Realism 8 run', async ({ page }) => {
+  test('FR-47 Realism 10 with 4 items completes with the note and LOWER REALISM starts a Realism 8 run', async ({ page }) => {
     test.setTimeout(240_000);
-    expect((await page.request.post(`${STUB}/__control/events`, { data: { mode: 'sparse' } })).status()).toBe(204);
     await connect(page);
-    await configureA10(page);
+    await configureA10(page, true);
+    const started = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/runs'));
     await page.getByTestId('generate-button').click();
+    expect((await started).postDataJSON()).toEqual(ONE10);
     await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
     const id = page.url().split('/').pop()!;
 
@@ -101,10 +108,14 @@ test.describe('FR-47 Always generate, note insufficient evidence at the end', ()
     expect(run.status).toBe('COMPLETED');
     expect(run.failure ?? null).toBeNull();
     expect(run.headline).toBeTruthy();
-    expect(run.evidenceNote).toEqual({ kind: 'INSUFFICIENT_EVIDENCE', message: NOTE10, coreItems: 2, coreNeeded: 5 });
+    expect(run.evidenceNote).toEqual({ kind: 'INSUFFICIENT_EVIDENCE', message: NOTE10, coreItems: 4, coreNeeded: 5 });
     expect(run.suggestedRealism).toBe(8);
+    expect(run.counts.eventsSelected).toBe(4);
+    expect(run.counts.counterSignals).toBe(0);
     const pack = await (await page.request.get(`/api/runs/${id}/evidence-pack`)).json();
-    expect(pack.core).toHaveLength(2);
+    expect(pack.core).toEqual([]);
+    expect(pack.wildcardSections).toHaveLength(1);
+    expect(pack.wildcardSections[0].items).toHaveLength(4);
     const result = await page.request.get(`/api/runs/${id}/result`);
     expect(result.status()).toBe(200);
     const purposes = (await recorded(page)).map(purposeOf);
@@ -115,7 +126,7 @@ test.describe('FR-47 Always generate, note insufficient evidence at the end', ()
     // LOWER REALISM starts a new run with realism 8
     const posted = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/runs'));
     await page.getByTestId('lower-realism').click();
-    expect((await posted).postDataJSON()).toEqual(A);
+    expect((await posted).postDataJSON()).toEqual(ONE8);
     await expect(page.getByTestId('value-realism')).toHaveText('8');
     await expect.poll(() => page.url().split('/').pop(), { timeout: 15_000 }).not.toBe(id);
     await expect(page).toHaveURL(/\/futures\/[0-9a-f-]{36}$/);
@@ -124,7 +135,7 @@ test.describe('FR-47 Always generate, note insufficient evidence at the end', ()
     const next = await (await page.request.get(`/api/runs/${newId}`)).json();
     expect(next.configuration.realism).toBe(8);
     await expect(page.getByTestId('result-view')).toBeVisible({ timeout: 90_000 });
-    // Realism 8 needs no core item in the E2E stack: no note this time
+    // Realism 8 needs no core item in the E2E stack (thresholds 0): no note this time
     await expect(page.getByTestId('evidence-note')).toHaveCount(0);
   });
 

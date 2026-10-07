@@ -72,6 +72,8 @@ async function listEvents(page: Page, id: string): Promise<any[]> {
 // @trace FR-47
 // @trace FR-50
 // @trace FR-53
+// @trace FR-57
+// @trace FR-59
 test.describe('FR-14 / FR-15 Event normalisation and semantic classification', () => {
   test('the acceptance run produces 4 normalized, classified events from its 7 kept sources', async ({ page }) => {
     test.setTimeout(90_000);
@@ -127,7 +129,7 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     expect(requests.some((r) => JSON.stringify(r).includes('"tools"'))).toBe(false);
   });
 
-  test('FR-15 malformed classification answers exclude every event with CLASSIFICATION_FAILED; the empty pack is written up speculatively', async ({ page }) => {
+  test('FR-15 malformed classification answers exclude every event with CLASSIFICATION_FAILED; the pack is unchanged (wildcard sources), so the run is written up normally without a note', async ({ page }) => {
     test.setTimeout(90_000);
     const mode = await page.request.post(`${STUB}/__control/events`, { data: { mode: 'malformed-classification' } });
     expect(mode.status()).toBe(204);
@@ -143,13 +145,26 @@ test.describe('FR-14 / FR-15 Event normalisation and semantic classification', (
     const purposes = (await recorded(page)).map(purposeOf);
     // one batch, answered twice (the content retry)
     expect(purposes.filter((p) => p === 'EVENT_CLASSIFICATION')).toHaveLength(2);
-    // run-control.md FR-47: the pack is empty (every event excluded) -> speculative mode, still scenario, critic and story
+    // wildcard-evidence.md FR-57: the pack is built from the wildcard sources whatever the classification or exclusion -> not empty,
+    // so the run is normal (not speculative): scenario, critic and story once each
     expect(purposes.filter((p) => p === 'SCENARIO_GENERATION')).toHaveLength(1);
     expect(purposes.filter((p) => p === 'SCENARIO_CRITIC')).toHaveLength(1);
     expect(purposes.filter((p) => p === 'STORY_WRITING')).toHaveLength(1);
     expect(run.status).toBe('COMPLETED');
     expect(run.headline).toBeTruthy();
-    expect(run.evidenceNote.kind).toBe('NO_EVIDENCE');
+    // FR-59: 7 kept sources, every pack item counts as core (7 >= 3 needed at Realism 8), both wildcards have sources -> no note
+    expect(run.evidenceNote ?? null).toBeNull();
+    expect(run.counts.eventsSelected).toBe(7);
+    expect(run.counts.counterSignals).toBe(0);
+    const pack = await (await page.request.get(`/api/runs/${id}/evidence-pack`)).json();
+    expect(pack.core).toEqual([]);
+    expect(pack.counterSignals).toEqual([]);
+    expect(pack.wildcardSections.map((s: any) => s.items.map((i: any) => i.evidenceId))).toEqual([
+      ['E001', 'E002', 'E003', 'E004'],
+      ['E001', 'E005', 'E006', 'E007'],
+    ]);
+    const generations = (await recorded(page)).filter((r) => purposeOf(r) === 'SCENARIO_GENERATION');
+    expect(JSON.stringify(generations[0])).not.toContain('The Evidence Pack is empty');
   });
 
   test('FR-14 a rate-limited normalisation fails the run with the usage-limit message and writes no events', async ({ page }) => {

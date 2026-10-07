@@ -51,7 +51,10 @@ public final class ScenarioFixtures {
 
     private static final String JSON_ARRAY_E001 = "[\"E001\"]";
 
-    /** SC-V4 with future date {@code d} (yyyy-MM-dd) and the evidence ids of F1, step 1, F2, step 2 (JSON arrays). */
+    /**
+     * SC-V4 with future date {@code d} (yyyy-MM-dd) and the evidence ids of F1, step 1, F2, step 2 (JSON arrays).
+     * {@code counterSignalsConsidered} is {@code []}: a wildcard pack has no counter-signal item (wildcard-evidence.md slice 06, fixture (e)).
+     */
     public static String sc(String d, String f1, String s1, String f2, String s2) {
         int y = LocalDate.parse(d).getYear();
         return "{\"candidateFutures\":[{\"title\":\"Robots replace striking dock workers\",\"summary\":\"Ports automate after the strike.\","
@@ -63,7 +66,7 @@ public final class ScenarioFixtures {
             + "\"inferences\":[{\"id\":\"I1\",\"statement\":\"Ports accelerate automation while labour unrest grows.\","
             + "\"basedOn\":[\"F1\"],\"evidenceIds\":[]}],"
             + "\"speculations\":[{\"id\":\"P1\",\"statement\":\"A major port runs entirely on humanoid robots.\",\"basedOn\":[\"I1\"]}],"
-            + "\"counterSignalsConsidered\":[{\"evidenceId\":\"E002\",\"howAddressed\":\"The vaccine lowers health risk but does not stop automation.\"}],"
+            + "\"counterSignalsConsidered\":[],"
             + "\"causalChain\":["
             + "{\"order\":1,\"informationClass\":\"FACT\",\"claimId\":\"F1\",\"statement\":\"Dock workers strike over humanoid robots.\",\"evidenceIds\":" + s1 + ",\"year\":null},"
             + "{\"order\":2,\"informationClass\":\"FACT\",\"claimId\":\"F2\",\"statement\":\"Regulators approved a new pandemic vaccine.\",\"evidenceIds\":" + s2 + ",\"year\":null},"

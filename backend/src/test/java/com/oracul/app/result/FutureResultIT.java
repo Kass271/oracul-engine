@@ -2,15 +2,98 @@ package com.oracul.app.result;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.oracul.app.api.model.EvidenceItem;
+import com.oracul.app.api.model.EvidencePack;
+import com.oracul.app.api.model.EvidenceSection;
+import com.oracul.app.api.model.Source;
+import com.oracul.app.research.EvidencePackRepository;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** future-result.md "Slice 09_future-story" ITs #3, #12 (empty pack, rejected), #13, #14: getFutureResult. */
 // @trace FR-23, FR-25
 class FutureResultIT extends AbstractStoryIT {
+
+    @Autowired
+    EvidencePackRepository packs;
+
+    private static EvidenceItem legacyItem(String id, EvidenceSection section, List<String> sourceIds) {
+        return new EvidenceItem(id, section, "EV" + id.substring(1), "labour", "Legacy summary " + id,
+            new ArrayList<>(List.of("Entity")), new ArrayList<>(sourceIds), 0.85, 0.8);
+    }
+
+    /**
+     * Stored legacy pack (core / supporting / counterSignals, wildcardSections null: phase-01 runs and the packs ALTERNATIVE runs
+     * reuse, wildcard-evidence.md): the result keeps the phase-01 layout, one ResultSource per item in Evidence ID order.
+     */
+    // @trace FR-57
+    @Test
+    void aStoredLegacyPackKeepsThePhaseOneLayoutOfTheResultSources() throws Exception {
+        Ran r = runV4(A);
+        assertStoryCompleted(r.run());
+        UUID packId = jdbc.queryForObject("select evidence_pack_id from generation_run where id = cast(? as uuid)", UUID.class, r.id());
+        EvidencePack wildcard = packs.findById(packId).orElseThrow();
+        assertThat(wildcard.getWildcardSections()).as("a new run builds a wildcard pack").isNotNull();
+        List<Source> withDate = wildcard.getSources().stream().filter(x -> x.getPublishedAt() != null).toList();
+        assertThat(withDate).as("the run kept at least two dated sources").hasSizeGreaterThanOrEqualTo(2);
+        Source a = withDate.get(0);
+        Source b = withDate.get(1);
+
+        // inserted out of order on purpose; E003 has no source at all
+        List<EvidenceItem> core = new ArrayList<>(List.of(legacyItem("E001", EvidenceSection.CORE, List.of(a.getId(), b.getId()))));
+        List<EvidenceItem> supporting = new ArrayList<>(List.of(
+            legacyItem("E003", EvidenceSection.SUPPORTING, List.of()),
+            legacyItem("E002", EvidenceSection.SUPPORTING, List.of(b.getId()))));
+        List<EvidenceItem> counters = new ArrayList<>(List.of(legacyItem("E004", EvidenceSection.COUNTER_SIGNAL, List.of(a.getId()))));
+        EvidencePack legacy = new EvidencePack(UUID.randomUUID(), wildcard.getGenerationId(), wildcard.getCutoff(), wildcard.getConfiguration(),
+            wildcard.getProfile(), core, supporting, counters, new ArrayList<>(wildcard.getSources()), "legacy prompt text");
+        legacy.setWildcardSections(null); // as stored before phase 03: the sections column is NULL
+        packs.insert(UUID.fromString(r.id()), legacy, OffsetDateTime.now());
+        jdbc.update("update generation_run set evidence_pack_id = ? where id = cast(? as uuid)", legacy.getId(), r.id());
+
+        Map<String, Object> res = result(r);
+        List<Map<String, Object>> sources = list(res.get("sources"));
+        assertThat(sources.stream().map(x -> x.get("evidenceId")).toList()).as("one entry per item, in Evidence ID order")
+            .containsExactly("E001", "E002", "E003", "E004");
+        assertThat(sources.stream().map(x -> x.get("section")).toList())
+            .containsExactly("CORE", "SUPPORTING", "SUPPORTING", "COUNTER_SIGNAL");
+        assertThat(sources.stream().map(x -> x.get("counterSignal")).toList()).containsExactly(false, false, false, true);
+
+        List<String> cited = new ArrayList<>();
+        for (Map<String, Object> f : list(map(structured(r).get("structuredScenario")).get("factsUsed"))) {
+            for (Object e : (List<?>) f.get("evidenceIds")) cited.add((String) e);
+        }
+        for (Map<String, Object> src : sources) {
+            assertThat(src.get("usedInScenario")).as("usedInScenario of " + src.get("evidenceId"))
+                .isEqualTo(cited.contains((String) src.get("evidenceId")));
+        }
+        assertThat(sources.stream().anyMatch(x -> Boolean.TRUE.equals(x.get("usedInScenario")))).as("the scenario cites a pack item").isTrue();
+
+        // the first source of the item gives title, publisher, url and publishedAt
+        assertSourceOf(sources.get(0), a);
+        assertSourceOf(sources.get(1), b);
+        assertSourceOf(sources.get(3), a);
+        Map<String, Object> noSource = sources.get(2);
+        assertThat(noSource.get("title")).isEqualTo("");
+        assertThat(noSource.get("publisher")).isEqualTo("");
+        assertThat(noSource.get("url")).isEqualTo("");
+        assertThat(noSource.get("publishedAt")).as("no source, no publishedAt").isNull();
+    }
+
+    private static void assertSourceOf(Map<String, Object> got, Source expected) {
+        assertThat(got.get("title")).isEqualTo(expected.getTitle());
+        assertThat(got.get("publisher")).isEqualTo(expected.getPublisher());
+        assertThat(got.get("url")).isEqualTo(expected.getUrl().toString());
+        assertThat(OffsetDateTime.parse(String.valueOf(got.get("publishedAt"))).toInstant())
+            .isEqualTo(expected.getPublishedAt().toInstant());
+    }
 
     // #3
     @Test

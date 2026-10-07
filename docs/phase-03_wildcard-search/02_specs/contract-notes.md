@@ -55,7 +55,7 @@ cut-offs) ends as data (query status, `contentStatus`, evidence note), never as 
 The DDL lands in four slices, so each of them adds its own Flyway file and never edits one already applied
 (plan.md "One Flyway file per slice"):
 - 04_wildcard-queries — `V11__source_pipeline_ids.sql`: `ALTER TABLE source ADD COLUMN pipeline_ids JSONB NULL`
-- 06_wildcard-pack — next free version: `ALTER TABLE evidence_pack ADD COLUMN sections JSONB NULL`
+- 06_wildcard-pack — `V12__evidence_pack_sections.sql`: `ALTER TABLE evidence_pack ADD COLUMN sections JSONB NULL`
 - 08_article-text — next free version: `ALTER TABLE source ADD COLUMN content_status VARCHAR(32) NULL, ADD COLUMN
   excerpts JSONB NULL, ADD COLUMN publisher_host TEXT NULL`
 - 09_wildcard-results — next free version: `ALTER TABLE generation_run ADD COLUMN evidence_note_wildcards JSONB NULL`
@@ -126,3 +126,13 @@ base) do not change.
 18. **"AI takeover"** in FR-50 / NFR-11 is not a catalogue label; tests and the real check enter it as a custom wildcard.
 19. **E2E stub control** moves to `POST /__control/google` (modes in `wildcard-search.md` FR-61); `/__control/rss`,
     `/__control/news` and the GDELT route are removed with FR-49.
+
+## Slice 06_wildcard-pack (step 4a)
+Description-only edits of 0.7.0, no shape change and no rename (so still no `Renamed:` line):
+- `EventSelection` — never set for runs created since phase 03 (the pack is built from sources per wildcard).
+- `EvidencePack.sources` — wildcard packs list every kept source of the run, by id ascending.
+- `PackSourceItem.snippet` — the stored source summary (else its title), `maxLength: 600` (a response-side bound; the
+  summary is already ≤ 600).
+- `FutureResult.sources` — for packs with `wildcardSections`: one entry per distinct Evidence ID, CORE, no counter-signal.
+Wire rule of the slice: `wildcardSections` present for every new pack; `PackWildcardSection.level`,
+`PackSourceItem.publishedAt` and `PackSourceItem.snippet` are absent when unset (NON_NULL mixins), never `null`.

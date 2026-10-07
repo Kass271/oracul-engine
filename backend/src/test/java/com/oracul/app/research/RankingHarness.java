@@ -2,7 +2,6 @@ package com.oracul.app.research;
 
 import com.oracul.app.api.model.EventClassification;
 import com.oracul.app.api.model.EventRanking;
-import com.oracul.app.api.model.EvidencePack;
 import com.oracul.app.api.model.HorizonCode;
 import com.oracul.app.api.model.NormalizedEvent;
 import com.oracul.app.api.model.RankingFactors;
@@ -27,10 +26,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Pure (no Spring) driver of {@code EventRanker}, {@code EvidenceSelector} and {@code EvidencePackRenderer} for the
- * slice 07 unit tests (research-pipeline.md "Slice 07_evidence-pack"). The production classes and their configuration
- * records are reached by reflection so RED compiles whatever they look like; a missing class or method is an
- * AssertionError naming it. Generated API models are used directly (they exist before the implementation).
+ * Pure (no Spring) driver of {@code EventRanker} for the slice 07 unit tests (research-pipeline.md "Slice 07_evidence-pack").
+ * The selector and the pack renderer of that slice are gone (wildcard-evidence.md slice 06: {@code select}, {@code Selection}
+ * and {@code render} are removed with them). The production class and its configuration records are reached by reflection so
+ * RED compiles whatever they look like; a missing class or method is an AssertionError naming it. Generated API models are used
+ * directly (they exist before the implementation).
  */
 final class RankingHarness {
 
@@ -158,61 +158,6 @@ final class RankingHarness {
         return rank(defaultWeights(), 0.30, fx.events, fx.sources, profile, CUTOFF);
     }
 
-    // ---- selector ----------------------------------------------------------------------------------------------
-
-    record Selection(List<NormalizedEvent> core, List<NormalizedEvent> supporting, List<NormalizedEvent> counterSignals) {
-        List<NormalizedEvent> all() {
-            List<NormalizedEvent> out = new ArrayList<>(core);
-            out.addAll(supporting);
-            out.addAll(counterSignals);
-            return out;
-        }
-
-        List<String> allIds() {
-            return ids(all());
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    static Selection select(Object props, List<NormalizedEvent> ranked, Map<String, Source> sources, ResearchProfile profile) {
-        Class<?> type = type("EvidenceSelector");
-        Object selector = instance(type, props);
-        Object result = call(selector, type, "select", ranked, sources, profile);
-        try {
-            Class<?> rt = result.getClass();
-            return new Selection((List<NormalizedEvent>) rt.getMethod("core").invoke(result),
-                (List<NormalizedEvent>) rt.getMethod("supporting").invoke(result),
-                (List<NormalizedEvent>) rt.getMethod("counterSignals").invoke(result));
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("EvidenceSelector.Result must expose core(), supporting(), counterSignals(): " + e, e);
-        }
-    }
-
-    // ---- renderer ----------------------------------------------------------------------------------------------
-
-    static String render(EvidencePack pack) {
-        Class<?> type = type("EvidencePackRenderer");
-        Method m = null;
-        for (Method c : type.getDeclaredMethods()) {
-            if (c.getName().equals("render") && c.getParameterCount() == 1) m = c;
-        }
-        if (m == null) throw new AssertionError("EvidencePackRenderer.render(EvidencePack) is missing");
-        try {
-            m.setAccessible(true);
-            Object target = null;
-            if (!Modifier.isStatic(m.getModifiers())) {
-                Constructor<?> c = type.getDeclaredConstructor();
-                c.setAccessible(true);
-                target = c.newInstance();
-            }
-            return (String) m.invoke(target, pack);
-        } catch (InvocationTargetException e) {
-            throw new AssertionError("EvidencePackRenderer.render failed: " + e.getTargetException(), e.getTargetException());
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("EvidencePackRenderer cannot be used: " + e, e);
-        }
-    }
-
     // ---- fixtures ----------------------------------------------------------------------------------------------
 
     static final ResearchTopic PANDEMIC = new ResearchTopic("biology-new-pandemic", "New pandemic", "biology", 0.8, false);
@@ -318,49 +263,5 @@ final class RankingHarness {
     static NormalizedEvent byId(List<NormalizedEvent> events, String id) {
         for (NormalizedEvent e : events) if (e.getId().equals(id)) return e;
         throw new AssertionError("no event " + id + " in " + ids(events));
-    }
-
-    /**
-     * Fixture G82: 82 events EV001...EV082 in rank order (score 0.9 - n * 0.001), entity "Entity n", source S<n>
-     * (publisher "Pub n", quality 0.85), geography global, category c(n mod 5); EV001-EV070 DARK (risk .8 / opp .1),
-     * EV071-EV082 BRIGHT (risk .1 / opp .8).
-     */
-    static Fx g82() {
-        Fx fx = new Fx();
-        for (int n = 1; n <= 82; n++) {
-            String id = String.format("EV%03d", n);
-            Source s = source(sid(id), "Pub " + n, "major", 0.85);
-            fx.sources.put(s.getId(), s);
-            boolean dark = n <= 70;
-            NormalizedEvent e = event(id, "2026-10-01", "c" + (n % 5), List.of("Entity " + n), List.of(s.getId()), 0.8,
-                classification("general", dark ? 0.8 : 0.1, dark ? 0.1 : 0.8, 0.5, 0.5, Trend.ESTABLISHED, "global", 0.85));
-            e.setRanking(ranking(0.9 - n * 0.001));
-            fx.events.add(e);
-        }
-        return fx;
-    }
-
-    static NormalizedEvent ev(Fx fx, int n) {
-        return fx.events.get(n - 1);
-    }
-
-    static void bright(NormalizedEvent e) {
-        e.getClassification().setRisk(0.1);
-        e.getClassification().setOpportunity(0.8);
-    }
-
-    static void dark(NormalizedEvent e) {
-        e.getClassification().setRisk(0.8);
-        e.getClassification().setOpportunity(0.1);
-    }
-
-    static String id(int n) {
-        return String.format("EV%03d", n);
-    }
-
-    static List<String> idRange(int from, int to) {
-        List<String> out = new ArrayList<>();
-        for (int n = from; n <= to; n++) out.add(id(n));
-        return out;
     }
 }

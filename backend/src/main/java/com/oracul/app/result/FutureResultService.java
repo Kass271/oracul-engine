@@ -73,6 +73,22 @@ public class FutureResultService {
         items.sort(Comparator.comparingInt((EvidenceItem i) -> number(i.getEvidenceId()))
             .thenComparing(EvidenceItem::getEvidenceId));
         List<ResultSource> sources = new ArrayList<>();
+        if (pack.getWildcardSections() != null) {
+            Map<String, com.oracul.app.api.model.PackSourceItem> distinct = new java.util.TreeMap<>(
+                Comparator.comparingInt(FutureResultService::number).thenComparing(Comparator.naturalOrder()));
+            for (var section : pack.getWildcardSections()) {
+                for (var item : section.getItems()) {
+                    distinct.putIfAbsent(item.getEvidenceId(), item);
+                }
+            }
+            for (var item : distinct.values()) {
+                ResultSource rs = new ResultSource(item.getEvidenceId(),
+                    com.oracul.app.api.model.EvidenceSection.CORE, item.getTitle(), item.getPublisher(),
+                    item.getUrl(), used.contains(item.getEvidenceId()), false);
+                rs.setPublishedAt(item.getPublishedAt());
+                sources.add(rs);
+            }
+        }
         for (EvidenceItem item : items) {
             Source first = item.getSourceIds().isEmpty() ? null : bySource.get(item.getSourceIds().get(0));
             ResultSource rs = new ResultSource(item.getEvidenceId(), item.getSection(),
