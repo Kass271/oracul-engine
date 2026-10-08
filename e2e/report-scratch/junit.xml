@@ -1,42 +1,30 @@
-<testsuites id="" name="" tests="7" failures="0" skipped="0" errors="0" time="143.090925">
-<testsuite name="wildcard-results.spec.ts" timestamp="2026-10-07T13:51:06.870Z" hostname="chromium" tests="7" failures="0" skipped="0" time="138.544" errors="0">
-<testcase name="FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard › FR-60 SOURCES lists one group per wildcard with its sources, excerpts, links and marks" classname="wildcard-results.spec.ts" time="19.942">
+<testsuites id="" name="" tests="5" failures="0" skipped="0" errors="0" time="130.86440100000002">
+<testsuite name="story-rewrite.spec.ts" timestamp="2026-10-07T23:56:32.607Z" hostname="chromium" tests="5" failures="0" skipped="0" time="126.141" errors="0">
+<testcase name="FR-67 rewrite the same future in another style or language › FR-67 REWRITE AS… tells the same future again in Kafka / Ukrainian with only a story request" classname="story-rewrite.spec.ts" time="22.931">
 <properties>
 <property name="serial" value="">
 </property>
 </properties>
 </testcase>
-<testcase name="FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard › FR-60 WHY THESE NEWS? lists the queries per wildcard and five summary numbers; a chip highlights every item of its id; a reload closes the panels" classname="wildcard-results.spec.ts" time="23.108">
+<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a rewrite of a rewrite tells the original scenario and disables its own menu item" classname="story-rewrite.spec.ts" time="25.305">
 <properties>
 <property name="serial" value="">
 </property>
 </properties>
 </testcase>
-<testcase name="FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard › FR-60 mode publisher-fail: every source says &quot;content not retrieved&quot; and no excerpt is shown" classname="wildcard-results.spec.ts" time="19.307">
+<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a run that is not COMPLETED cannot be rewritten" classname="story-rewrite.spec.ts" time="17.277">
 <properties>
 <property name="serial" value="">
 </property>
 </properties>
 </testcase>
-<testcase name="FR-59 a wildcard without sources is explicit › FR-59 / FR-60 mode empty-for W02: the note names Energy crisis, no LOWER REALISM, W02 shows &quot;no current sources found&quot;" classname="wildcard-results.spec.ts" time="19.292">
+<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a failing rewrite shows the failure and leaves the original result alone" classname="story-rewrite.spec.ts" time="21.121">
 <properties>
 <property name="serial" value="">
 </property>
 </properties>
 </testcase>
-<testcase name="FR-59 a wildcard without sources is explicit › FR-59 mode empty-for W02 at Realism 10: the missing sentence prefixes the insufficiency sentence and LOWER REALISM shows" classname="wildcard-results.spec.ts" time="18.924">
-<properties>
-<property name="serial" value="">
-</property>
-</properties>
-</testcase>
-<testcase name="FR-59 a wildcard without sources is explicit › FR-59 mode empty: &quot;No sources&quot;, the NO_EVIDENCE note, and WHY THESE NEWS? still lists both groups with EMPTY queries" classname="wildcard-results.spec.ts" time="19.014">
-<properties>
-<property name="serial" value="">
-</property>
-</properties>
-</testcase>
-<testcase name="FR-59 a wildcard without sources is explicit › FR-59 mode down: every query is FAILED, the note is NO_EVIDENCE and the run completes" classname="wildcard-results.spec.ts" time="18.957">
+<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a rewrite is refused while another run of the session is active" classname="story-rewrite.spec.ts" time="39.507">
 <properties>
 <property name="serial" value="">
 </property>

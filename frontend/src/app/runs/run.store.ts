@@ -5,6 +5,9 @@ import { Router } from '@angular/router';
 
 import type { GenerationRun } from '../api/models/generation-run';
 import type { ScenarioConfiguration } from '../api/models/scenario-configuration';
+import type { StoryLanguage } from '../api/models/story-language';
+import type { WritingStyleSelection } from '../api/models/writing-style-selection';
+import { RewriteService } from '../api/services/rewrite.service';
 import { RunsService } from '../api/services/runs.service';
 import { ConnectionStore } from '../chatgpt/connection.store';
 import { ScenarioStore } from '../scenario/scenario.store';
@@ -20,6 +23,7 @@ const FAILED_RELOAD_CODES = ['CHATGPT_SESSION_EXPIRED', 'CHATGPT_REGISTRATION_IN
 @Injectable({ providedIn: 'root' })
 export class RunStore {
   private readonly api = inject(RunsService);
+  private readonly rewriteApi = inject(RewriteService);
   private readonly snackBar = inject(MatSnackBar);
   private readonly router = inject(Router);
   private readonly connection = inject(ConnectionStore);
@@ -70,6 +74,30 @@ export class RunStore {
     if (this.starting()) return;
     this.starting.set(true);
     this.api.startAlternativeRun({ runId: parentRunId }).subscribe({
+      next: (run) => {
+        this.starting.set(false);
+        this.reset();
+        this.run.set(run);
+        this.runId = run.id;
+        this.panel.load(run.configuration);
+        this.schedule();
+        void this.router.navigate(['/futures', run.id], { replaceUrl: true });
+      },
+      error: (err: unknown) => {
+        this.starting.set(false);
+        const body = err instanceof HttpErrorResponse ? err.error : null;
+        const isApiError =
+          body && typeof body === 'object' && typeof body.code === 'string' && typeof body.message === 'string';
+        this.showError(isApiError ? body.message : GENERIC_ERROR);
+        if (isApiError && CONNECTION_CODES.includes(body.code)) this.connection.load();
+      },
+    });
+  }
+
+  rewrite(parentRunId: string, writingStyle: WritingStyleSelection, language: StoryLanguage): void {
+    if (this.starting()) return;
+    this.starting.set(true);
+    this.rewriteApi.startRewriteRun({ runId: parentRunId, body: { writingStyle, language } }).subscribe({
       next: (run) => {
         this.starting.set(false);
         this.reset();

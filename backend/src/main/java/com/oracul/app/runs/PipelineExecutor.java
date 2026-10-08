@@ -72,12 +72,18 @@ public class PipelineExecutor {
         try {
             var queued = runs.find(runId, sessionId).orElseThrow();
             boolean alternative = queued.kind() == com.oracul.app.api.model.RunKind.ALTERNATIVE;
-            boolean started = alternative ? runs.startRunningAlternative(runId, now()) : runs.startRunning(runId, now());
+            boolean rewrite = queued.kind() == com.oracul.app.api.model.RunKind.REWRITE;
+            boolean started = rewrite ? runs.startRunningRewrite(runId, now())
+                : alternative ? runs.startRunningAlternative(runId, now()) : runs.startRunning(runId, now());
             if (!started) {
                 runs.failTimedOut(runId, now());
                 return;
             }
             if (!resolveModel(runId, sessionId)) {
+                return;
+            }
+            if (rewrite) {
+                story.run(runId, sessionId);
                 return;
             }
             var run = runs.find(runId, sessionId).orElseThrow();

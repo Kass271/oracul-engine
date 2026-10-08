@@ -100,6 +100,47 @@ public class RunService {
         return created;
     }
 
+    /** FR-67: queues a REWRITE of a completed future in another style / language (story-writing only). */
+    public GenerationRun startRewrite(UUID sessionId, UUID parentId,
+                                      com.oracul.app.api.model.WritingStyleSelection style,
+                                      com.oracul.app.api.model.StoryLanguage language) {
+        OffsetDateTime now = clock.instant().truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        UUID id = UUID.randomUUID();
+        for (int attempt = 0; attempt < ID_ATTEMPTS; attempt++) {
+            try {
+                tx.executeWithoutResult(status -> {
+                    var parent = runs.find(parentId, sessionId)
+                        .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found"));
+                    if (!runs.isCompletedWithStory(parentId)) {
+                        throw new ApiException(HttpStatus.CONFLICT, "RUN_NOT_COMPLETED",
+                            "Only a completed future can be rewritten");
+                    }
+                    if (runs.hasActiveRun(sessionId)) {
+                        throw activeConflict();
+                    }
+                    ScenarioConfiguration cfg = parent.configuration();
+                    cfg.getOutput().setWritingStyle(new com.oracul.app.api.model.WritingStyleSelection(
+                        style.getMode(), style.getProfileId()));
+                    cfg.getOutput().setLanguage(language);
+                    runs.insertRewriteQueued(id, nextGenerationId(now), sessionId, parentId, parent.scenarioSource(),
+                        cfg, now, now.plus(timeout));
+                });
+                break;
+            } catch (DuplicateKeyException e) {
+                String message = String.valueOf(e.getMessage());
+                if (message.contains("one_active_run_per_session")) {
+                    throw activeConflict();
+                }
+                if (attempt == ID_ATTEMPTS - 1) {
+                    throw e;
+                }
+            }
+        }
+        GenerationRun created = toApi(runs.find(id, sessionId).orElseThrow());
+        pipeline.submit(id, sessionId);
+        return created;
+    }
+
     public GenerationRun get(UUID id, UUID sessionId) {
         return toApi(runs.find(id, sessionId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found")));
@@ -151,6 +192,7 @@ public class RunService {
         run.setGenerationId(r.generationId());
         run.setKind(r.kind());
         run.setParentRunId(r.parentRunId());
+        run.setScenarioRunId(r.scenarioRunId());
         run.setStatus(r.status());
         run.setStage(r.stage());
         run.setStageLabel(r.stage() == null ? null : RunStages.label(r.stage()));

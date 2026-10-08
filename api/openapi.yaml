@@ -407,8 +407,9 @@ paths:
       summary: REWRITE AS… — new run that tells the same validated scenario in another writing style and/or language
       description: |
         Checks in this order; nothing is stored on an error: runId unknown, malformed or of another session → 404
-        RUN_NOT_FOUND "Future not found"; body not valid JSON → 400 VALIDATION_FAILED "Request body is not valid
-        JSON"; writingStyle missing / null / not an object, mode not OFFICIAL/NARRATIVE, profileId missing / not a
+        RUN_NOT_FOUND "Future not found" (also when the body is broken); body not valid JSON, empty, or not
+        application/json → 400 VALIDATION_FAILED "Request body is not valid JSON"; body JSON null / not an object,
+        writingStyle missing / null / not an object, mode not OFFICIAL/NARRATIVE, profileId missing / not a
         string / not in the style file, or a profile of the other mode → 400 VALIDATION_FAILED "Unknown writing
         style"; language missing / null / not "en" or "uk" → 400 VALIDATION_FAILED "Unknown story language"; ChatGPT
         not connected / expired / registration invalid / plan not eligible / transient refresh failure → 401 / 401 /

@@ -4,7 +4,7 @@
       "/opt/homebrew/Cellar/node@24/24.21.0/bin/node",
       "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/node_modules/.bin/playwright",
       "test",
-      "e2e/tests/wildcard-results.spec.ts"
+      "e2e/tests/story-rewrite.spec.ts"
     ],
     "configFile": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/playwright.config.ts",
     "rootDir": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests",
@@ -90,30 +90,30 @@
   },
   "suites": [
     {
-      "title": "wildcard-results.spec.ts",
-      "file": "wildcard-results.spec.ts",
+      "title": "story-rewrite.spec.ts",
+      "file": "story-rewrite.spec.ts",
       "column": 0,
       "line": 0,
       "specs": [],
       "suites": [
         {
-          "title": "FR-60 SOURCES and WHY THESE NEWS? grouped by wildcard",
-          "file": "wildcard-results.spec.ts",
-          "line": 117,
+          "title": "FR-67 rewrite the same future in another style or language",
+          "file": "story-rewrite.spec.ts",
+          "line": 111,
           "column": 6,
           "specs": [
             {
-              "title": "FR-60 SOURCES lists one group per wildcard with its sources, excerpts, links and marks",
+              "title": "FR-67 REWRITE AS… tells the same future again in Kafka / Ukrainian with only a story request",
               "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 150000,
+                  "timeout": 240000,
                   "annotations": [
                     {
                       "type": "serial",
                       "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                         "line": 0,
                         "column": 0
                       }
@@ -127,17 +127,17 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 19942,
+                      "duration": 22931,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-07T13:51:07.076Z",
+                      "startTime": "2026-10-07T23:56:32.817Z",
                       "annotations": [
                         {
                           "type": "serial",
                           "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                             "line": 0,
                             "column": 0
                           }
@@ -149,23 +149,23 @@
                   "status": "expected"
                 }
               ],
-              "id": "430e60db390b08f20624-7f2cce01dda93346fa32",
-              "file": "wildcard-results.spec.ts",
-              "line": 118,
+              "id": "de3bf923e8a97feb67de-bbc283cf82dc4a1cc1a0",
+              "file": "story-rewrite.spec.ts",
+              "line": 112,
               "column": 3
             },
             {
-              "title": "FR-60 WHY THESE NEWS? lists the queries per wildcard and five summary numbers; a chip highlights every item of its id; a reload closes the panels",
+              "title": "FR-67 a rewrite of a rewrite tells the original scenario and disables its own menu item",
               "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 150000,
+                  "timeout": 240000,
                   "annotations": [
                     {
                       "type": "serial",
                       "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                         "line": 0,
                         "column": 0
                       }
@@ -179,17 +179,17 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 23108,
+                      "duration": 25305,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-07T13:51:27.215Z",
+                      "startTime": "2026-10-07T23:56:55.961Z",
                       "annotations": [
                         {
                           "type": "serial",
                           "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                             "line": 0,
                             "column": 0
                           }
@@ -201,13 +201,13 @@
                   "status": "expected"
                 }
               ],
-              "id": "430e60db390b08f20624-595210e491f790c1c868",
-              "file": "wildcard-results.spec.ts",
-              "line": 170,
+              "id": "de3bf923e8a97feb67de-611a385a323e5ced9102",
+              "file": "story-rewrite.spec.ts",
+              "line": 186,
               "column": 3
             },
             {
-              "title": "FR-60 mode publisher-fail: every source says \"content not retrieved\" and no excerpt is shown",
+              "title": "FR-67 a run that is not COMPLETED cannot be rewritten",
               "ok": true,
               "tags": [],
               "tests": [
@@ -217,7 +217,7 @@
                     {
                       "type": "serial",
                       "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                         "line": 0,
                         "column": 0
                       }
@@ -231,17 +231,17 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 19307,
+                      "duration": 17277,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-07T13:51:50.327Z",
+                      "startTime": "2026-10-07T23:57:21.272Z",
                       "annotations": [
                         {
                           "type": "serial",
                           "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                             "line": 0,
                             "column": 0
                           }
@@ -253,83 +253,23 @@
                   "status": "expected"
                 }
               ],
-              "id": "430e60db390b08f20624-a71f22065aed5dd77aa9",
-              "file": "wildcard-results.spec.ts",
-              "line": 242,
-              "column": 3
-            }
-          ]
-        },
-        {
-          "title": "FR-59 a wildcard without sources is explicit",
-          "file": "wildcard-results.spec.ts",
-          "line": 268,
-          "column": 6,
-          "specs": [
-            {
-              "title": "FR-59 / FR-60 mode empty-for W02: the note names Energy crisis, no LOWER REALISM, W02 shows \"no current sources found\"",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 150000,
-                  "annotations": [
-                    {
-                      "type": "serial",
-                      "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
-                        "line": 0,
-                        "column": 0
-                      }
-                    }
-                  ],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 19292,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-07T13:52:09.638Z",
-                      "annotations": [
-                        {
-                          "type": "serial",
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
-                            "line": 0,
-                            "column": 0
-                          }
-                        }
-                      ],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "430e60db390b08f20624-4aae9e9ca9e43117725f",
-              "file": "wildcard-results.spec.ts",
-              "line": 270,
+              "id": "de3bf923e8a97feb67de-b35c759ea5a484c2d2c3",
+              "file": "story-rewrite.spec.ts",
+              "line": 225,
               "column": 3
             },
             {
-              "title": "FR-59 mode empty-for W02 at Realism 10: the missing sentence prefixes the insufficiency sentence and LOWER REALISM shows",
+              "title": "FR-67 a failing rewrite shows the failure and leaves the original result alone",
               "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 150000,
+                  "timeout": 240000,
                   "annotations": [
                     {
                       "type": "serial",
                       "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                         "line": 0,
                         "column": 0
                       }
@@ -343,17 +283,17 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 18924,
+                      "duration": 21121,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-07T13:52:28.935Z",
+                      "startTime": "2026-10-07T23:57:38.554Z",
                       "annotations": [
                         {
                           "type": "serial",
                           "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                             "line": 0,
                             "column": 0
                           }
@@ -365,23 +305,23 @@
                   "status": "expected"
                 }
               ],
-              "id": "430e60db390b08f20624-835761259de7df67d672",
-              "file": "wildcard-results.spec.ts",
-              "line": 313,
+              "id": "de3bf923e8a97feb67de-82ad2e9a4edf50480ecf",
+              "file": "story-rewrite.spec.ts",
+              "line": 243,
               "column": 3
             },
             {
-              "title": "FR-59 mode empty: \"No sources\", the NO_EVIDENCE note, and WHY THESE NEWS? still lists both groups with EMPTY queries",
+              "title": "FR-67 a rewrite is refused while another run of the session is active",
               "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 150000,
+                  "timeout": 240000,
                   "annotations": [
                     {
                       "type": "serial",
                       "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                         "line": 0,
                         "column": 0
                       }
@@ -395,17 +335,17 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 19014,
+                      "duration": 39507,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-07T13:52:47.863Z",
+                      "startTime": "2026-10-07T23:57:59.681Z",
                       "annotations": [
                         {
                           "type": "serial",
                           "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
+                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
                             "line": 0,
                             "column": 0
                           }
@@ -417,61 +357,9 @@
                   "status": "expected"
                 }
               ],
-              "id": "430e60db390b08f20624-8f55b3036825daf3ce65",
-              "file": "wildcard-results.spec.ts",
-              "line": 334,
-              "column": 3
-            },
-            {
-              "title": "FR-59 mode down: every query is FAILED, the note is NO_EVIDENCE and the run completes",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 150000,
-                  "annotations": [
-                    {
-                      "type": "serial",
-                      "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
-                        "line": 0,
-                        "column": 0
-                      }
-                    }
-                  ],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 18957,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-07T13:53:06.882Z",
-                      "annotations": [
-                        {
-                          "type": "serial",
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/wildcard-results.spec.ts",
-                            "line": 0,
-                            "column": 0
-                          }
-                        }
-                      ],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "430e60db390b08f20624-95e7a421ea7575c6df16",
-              "file": "wildcard-results.spec.ts",
-              "line": 365,
+              "id": "de3bf923e8a97feb67de-76c8fca6ae7ec3db3e79",
+              "file": "story-rewrite.spec.ts",
+              "line": 265,
               "column": 3
             }
           ]
@@ -481,9 +369,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-07T13:51:02.813Z",
-    "duration": 143090.925,
-    "expected": 7,
+    "startTime": "2026-10-07T23:56:28.406Z",
+    "duration": 130864.40100000001,
+    "expected": 5,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

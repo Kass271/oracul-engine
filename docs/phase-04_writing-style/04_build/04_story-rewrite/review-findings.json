@@ -1,0 +1,43 @@
+{
+  "slice": "04_story-rewrite",
+  "round": 3,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/runs/RewriteRunLookupFilter.java",
+      "line": 39,
+      "fr": "FR-67",
+      "problem": "The run lookup runs in a servlet filter, outside the MVC exception handler. A RuntimeException from runs.find (DB failure after the session was resolved, or a stored configuration that does not deserialize) escapes the filter chain. The client then gets Spring Boot's default /error body ({timestamp,status,error,path}) instead of 500 {\"code\":\"INTERNAL_ERROR\",\"message\":\"Something went wrong — try again\"}, and that body contains the request URL. The spec requires every error body to be exactly {code,message} with no URL. SessionFilter guards its own lookup the same way for this reason.",
+      "fix": "Wrap the lookup in try/catch (RuntimeException), log it, and write the same 500 INTERNAL_ERROR JSON that SessionFilter writes. Only IllegalArgumentException from UUID.fromString should map to 404.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "backend/src/main/java/com/oracul/app/runs/PipelineExecutor.java",
+      "line": 77,
+      "fr": "FR-67",
+      "problem": "The spec says PipelineExecutor decides by kind explicitly and that a kind it does not know never falls into the research path. The code uses a two-flag ternary, so any kind that is not ALTERNATIVE or REWRITE takes the STANDARD path (startRunning, research). With the current 3-value RunKind enum this cannot be reached, but adding a kind later would silently run the research path.",
+      "fix": "Switch exhaustively on queued.kind() (STANDARD -> research, ALTERNATIVE -> reasoning, REWRITE -> story only). Fail any other value as INTERNAL_ERROR.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/quick-actions.ts",
+      "line": 33,
+      "fr": "FR-67",
+      "problem": "The language headings rewrite-language-en / -uk are plain divs inside the mat-menu panel (role=\"menu\"). ARIA allows only menuitem, group or separator children in a menu, so screen readers announce the headings as stray content. The 9 items of each language also have no group that names the language.",
+      "fix": "Wrap each language block in a <div role=\"group\" [attr.aria-label]=\"languageLabel(lang)\">. Give the visible heading role=\"presentation\" or aria-hidden=\"true\". Keep the data-testids and the DOM order.",
+      "status": "open"
+    }
+  ]
+}

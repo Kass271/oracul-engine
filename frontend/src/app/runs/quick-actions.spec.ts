@@ -164,15 +164,25 @@ describe('slice 16_quick-regeneration: quick actions bar', () => {
     vi.useRealTimers();
   });
 
+  // phase-04 story-rewrite.md FR-67: the bar gained a sixth button, quick-rewrite "REWRITE AS…", after quick-alternative.
   // @trace FR-29
   // @trace FR-30
-  it('renders exactly the five buttons with the exact texts in table order, alternative last', async () => {
+  // @trace FR-67
+  it('renders exactly the six buttons with the exact texts in table order, alternative then rewrite last', async () => {
     await openCompleted(config());
     const bar = el().querySelector('[data-testid="result-view"] [data-testid="quick-actions"]');
     expect(bar).not.toBeNull();
     const buttons = Array.from((bar as HTMLElement).querySelectorAll('button'));
-    expect(buttons.map((b) => b.getAttribute('data-testid'))).toEqual([...ACTIONS.map((a) => a.testid), 'quick-alternative']);
-    expect(buttons.map((b) => (b.textContent ?? '').trim())).toEqual([...ACTIONS.map((a) => a.text), 'ALTERNATIVE FUTURE']);
+    expect(buttons.map((b) => b.getAttribute('data-testid'))).toEqual([
+      ...ACTIONS.map((a) => a.testid),
+      'quick-alternative',
+      'quick-rewrite',
+    ]);
+    expect(buttons.map((b) => (b.textContent ?? '').trim())).toEqual([
+      ...ACTIONS.map((a) => a.text),
+      'ALTERNATIVE FUTURE',
+      'REWRITE AS\u2026',
+    ]);
   });
 
   // Ranges & invariants: 4 actions x v = 1..10 (40 cases) against the table, enabled state, body and panel invariants.

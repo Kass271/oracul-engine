@@ -122,3 +122,7 @@ E2E stub only gains the per-style STORY_WRITING answers (`styled-story.md` "Stub
   inside `writingStyle` answers exactly "Unknown writing style", unknown inner keys are not stored) and
   `getScenarioConfiguration` (returns the newest run's configuration as stored; absent style / language = Official /
   Briefing, English). No operation, schema, property or enum value added, renamed or removed; no `Renamed:` line.
+- 04_story-rewrite: description-only precision in `api/openapi.yaml` — `startRewriteRun` (404 also with a broken body;
+  an empty or non-`application/json` body answers "Request body is not valid JSON"; a JSON body that is `null` or not
+  an object answers "Unknown writing style"). No operation, schema, property or enum value added, renamed or removed;
+  no `Renamed:` line. Docker compose files, profiles and `.oracul/stack.json` unchanged (no stub change).

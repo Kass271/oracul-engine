@@ -41,7 +41,8 @@ public class ReasoningController implements ReasoningApi {
         if (run.isEmpty()) {
             throw new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Future not found");
         }
-        List<ScenarioAttemptRepository.Attempt> rows = attempts.list(runId);
+        UUID source = run.get().scenarioSource();
+        List<ScenarioAttemptRepository.Attempt> rows = attempts.list(source);
         ScenarioAttemptRepository.Attempt latest = null;
         for (var a : rows) {
             if (a.scenario().isPresent()) {
@@ -64,8 +65,8 @@ public class ReasoningController implements ReasoningApi {
             summaries.add(new ScenarioAttemptSummary(a.attempt(), a.reason(), a.scenario().isPresent(),
                 new ArrayList<>(a.schemaErrors())));
         }
-        boolean accepted = attempts.finalAttempt(runId).filter(f -> f == latestAttempt(rows)).isPresent();
-        return ResponseEntity.ok(new StructuredScenarioRecord(runId, run.get().evidencePackId(), latest.attempt(),
+        boolean accepted = attempts.finalAttempt(source).filter(f -> f == latestAttempt(rows)).isPresent();
+        return ResponseEntity.ok(new StructuredScenarioRecord(source, run.get().evidencePackId(), latest.attempt(),
             accepted, shown, reports, critics, rows.size(), summaries));
     }
 

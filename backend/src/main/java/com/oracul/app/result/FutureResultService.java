@@ -53,8 +53,9 @@ public class FutureResultService {
         if (story == null || run.evidencePackId() == null) {
             throw notReady();
         }
-        int finalAttempt = attempts.finalAttempt(runId).orElseThrow(FutureResultService::notReady);
-        var accepted = attempts.list(runId).stream().filter(a -> a.attempt() == finalAttempt).findFirst()
+        UUID source = run.scenarioSource();
+        int finalAttempt = attempts.finalAttempt(source).orElseThrow(FutureResultService::notReady);
+        var accepted = attempts.list(source).stream().filter(a -> a.attempt() == finalAttempt).findFirst()
             .orElseThrow(FutureResultService::notReady);
         StructuredScenario scenario = accepted.cleaned().orElseThrow(FutureResultService::notReady);
         List<com.oracul.app.api.model.CriticIssue> openIssues = accepted.criticReport()

@@ -26,13 +26,18 @@ public class GenerationRunRepository {
                       String headline, OffsetDateTime createdAt, OffsetDateTime updatedAt,
                       OffsetDateTime completedAt, SearchPlan searchPlan, UUID evidencePackId, boolean hasOpenCriticIssues,
                       String model, String failureProviderCode, String evidenceNoteKind, Integer evidenceCoreItems,
-                      Integer evidenceCoreNeeded, List<String> evidenceNoteWildcards) {
+                      Integer evidenceCoreNeeded, List<String> evidenceNoteWildcards, UUID scenarioRunId) {
+
+        /** The run whose accepted scenario this run tells: itself, or for a REWRITE the original run. */
+        public UUID scenarioSource() {
+            return scenarioRunId != null ? scenarioRunId : id;
+        }
     }
 
     private static final String COLUMNS = "id, generation_id, session_id, kind, parent_run_id, status, stage, "
         + "configuration, research_profile, counts, failure_code, failure_message, suggested_realism, headline, "
         + "created_at, updated_at, completed_at, search_plan, evidence_pack_id, model, failure_provider_code, "
-        + "evidence_note_kind, evidence_core_items, evidence_core_needed, evidence_note_wildcards";
+        + "evidence_note_kind, evidence_core_items, evidence_core_needed, evidence_note_wildcards, scenario_run_id";
 
     private final JdbcTemplate jdbc;
     private final JsonMapper json;
@@ -78,6 +83,32 @@ public class GenerationRunRepository {
                 + "p.search_plan, p.counts, p.evidence_pack_id, p.suggested_realism, p.evidence_note_kind, "
                 + "p.evidence_core_items, p.evidence_core_needed, p.evidence_note_wildcards, ?, ?, ? from generation_run p where p.id = ?",
             id, generationId, sessionId, deadline, now, now, parentId);
+    }
+
+    /** True when the run is COMPLETED and has its own story. */
+    boolean isCompletedWithStory(UUID id) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists (select 1 from generation_run r where r.id = ? "
+            + "and r.status = 'COMPLETED' and r.evidence_pack_id is not null "
+            + "and exists (select 1 from future_story f where f.run_id = r.id))", Boolean.class, id));
+    }
+
+    /** Inserts a QUEUED REWRITE run: the parent's research data and pack, the given configuration. */
+    void insertRewriteQueued(UUID id, String generationId, UUID sessionId, UUID parentId, UUID scenarioRunId,
+                             ScenarioConfiguration cfg, OffsetDateTime now, OffsetDateTime deadline) {
+        jdbc.update("insert into generation_run (id, generation_id, session_id, kind, parent_run_id, scenario_run_id, "
+                + "status, configuration, research_profile, search_plan, counts, evidence_pack_id, suggested_realism, "
+                + "evidence_note_kind, evidence_core_items, evidence_core_needed, evidence_note_wildcards, deadline_at, "
+                + "created_at, updated_at) select ?, ?, ?, 'REWRITE', p.id, ?, 'QUEUED', cast(? as jsonb), "
+                + "p.research_profile, p.search_plan, p.counts, p.evidence_pack_id, p.suggested_realism, "
+                + "p.evidence_note_kind, p.evidence_core_items, p.evidence_core_needed, p.evidence_note_wildcards, "
+                + "?, ?, ? from generation_run p where p.id = ?",
+            id, generationId, sessionId, scenarioRunId, write(cfg), deadline, now, now, parentId);
+    }
+
+    /** QUEUED to RUNNING at stage WRITING_STORY for REWRITE runs, only before the deadline. */
+    boolean startRunningRewrite(UUID id, OffsetDateTime now) {
+        return jdbc.update("update generation_run set status = 'RUNNING', stage = 'WRITING_STORY', updated_at = ? "
+            + "where id = ? and status = 'QUEUED' and deadline_at > ?", now, id, now) == 1;
     }
 
     /** QUEUED to RUNNING at stage EXPLORING_FUTURES for ALTERNATIVE runs, only before the deadline. */
@@ -237,12 +268,13 @@ public class GenerationRunRepository {
             rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
             rs.getObject("evidence_pack_id", UUID.class), openCritic,
             rs.getString("model"), rs.getString("failure_provider_code"), rs.getString("evidence_note_kind"),
-            (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"), wildcards(rs.getString("evidence_note_wildcards")));
+            (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"), wildcards(rs.getString("evidence_note_wildcards")),
+            rs.getObject("scenario_run_id", UUID.class));
     }
 
     public Optional<Row> find(UUID id, UUID sessionId) {
-        List<Row> rows = jdbc.query("select " + COLUMNS + ", exists (select 1 from scenario_attempt a where a.run_id = generation_run.id "
-                + "and a.attempt = generation_run.final_attempt and a.critic_report ->> 'verdict' = 'FAIL') "
+        List<Row> rows = jdbc.query("select " + COLUMNS + ", exists (select 1 from scenario_attempt a, generation_run s where s.id = coalesce(generation_run.scenario_run_id, generation_run.id) "
+                + "and a.run_id = s.id and a.attempt = s.final_attempt and a.critic_report ->> 'verdict' = 'FAIL') "
                 + "as open_critic from generation_run where id = ? and session_id = ?",
             (rs, i) -> new Row(
                 rs.getObject("id", UUID.class), rs.getString("generation_id"), rs.getObject("session_id", UUID.class),
@@ -261,7 +293,8 @@ public class GenerationRunRepository {
                 rs.getString("search_plan") == null ? null : read(rs.getString("search_plan"), SearchPlan.class),
                 rs.getObject("evidence_pack_id", UUID.class), rs.getBoolean("open_critic"),
                 rs.getString("model"), rs.getString("failure_provider_code"), rs.getString("evidence_note_kind"),
-                (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"), wildcards(rs.getString("evidence_note_wildcards"))),
+                (Integer) rs.getObject("evidence_core_items"), (Integer) rs.getObject("evidence_core_needed"), wildcards(rs.getString("evidence_note_wildcards")),
+                rs.getObject("scenario_run_id", UUID.class)),
             id, sessionId);
         return rows.stream().findFirst();
     }

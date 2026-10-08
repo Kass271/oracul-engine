@@ -14,7 +14,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class SessionFilter extends OncePerRequestFilter {
 
     public static final String COOKIE = "ORACUL_SID";
-    static final String ATTRIBUTE = SessionFilter.class.getName() + ".SESSION_ID";
+    public static final String ATTRIBUTE = SessionFilter.class.getName() + ".SESSION_ID";
     private static final String CALLBACK = "/api/auth/chatgpt/callback";
 
     private final SessionService sessions;
