@@ -1,0 +1,43 @@
+{
+  "slice": "release",
+  "round": 1,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "ui",
+      "file": "frontend/src/app/result/future-story.ts",
+      "line": 15,
+      "fr": "FR-66",
+      "problem": "A Ukrainian story (headline, dateline, body) is shown inside <html lang=\"en\"> and has no lang attribute of its own. Screen readers read the Cyrillic text with English pronunciation rules (WCAG 3.1.2 Language of Parts). The spec does not ask for this, so it is low.",
+      "fix": "Bind [attr.lang] on the story container to the run's output.language ('uk' or 'en'). The AI labels stay outside it and stay English.",
+      "status": "open"
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "error-handling",
+      "file": "backend/src/main/java/com/oracul/app/runs/RewriteRunLookupFilter.java",
+      "line": 39,
+      "fr": "FR-67",
+      "problem": "This carries over slice 04 R1. runs.find runs in a servlet filter, outside ApiExceptionHandler. A RuntimeException there (a DB failure, or a stored configuration that does not deserialize) goes to Spring Boot's /error, which answers {timestamp,status,error,path} instead of ApiError {code:INTERNAL_ERROR,message}. SessionFilter catches this case itself. The UI falls back to the generic message, so only the contract shape is wrong.",
+      "fix": "Wrap the lookup in try/catch(RuntimeException), log it, and write the 500 INTERNAL_ERROR ApiError body the same way SessionFilter does.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "ui",
+      "file": "frontend/src/app/runs/quick-actions.ts",
+      "line": 30,
+      "fr": "FR-67",
+      "problem": "This carries over slice 04 R3. The headings rewrite-language-en and rewrite-language-uk are plain divs inside the role=menu panel. Screen readers do not tie them to the 9 items that follow, so each language block has no accessible name.",
+      "fix": "Wrap each language block in an element with role=\"group\" and aria-labelledby pointing to its heading, or give the heading role=\"presentation\" and set aria-label on each item (e.g. \"Narrative — inspired by Franz Kafka, Ukrainian\").",
+      "status": "open"
+    }
+  ]
+}
