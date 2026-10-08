@@ -80,6 +80,21 @@ function withoutStyleSection(text: string): string {
   return [...lines.slice(0, from), ...lines.slice(to)].join('\n');
 }
 
+/** The WRITING STYLE section of an input text: from the `WRITING STYLE` line up to the line before `TASK`. */
+function sectionOf(text: string): string {
+  const lines = text.split('\n');
+  const from = lines.indexOf('WRITING STYLE');
+  const to = lines.indexOf('TASK', from + 1);
+  expect(from, 'a WRITING STYLE line').toBeGreaterThanOrEqual(0);
+  expect(to, 'a TASK line after it').toBeGreaterThan(from);
+  return lines.slice(from, to).join('\n');
+}
+
+function withoutTrailingSection(instructions: string, section: string): string {
+  expect(instructions.endsWith(`\n${section}`), 'instructions end with the section').toBe(true);
+  return instructions.slice(0, instructions.length - section.length - 1);
+}
+
 async function getJson(page: Page, url: string): Promise<any> {
   const res = await page.request.get(url);
   expect(res.status(), url).toBe(200);
@@ -170,7 +185,14 @@ test.describe('FR-67 rewrite the same future in another style or language', () =
     expect(withoutStyleSection(second)).toBe(withoutStyleSection(first));
     expect(dataBlock(second, 'structured-scenario')).not.toBe('');
     expect(dataBlock(second, 'structured-scenario')).toBe(dataBlock(first, 'structured-scenario'));
-    expect(added[0].instructions).toBe(firstStory[0].instructions);
+    // @trace FR-65 (post-release correction 2026-10-08): the instructions end with the run's own WRITING STYLE section
+    expect(added[0].instructions).not.toBe(firstStory[0].instructions);
+    expect(added[0].instructions.startsWith('You are the story writer of ORACUL.\n')).toBe(true);
+    expect(added[0].instructions.endsWith(`\n${sectionOf(second)}`)).toBe(true);
+    expect(firstStory[0].instructions.endsWith(`\n${sectionOf(first)}`)).toBe(true);
+    expect(withoutTrailingSection(added[0].instructions, sectionOf(second))).toBe(
+      withoutTrailingSection(firstStory[0].instructions, sectionOf(first)),
+    );
 
     // the rewrite run and the untouched original
     const rewrite = await getJson(page, `/api/runs/${r2}`);

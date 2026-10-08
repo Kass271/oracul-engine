@@ -36,16 +36,31 @@ test.describe('FR-42 Opt-in E2E stub with its own data: compose files and stack 
     expect(exists('docker-compose.override.yml')).toBe(false);
   });
 
-  test('docker-compose.yml is the real stack: db, backend, frontend, db-data, no stub and no ORACUL_ variable', () => {
+  // @trace FR-42, FR-65
+  test('docker-compose.yml is the real stack: db, backend, frontend, db-data, no stub, and exactly the two ORACUL_ timeout variables on the backend', () => {
     const yml = read('docker-compose.yml');
     expect(yml).toMatch(/^name:\s*oracul-engine\s*$/m);
     for (const service of ['db', 'backend', 'frontend']) expect(yml).toMatch(new RegExp(`^  ${service}:\\s*$`, 'm'));
     expect(yml).not.toMatch(/^\s*stub:/m);
     expect(yml).not.toContain('4010');
-    expect(yml).not.toContain('ORACUL_');
     expect(yml).toContain('db-data:/var/lib/postgresql');
     expect(yml).toMatch(/^volumes:\s*\n\s+db-data:/m);
     expect(yml).not.toContain('db-e2e-data');
+    // FR-65 (decision 2026-10-08): the real backend sets exactly these two ORACUL_ variables, no stub / base-URL / other one
+    const lines = yml.split('\n');
+    const start = lines.findIndex((l) => /^  backend:\s*$/.test(l));
+    expect(start, 'service backend exists').toBeGreaterThanOrEqual(0);
+    let end = lines.findIndex((l, i) => i > start && /^ {0,2}\S/.test(l));
+    if (end < 0) end = lines.length;
+    const vars = lines
+      .slice(start, end)
+      .map((l) => /^\s+(ORACUL_[A-Z0-9_]+):\s*"?([^"\s#]+)"?\s*(?:#.*)?$/.exec(l))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => [m[1], m[2]]);
+    expect(vars, 'no ORACUL_ variable is set twice').toHaveLength(2);
+    expect(Object.fromEntries(vars)).toEqual({ ORACUL_RUN_TIMEOUT: 'PT10M', ORACUL_OPENAI_STREAM_TIMEOUT: 'PT5M' });
+    const everywhere = [...yml.matchAll(/\bORACUL_[A-Z0-9_]+(?=\s*:)/g)].map((m) => m[0]).sort();
+    expect(everywhere, 'no other ORACUL_ variable in any service').toEqual(['ORACUL_OPENAI_STREAM_TIMEOUT', 'ORACUL_RUN_TIMEOUT']);
   });
 
   test('docker-compose.e2e.yml adds the stub, every backend override and its own database volume', () => {

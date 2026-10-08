@@ -141,6 +141,16 @@ final class StoryHarness {
         return (String) constant("StoryWritingPrompt", "INSTRUCTIONS");
     }
 
+    /** StoryWritingPrompt.STORY_WRITER (post-release correction 2026-10-08). */
+    static String storyWriter() {
+        return (String) constant("StoryWritingPrompt", "STORY_WRITER");
+    }
+
+    /** StoryWritingPrompt.instructions(style) = INSTRUCTIONS + "\n" + styleSection(style). */
+    static String instructions(Object style) {
+        return (String) call("StoryWritingPrompt", "instructions", style);
+    }
+
     static final String STYLE_PKG = "com.oracul.app.style.";
 
     static Class<?> styleType(String name) {

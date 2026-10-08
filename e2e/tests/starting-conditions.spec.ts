@@ -4,7 +4,8 @@ const STUB = 'http://localhost:4010';
 const MARKER_START = '<<<ORACUL_UNTRUSTED_DATA name="';
 const MARKER_END = '<<<END_ORACUL_UNTRUSTED_DATA>>>';
 const STARTING_START = 'You are the scenario reasoning component of ORACUL. You are NOT a researcher and you do NOT summarise news.\n';
-const STORY_START = 'You are the scenario reasoning component of ORACUL.\nYou are NOT a researcher.';
+// @trace FR-65 (post-release correction 2026-10-08): the story-writer block replaces the Closed Evidence Mode block
+const STORY_START = 'You are the story writer of ORACUL.\n';
 const PRINCIPLES = [
   'starting conditions',
   'direction, intensity and magnitude',

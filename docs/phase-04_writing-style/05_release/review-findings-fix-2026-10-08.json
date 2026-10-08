@@ -1,0 +1,82 @@
+{
+  "slice": "release-fix",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/result/StoryParser.java",
+      "line": 27,
+      "fr": "FR-65",
+      "problem": "The LABEL pattern `^ *(FACT|INFERENCE|SPECULATION|FUTURE EVENT)( —|:)` matches the spec table exactly, but it misses the label forms a real model is most likely to produce now that the Closed Evidence Mode block is gone. (a) `FUTURE_EVENT — ` / `FUTURE_EVENT: ` with an underscore. This is the exact `informationClass` enum value the model reads on every causalChain step of the structured-scenario block, which is now the only place in the request where these words appear apart from the prohibition line, so it is the most likely form to be copied. (b) An en dash, `FACT – ` (U+2013). This is common in model output and in Ukrainian typography. (c) A no-break space between label and dash, `FACT\\u00A0— `, or before the label (`^ *` only allows ASCII spaces). (d) In `uk` stories, translated labels such as `ФАКТ — `, `ПРИПУЩЕННЯ — `, `СПЕКУЛЯЦІЯ — `, `ВИСНОВОК — `, `МАЙБУТНЯ ПОДІЯ — `. Every one of these passes validation, so the story is stored and served with the analytical labelling this correction was meant to stop. The parser is the only backstop if the new instructions do not fully steer the model. No legitimate prose starts a line with an uppercase information-class word followed by a dash or colon, so widening the pattern does not reject real stories.",
+      "fix": "Change the spec table first (the code follows it to the letter). Then use, for example, `^[ \\u00A0]*(FACT|INFERENCE|SPECULATION|FUTURE[ _]EVENT)[ \\u00A0][—–]|^[ \\u00A0]*(FACT|INFERENCE|SPECULATION|FUTURE[ _]EVENT):` with MULTILINE. Optionally add the Ukrainian uppercase equivalents for uk runs. The spec-pinned valid look-alikes (`FACT—`, `FACT -`, `Fact:`, `FACTS — `, `FACTORY:`) stay valid. Error texts are unchanged.",
+      "status": "fixed",
+      "verification": "Round 2: fixed. StoryParser.LABEL (line 27-29) equals the spec rule in styled-story.md FR-65 Rules: `^[ \\u00A0]*(FACT|INFERENCE|SPECULATION|FUTURE EVENT|FUTURE_EVENT|ФАКТ|ВИСНОВОК|ПРИПУЩЕННЯ|МАЙБУТНЯ ПОДІЯ)[ \\u00A0]*[—–:]`, MULTILINE, case-sensitive. The no-break space is the Java escape `\\u00A0` inside the string literal (javac turns it into U+00A0, toolchain Java 25 so sources are UTF-8). The separators are real U+2014 / U+2013, the Cyrillic words are real Cyrillic code points (including U+0406 І in ПОДІЯ). NBSP survives normalisation (Java `\\s` and String.trim() do not touch U+00A0), so headline and body leads with NBSP are caught. No false positives on legitimate prose: the words are uppercase-only and must be followed (after optional spaces) directly by a dash or colon at a line start; the uk Official lead-ins are СИТУАЦІЯ. / НАСЛІДКИ. / ПЕРСПЕКТИВА. (period), the look-alikes FACTS / ФАКТИ / FACTORY / FUTURE-EVENT / FACT - stay valid, and no fixture or stub outside ST-FACT / ST-FACT-COLON matches."
+    },
+    {
+      "id": "R2",
+      "severity": "medium",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/result/StoryParserTest.java",
+      "line": 220,
+      "fr": "FR-65",
+      "problem": "Missing exhaustive test for the analysis-label area (label word × separator × leading whitespace). INVALID_LABELS lists only the spec's exact forms (word + ` —` or `:` + ASCII spaces). No case covers `FUTURE_EVENT`, an en dash, a no-break space or a translated (uk) label, so a pattern that is too narrow passes the suite (see R1).",
+      "fix": "Once R1 is decided in the spec, generate the invalid cases as the cross product {FACT, INFERENCE, SPECULATION, FUTURE EVENT, FUTURE_EVENT} × {` — `, ` – `, `\\u00A0— `, `: `} × {no indent, `  `, `\\u00A0`}. Test each in paragraph 1, paragraph 3 and the headline, and keep the existing valid look-alike list as the negative side.",
+      "status": "fixed",
+      "verification": "Round 2: fixed. StoryParserTest now has the spec's 9 × 3 × 4 × 4 × 3 = 1296-case cross product (word × separator × inner × lead × position, NBSP as \\u00A0, a count test), all-3-paragraphs tests with ASCII and NBSP leads, and the spec's valid look-alike list on headline and paragraphs 1 and 3; FACT— / FACT– / ФАКТ— moved from valid to invalid as the spec says."
+    },
+    {
+      "id": "R3",
+      "severity": "medium",
+      "kind": "defect",
+      "dimension": "spec-compliance",
+      "file": "docker-compose.yml",
+      "line": 25,
+      "fr": "NFR-2",
+      "problem": "`ORACUL_RUN_TIMEOUT: PT10M` and `ORACUL_OPENAI_STREAM_TIMEOUT: PT5M` change the shipped real-mode stack away from three specs. NFR-2 says 'A run completes or fails within 180 s'. FR-32 says 'Given a run exceeds 3 minutes … FAILED'. phase-01 generation-runs.md says 'stack timeout stays PT3M', and phase-02 chatgpt-inference.md gives stream-timeout as PT120S. The env names do bind (relaxed binding to `oracul.run.timeout` / `oracul.openai.stream-timeout`). The change is also safe for the E2E stack: no E2E test waits for a real RUN_TIMEOUT (run-failures.spec.ts mocks it), the stub never holds a stream open, the search budget (75 s) and stage budgets are fixed, and RunDeadlineIT / StreamTimeoutIT / EventRunGuardIT set their own properties. But the change was made at the user's request and is not recorded anywhere in the specs or the post-release correction, so the documented NFR-2 / FR-32 behaviour no longer matches the delivered stack.",
+      "fix": "Record the user's decision as a spec change: add one line to the post-release correction (or NFR-2 / FR-32) saying that the real-mode docker-compose.yml uses run timeout PT10M and stream timeout PT5M while the code defaults stay PT3M / PT120S. Optionally move both variables into a real-mode-only place so the E2E stack keeps the documented PT3M.",
+      "status": "fixed",
+      "verification": "Round 2: fixed. styled-story.md post-release correction item 6 records the user's decision (PT10M / PT5M for the running stack, code defaults PT3M / PT120S, supersedes phase-01 NFR-2 / FR-32 and phase-02 PT120S for the stack, tests keep their own timeouts, E2E stack inherits without waiting for a real timeout). contract-notes.md has the matching Configuration row and the docker-compose exception."
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/result/StoryParser.java",
+      "line": 29,
+      "fr": "FR-65",
+      "problem": "CITATION `\\[E[0-9]+` catches only square-bracket Evidence IDs. RULES line 8 also forbids `(E001)` and claim ids (`[F1]`, `[I2]`, `[P1]`), and fullwidth brackets `【E001】` (a GPT citation habit) are a further form, yet all of these pass. The spec deliberately pins `(E001)` and `[F1]` as valid, so this is a spec choice, not a code deviation. If the model switches from `[E001]` to `(E001)` after the correction retry, the citation reaches the user.",
+      "fix": "Spec decision: consider `[\\[(【]\\s*[EFIP][0-9]+` (uppercase only, so `[e001]` and `[Europe]` stay valid), and move `(E001)` / `[F1]` from the valid list to the invalid list.",
+      "status": "open"
+    },
+    {
+      "id": "R5",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/result/StoryWritingPrompt.java",
+      "line": 110,
+      "fr": "FR-65",
+      "problem": "Steering check. The instructions are now clean: no Closed Evidence Mode line apart from the untrusted-data sentence, no 'facts, inferences, speculations', explicit no-label / no-citation / no-mirroring lines, the style section last, and the grounding kept (only the scenario's events, dates, actors and causes; no current-world facts; untrusted-data line plus TRAILER). The remaining pull toward an analytical report is the input. The structured-scenario JSON still carries `factsUsed` / `inferences` / `speculations` arrays, claim ids `F1`/`I1`/`P1`, `evidenceIds: [\"E001\", …]` and `informationClass: \"FACT\" | … | \"FUTURE_EVENT\"` on every causal step. The official-briefing profile text adds 'intelligence summary' and 'factual … analytical report' (that is wanted for Official and is countered by the RULES). The spec requires the block to stay byte-identical, so this is only an observation.",
+      "fix": "None now. If the next real check still shows labels or IDs, build a story-only projection of the scenario (statements, futureEvent, causal order) without `evidenceIds`, `informationClass` and claim ids, as a spec change.",
+      "status": "open"
+    },
+    {
+      "id": "R6",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/result/StoryParser.java",
+      "line": 28,
+      "fr": "FR-65",
+      "problem": "Remaining whitespace forms the LABEL rule does not cover (the spec pins them this way, so not a code deviation): a no-break space inside the two-word labels (`FUTURE\\u00A0EVENT —`, `МАЙБУТНЯ\\u00A0ПОДІЯ —`), and other Unicode spaces as lead or inner (U+202F narrow no-break, U+2009 thin space), plus the fullwidth colon `：`. Also `СПЕКУЛЯЦІЯ —` is not a label word, although it is a plausible uk rendering of SPECULATION. All are unlikely forms; they would pass validation.",
+      "fix": "Optional spec decision: use `[ \\u00A0\\u2009\\u202F]` for lead, inner and the word gap of the two-word labels, add `：` and `СПЕКУЛЯЦІЯ`; extend the cross product accordingly.",
+      "status": "open"
+    }
+  ]
+}

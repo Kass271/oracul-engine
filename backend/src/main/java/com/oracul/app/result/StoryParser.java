@@ -24,6 +24,10 @@ public final class StoryParser {
         .build();
     private static final List<String> FIELDS = List.of("headline", "dateline", "futureDate", "body");
     private static final Pattern HTML = Pattern.compile("<[A-Za-z/!]");
+    private static final Pattern LABEL = Pattern.compile(
+        "^[ \u00A0]*(FACT|INFERENCE|SPECULATION|FUTURE EVENT|FUTURE_EVENT|ФАКТ|ВИСНОВОК|ПРИПУЩЕННЯ|МАЙБУТНЯ ПОДІЯ)"
+            + "[ \u00A0]*[—–:]", Pattern.MULTILINE);
+    private static final Pattern CITATION = Pattern.compile("\\[E[0-9]+");
     private static final Pattern WS = Pattern.compile("\\s+");
 
     private StoryParser() {
@@ -89,6 +93,18 @@ public final class StoryParser {
         }
         if (isMarkup(body)) {
             errors.add("body must be plain text");
+        }
+        if (LABEL.matcher(headline).find()) {
+            errors.add("headline must not start with FACT, INFERENCE, SPECULATION or FUTURE EVENT");
+        }
+        if (CITATION.matcher(headline).find()) {
+            errors.add("headline must not cite Evidence IDs");
+        }
+        if (LABEL.matcher(body).find()) {
+            errors.add("body must not label paragraphs FACT, INFERENCE, SPECULATION or FUTURE EVENT");
+        }
+        if (CITATION.matcher(body).find()) {
+            errors.add("body must not cite Evidence IDs");
         }
 
         String dateText = root.get("futureDate").asString();

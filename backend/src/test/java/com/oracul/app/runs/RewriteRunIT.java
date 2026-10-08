@@ -26,7 +26,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * run's accepted scenario and the rewrite's own style and language, writes only its own story and leaves the parent and the
  * scenario run untouched; the reads of a rewrite; the failures of stage 10.
  */
-// @trace FR-67
+// @trace FR-67, FR-65
 class RewriteRunIT extends AbstractRewriteIT {
 
     private static final String KAFKA = "Narrative — inspired by Franz Kafka";
@@ -97,7 +97,15 @@ class RewriteRunIT extends AbstractRewriteIT {
         assertThat(input).isNotEqualTo(parentInput);
         assertThat(withoutStyleSection(input)).isEqualTo(withoutStyleSection(parentInput));
         assertThat(scenarioBlock(input)).isEqualTo(scenarioBlock(parentInput));
-        assertThat(instructionsOf(newStoryRequests(story0).get(0))).isEqualTo(instructionsOf(sreq(1)));
+        // @trace FR-65: post-release correction 2026-10-08 - the instructions end with the rewrite's own section, so they
+        // differ from the parent's and are equal once that trailing section is removed
+        String rewriteInstructions = instructionsOf(newStoryRequests(story0).get(0));
+        String parentInstructions = instructionsOf(sreq(1));
+        assertThat(rewriteInstructions).isEqualTo(StoryFixtures.INSTRUCTIONS + "\n" + sectionOf("kafka", "uk"));
+        assertThat(parentInstructions).isEqualTo(StoryFixtures.INSTRUCTIONS + "\n" + sectionOf("official-briefing", "en"));
+        assertThat(rewriteInstructions).isNotEqualTo(parentInstructions);
+        assertThat(StoryFixtures.withoutTrailingSection(rewriteInstructions, sectionOf("kafka", "uk")))
+            .isEqualTo(StoryFixtures.withoutTrailingSection(parentInstructions, sectionOf("official-briefing", "en")));
         assertThat(input.lines().filter("WRITING STYLE"::equals).count()).isEqualTo(1);
 
         // the rows of the rewrite: its own story and STORY_WRITING model call only

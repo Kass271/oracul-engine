@@ -4,7 +4,7 @@
       "/opt/homebrew/Cellar/node@24/24.21.0/bin/node",
       "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/node_modules/.bin/playwright",
       "test",
-      "e2e/tests/story-rewrite.spec.ts"
+      "run-modes.spec.ts"
     ],
     "configFile": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/playwright.config.ts",
     "rootDir": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests",
@@ -90,35 +90,26 @@
   },
   "suites": [
     {
-      "title": "story-rewrite.spec.ts",
-      "file": "story-rewrite.spec.ts",
+      "title": "run-modes.spec.ts",
+      "file": "run-modes.spec.ts",
       "column": 0,
       "line": 0,
       "specs": [],
       "suites": [
         {
-          "title": "FR-67 rewrite the same future in another style or language",
-          "file": "story-rewrite.spec.ts",
-          "line": 111,
+          "title": "FR-42 Opt-in E2E stub with its own data: compose files and stack modes",
+          "file": "run-modes.spec.ts",
+          "line": 34,
           "column": 6,
           "specs": [
             {
-              "title": "FR-67 REWRITE AS… tells the same future again in Kafka / Ukrainian with only a story request",
+              "title": "docker-compose.override.yml is gone, so a plain compose up merges nothing",
               "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 240000,
-                  "annotations": [
-                    {
-                      "type": "serial",
-                      "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                        "line": 0,
-                        "column": 0
-                      }
-                    }
-                  ],
+                  "timeout": 30000,
+                  "annotations": [],
                   "expectedStatus": "passed",
                   "projectId": "chromium",
                   "projectName": "chromium",
@@ -127,50 +118,32 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 22931,
+                      "duration": 2,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-07T23:56:32.817Z",
-                      "annotations": [
-                        {
-                          "type": "serial",
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                            "line": 0,
-                            "column": 0
-                          }
-                        }
-                      ],
+                      "startTime": "2026-10-08T08:41:53.857Z",
+                      "annotations": [],
                       "attachments": []
                     }
                   ],
                   "status": "expected"
                 }
               ],
-              "id": "de3bf923e8a97feb67de-bbc283cf82dc4a1cc1a0",
-              "file": "story-rewrite.spec.ts",
-              "line": 112,
+              "id": "8def78245ef5dd2af890-75eef594c6062490207d",
+              "file": "run-modes.spec.ts",
+              "line": 35,
               "column": 3
             },
             {
-              "title": "FR-67 a rewrite of a rewrite tells the original scenario and disables its own menu item",
+              "title": "docker-compose.yml is the real stack: db, backend, frontend, db-data, no stub, and exactly the two ORACUL_ timeout variables on the backend",
               "ok": true,
               "tags": [],
               "tests": [
                 {
-                  "timeout": 240000,
-                  "annotations": [
-                    {
-                      "type": "serial",
-                      "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                        "line": 0,
-                        "column": 0
-                      }
-                    }
-                  ],
+                  "timeout": 30000,
+                  "annotations": [],
                   "expectedStatus": "passed",
                   "projectId": "chromium",
                   "projectName": "chromium",
@@ -179,187 +152,684 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 25305,
+                      "duration": 2,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-10-07T23:56:55.961Z",
-                      "annotations": [
-                        {
-                          "type": "serial",
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                            "line": 0,
-                            "column": 0
-                          }
-                        }
-                      ],
+                      "startTime": "2026-10-08T08:41:53.874Z",
+                      "annotations": [],
                       "attachments": []
                     }
                   ],
                   "status": "expected"
                 }
               ],
-              "id": "de3bf923e8a97feb67de-611a385a323e5ced9102",
-              "file": "story-rewrite.spec.ts",
+              "id": "8def78245ef5dd2af890-b3bde82dcdb4d4b869de",
+              "file": "run-modes.spec.ts",
+              "line": 40,
+              "column": 3
+            },
+            {
+              "title": "docker-compose.e2e.yml adds the stub, every backend override and its own database volume",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.882Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-78e224325d82652ea581",
+              "file": "run-modes.spec.ts",
+              "line": 66,
+              "column": 3
+            },
+            {
+              "title": "FR-49 docker-compose.e2e.yml sets no variable of the former news provider and none of its removed settings",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.888Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-bdec44c4248a06213bdf",
+              "file": "run-modes.spec.ts",
+              "line": 82,
+              "column": 3
+            },
+            {
+              "title": ".oracul/stack.json declares the e2e mode with the stub file and the run mode with the real stack only",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.894Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-18d4d6dfa67ec0676260",
+              "file": "run-modes.spec.ts",
+              "line": 95,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "FR-42 the stub enforces the documented OpenAI request shapes",
+          "file": "run-modes.spec.ts",
+          "line": 104,
+          "column": 6,
+          "specs": [
+            {
+              "title": "GET /oauth/authorize with a bare UUID as the host id answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 32,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.899Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-f803e1e1d5718e549d5c",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with an upper-case hex host id answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.938Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-46b5d6b16e0b22da88b6",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with the redirect path /auth/callback answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.949Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-7311f1100a45d61995cd",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with the redirect host localhost answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.961Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-01f3649d54588ecf60f1",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with a missing nonce answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.970Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-8bca5322b1fe7f2b80fb",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with client_id oaiapp_x with an agent_name_hint answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.986Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-cd0d11ab68e026afd55a",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with dynamic_agent_client without an agent_name_hint answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:53.995Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-bbfd16e75546068ca7cc",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with a missing resource answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.004Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-47d8855d5c9ae32db50d",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with code_challenge_method plain answers 400 invalid_authorize_request and no redirect",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.014Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-5e1b64f4af8835cfc924",
+              "file": "run-modes.spec.ts",
+              "line": 138,
+              "column": 5
+            },
+            {
+              "title": "GET /oauth/authorize with a fully valid request redirects to the loopback callback with a code",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.023Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-12bd54baf364ef37fc5a",
+              "file": "run-modes.spec.ts",
+              "line": 148,
+              "column": 3
+            },
+            {
+              "title": "GET /oauth/authorize accepts a registered oaiapp_ client id without an agent_name_hint",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.037Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-c952c054c29d919fbc04",
+              "file": "run-modes.spec.ts",
+              "line": 154,
+              "column": 3
+            },
+            {
+              "title": "POST /v1/responses without stream answers 400 and the body is still recorded",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.045Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-ff39fd5472da183a43b4",
+              "file": "run-modes.spec.ts",
+              "line": 171,
+              "column": 5
+            },
+            {
+              "title": "POST /v1/responses with stream:false answers 400 and the body is still recorded",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.057Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-63ad51596ad6cb8e55c2",
+              "file": "run-modes.spec.ts",
+              "line": 171,
+              "column": 5
+            },
+            {
+              "title": "POST /v1/responses without store answers 400 and the body is still recorded",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.068Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-ff3d828ce610373dbd4c",
+              "file": "run-modes.spec.ts",
+              "line": 171,
+              "column": 5
+            },
+            {
+              "title": "POST /v1/responses with store:true answers 400 and the body is still recorded",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.082Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-37b6e68ec21243c9dc03",
+              "file": "run-modes.spec.ts",
+              "line": 171,
+              "column": 5
+            }
+          ]
+        },
+        {
+          "title": "FR-42 real-mode isolation: the stack under test is wired to the stub",
+          "file": "run-modes.spec.ts",
+          "line": 185,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a sign-in through the UI reaches the stub and registers oaiapp_stub_client",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 760,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T08:41:54.092Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8def78245ef5dd2af890-19a2175428252f392f59",
+              "file": "run-modes.spec.ts",
               "line": 186,
-              "column": 3
-            },
-            {
-              "title": "FR-67 a run that is not COMPLETED cannot be rewritten",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 150000,
-                  "annotations": [
-                    {
-                      "type": "serial",
-                      "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                        "line": 0,
-                        "column": 0
-                      }
-                    }
-                  ],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 17277,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-07T23:57:21.272Z",
-                      "annotations": [
-                        {
-                          "type": "serial",
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                            "line": 0,
-                            "column": 0
-                          }
-                        }
-                      ],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "de3bf923e8a97feb67de-b35c759ea5a484c2d2c3",
-              "file": "story-rewrite.spec.ts",
-              "line": 225,
-              "column": 3
-            },
-            {
-              "title": "FR-67 a failing rewrite shows the failure and leaves the original result alone",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 240000,
-                  "annotations": [
-                    {
-                      "type": "serial",
-                      "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                        "line": 0,
-                        "column": 0
-                      }
-                    }
-                  ],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 21121,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-07T23:57:38.554Z",
-                      "annotations": [
-                        {
-                          "type": "serial",
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                            "line": 0,
-                            "column": 0
-                          }
-                        }
-                      ],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "de3bf923e8a97feb67de-82ad2e9a4edf50480ecf",
-              "file": "story-rewrite.spec.ts",
-              "line": 243,
-              "column": 3
-            },
-            {
-              "title": "FR-67 a rewrite is refused while another run of the session is active",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 240000,
-                  "annotations": [
-                    {
-                      "type": "serial",
-                      "location": {
-                        "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                        "line": 0,
-                        "column": 0
-                      }
-                    }
-                  ],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 39507,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-07T23:57:59.681Z",
-                      "annotations": [
-                        {
-                          "type": "serial",
-                          "location": {
-                            "file": "/Users/frederiks/courses/agent_crash/oracul/apps/oracul-engine/e2e/tests/story-rewrite.spec.ts",
-                            "line": 0,
-                            "column": 0
-                          }
-                        }
-                      ],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "de3bf923e8a97feb67de-76c8fca6ae7ec3db3e79",
-              "file": "story-rewrite.spec.ts",
-              "line": 265,
               "column": 3
             }
           ]
@@ -369,9 +839,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-07T23:56:28.406Z",
-    "duration": 130864.40100000001,
-    "expected": 5,
+    "startTime": "2026-10-08T08:41:49.640Z",
+    "duration": 5415.036,
+    "expected": 21,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

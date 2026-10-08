@@ -3,7 +3,8 @@ import { evidence } from './evidence';
 
 const STUB = 'http://localhost:4010';
 const MARKER_START = '<<<ORACUL_UNTRUSTED_DATA name="';
-const STORY_INSTRUCTIONS_START = 'You are the scenario reasoning component of ORACUL.\nYou are NOT a researcher.';
+// @trace FR-65 (post-release correction 2026-10-08): the story-writer block replaces the Closed Evidence Mode block
+const STORY_INSTRUCTIONS_START = 'You are the story writer of ORACUL.\n';
 const GENERATION_INSTRUCTIONS_START =
   'You are the scenario reasoning component of ORACUL. You are NOT a researcher and you do NOT summarise news.\n';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -156,7 +157,7 @@ test.describe('FR-23 / FR-25 Future story and metadata', () => {
     await expect(page.getByTestId('result-view')).toBeVisible();
     await expect(page.getByTestId('story-headline')).toHaveText('Stub headline from the future');
 
-    // NFR-3: no tools anywhere, Closed Evidence Mode instructions, one STORY_WRITING request, last
+    // NFR-3: no tools anywhere, story-writer instructions, one STORY_WRITING request, last
     const requests = await recorded(page);
     for (const r of requests) {
       const keys = keysOf(r);
@@ -165,7 +166,7 @@ test.describe('FR-23 / FR-25 Future story and metadata', () => {
       expect(keys.filter((k) => k.startsWith('web_search'))).toEqual([]);
     }
     const purposes = requests.map(purposeOf);
-    // FR-58: SCENARIO_GENERATION starts with the starting-conditions block, STORY_WRITING keeps Closed Evidence Mode
+    // FR-58: SCENARIO_GENERATION starts with the starting-conditions block, STORY_WRITING starts with the story-writer block
     for (const [purpose, start] of [
       ['SCENARIO_GENERATION', GENERATION_INSTRUCTIONS_START],
       ['STORY_WRITING', STORY_INSTRUCTIONS_START],

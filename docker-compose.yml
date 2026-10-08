@@ -21,6 +21,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/app
       SPRING_DATASOURCE_USERNAME: app
       SPRING_DATASOURCE_PASSWORD: app
+      # real ChatGPT reasoning calls are slow: whole run ≤ 10 min, one streamed call ≤ 5 min
+      ORACUL_RUN_TIMEOUT: PT10M
+      ORACUL_OPENAI_STREAM_TIMEOUT: PT5M
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

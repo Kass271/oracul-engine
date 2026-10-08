@@ -72,7 +72,8 @@ failures of a rewrite use the existing `RunFailureCode`s (no new code).
 | Property | Default | Used by |
 |---|---|---|
 | `oracul.writing-styles.location` | `classpath:writing-styles.json` (`backend/src/main/resources/writing-styles.json`) | FR-62 — Spring resource location; tests point it at a test file (`classpath:…` or `file:…`) |
-Docker compose files, `.oracul/stack.json` (`e2e` = base + e2e file, `run` = base) and nginx routes do not change; the
+| `oracul.run.timeout` / `oracul.openai.stream-timeout` | code defaults unchanged PT3M / PT120S; `docker-compose.yml` sets `ORACUL_RUN_TIMEOUT: PT10M` and `ORACUL_OPENAI_STREAM_TIMEOUT: PT5M` | user decision 2026-10-08 (`styled-story.md` post-release correction item 6): configuration only, no API change. The running stack no longer has the 180 s budget of phase-01 NFR-2 / FR-32 or the PT120S stream timeout of phase-02; tests keep their own short timeouts |
+Docker compose files (except the two timeout variables above, post-release 2026-10-08), `.oracul/stack.json` (`e2e` = base + e2e file, `run` = base) and nginx routes do not change; the
 E2E stub only gains the per-style STORY_WRITING answers (`styled-story.md` "Stubs").
 
 ## Analyst decisions to confirm at spec approval

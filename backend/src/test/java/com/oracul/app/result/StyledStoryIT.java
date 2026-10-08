@@ -104,7 +104,8 @@ class StyledStoryIT extends AbstractStoryIT {
         assertThat(s(1)).contains("Future event date: " + d + "\n" + sectionOf(profileId, language) + "\nTASK\n"
             + "Write the story of the future event of the scenario in structured-scenario under the settings above.\n");
         assertThat(s(1).lines().filter("WRITING STYLE"::equals).count()).isEqualTo(1);
-        assertThat(instructionsOf(sreq(1))).isEqualTo(StoryFixtures.INSTRUCTIONS);
+        // post-release correction 2026-10-08: the instructions end with the run's own WRITING STYLE section
+        assertThat(instructionsOf(sreq(1))).isEqualTo(StoryFixtures.INSTRUCTIONS + "\n" + sectionOf(profileId, language));
         assertThat(storyModelCalls(r.id())).hasSize(1);
         assertThat((String) storyModelCalls(r.id()).get(0).get("body")).contains("Write the headline and the body in "
             + ("uk".equals(language) ? "Ukrainian." : "English."));
@@ -160,7 +161,13 @@ class StyledStoryIT extends AbstractStoryIT {
         assertThat(t2).contains(s2 + "\n");
         assertThat(t1).isNotEqualTo(t2);
         assertThat(t2.replace(s2 + "\n", "")).isEqualTo(t1.replace(s1 + "\n", ""));
-        assertThat(instructionsOf(storyOf(second).get(0))).isEqualTo(instructionsOf(storyOf(first).get(0)));
+        // post-release correction 2026-10-08: the instructions differ by style, equal once the trailing section is removed
+        String i1 = instructionsOf(storyOf(first).get(0));
+        String i2 = instructionsOf(storyOf(second).get(0));
+        assertThat(i1).isEqualTo(StoryFixtures.INSTRUCTIONS + "\n" + s1);
+        assertThat(i2).isEqualTo(StoryFixtures.INSTRUCTIONS + "\n" + s2);
+        assertThat(i2).isNotEqualTo(i1);
+        assertThat(StoryFixtures.withoutTrailingSection(i2, s2)).isEqualTo(StoryFixtures.withoutTrailingSection(i1, s1));
         // the structured-scenario block is the same accepted scenario
         assertThat(StubResponses.dataBlock(t2, "structured-scenario")).isEqualTo(StubResponses.dataBlock(t1, "structured-scenario"));
         assertThat(StubResponses.dataBlock(t2, "structured-scenario")).isNotEmpty();
@@ -207,6 +214,7 @@ class StyledStoryIT extends AbstractStoryIT {
         assertThat(s(2)).contains(section + "\nTASK\n");
         assertThat(s(2)).contains("Attempt: 2 | Reason: STORY_CORRECTION");
         assertThat(instructionsOf(sreq(2))).isEqualTo(instructionsOf(sreq(1)));
+        assertThat(instructionsOf(sreq(2))).isEqualTo(StoryFixtures.INSTRUCTIONS + "\n" + section);
         assertThat(StubResponses.dataBlock(s(2), "story-errors")).isEqualTo("body must have 150 to 900 words (found 149)");
     }
 

@@ -35,8 +35,15 @@ class StoryWritingIT extends AbstractStoryIT {
         assertThat(body.get("stream")).isEqualTo(true);
         assertThat(req.headers().get("accept")).isEqualTo("text/event-stream");
         assertThat(body.get("store")).isEqualTo(false);
-        assertThat(instructionsOf(req)).isEqualTo(StoryFixtures.INSTRUCTIONS);
-        assertThat(instructionsOf(req)).startsWith("You are the scenario reasoning component of ORACUL.\nYou are NOT a researcher.");
+        // @trace FR-65: post-release correction 2026-10-08 - the story-writer block, the rules and the run's WRITING STYLE section
+        var officialProfile = new com.oracul.app.style.WritingStyles("classpath:writing-styles.json",
+            new org.springframework.core.io.DefaultResourceLoader()).find("official-briefing").orElseThrow();
+        String officialSection = StoryFixtures.styleSection(true, officialProfile.label(), officialProfile.characteristics(),
+            officialProfile.instructions(), false);
+        assertThat(instructionsOf(req)).isEqualTo(StoryFixtures.INSTRUCTIONS + "\n" + officialSection);
+        assertThat(instructionsOf(req)).startsWith("You are the story writer of ORACUL.\n")
+            .doesNotContain("scenario reasoning component").doesNotContain("You must distinguish: FACT")
+            .doesNotContain("Every FACT must reference").doesNotContain("You are NOT a researcher");
         assertThat(body.get("text")).isEqualTo(jsonOf(StoryFixtures.TEXT_FORMAT_JSON));
         assertThat(s(1)).startsWith("ORACUL REQUEST STORY_WRITING\nSETTINGS\nAttempt: 1 | Reason: INITIAL\n"
             + "Realism: 8 | Darkness: 9 | Optimism: 2 | Horizon: 5 years\n"
@@ -64,10 +71,12 @@ class StoryWritingIT extends AbstractStoryIT {
         assertStoryCompleted(r.run());
         for (StubResponses.Request any : responses.requests) assertNoToolKeys(any);
         String closed = com.oracul.app.reasoning.ScenarioFixtures.CLOSED_EVIDENCE_MODE;
+        // @trace FR-65
         // @trace FR-58
         assertThat(instructionsOf(requests(GEN).get(0)))
             .startsWith(com.oracul.app.reasoning.ScenarioFixtures.STARTING_CONDITIONS + "\n");
-        assertThat(instructionsOf(sreq(1))).startsWith(closed);
+        assertThat(instructionsOf(sreq(1))).doesNotStartWith(closed).doesNotContain(closed)
+            .startsWith("You are the story writer of ORACUL.\n");
         String block = StubResponses.dataBlock(s(1), "structured-scenario");
         assertThat(com.oracul.app.reasoning.ReasoningHarness.comparable(block)).isEqualTo(scenarioOf(structuredRaw(r)));
     }
@@ -224,6 +233,52 @@ class StoryWritingIT extends AbstractStoryIT {
                 .andReturn().getResponse().getContentAsString();
             assertThat(json(conn).get("state")).isEqualTo("SESSION_EXPIRED");
         }
+    }
+
+    // ---- FR-65 post-release correction 2026-10-08: StoryParser rejects analysis labels and Evidence-ID citations ----
+
+    private static final String LABEL_ERROR = "body must not label paragraphs FACT, INFERENCE, SPECULATION or FUTURE EVENT";
+    private static final String CITATION_ERROR = "body must not cite Evidence IDs";
+
+    // @trace FR-65
+    @ParameterizedTest(name = "label on attempt 1 only: {0}")
+    @ValueSource(strings = {"ST-FACT", "ST-FACT-COLON"})
+    void aLabelledStoryOnAttemptOneGetsOneCorrectionWithTheLabelErrorAndAttemptTwoCompletes(String kind) throws Exception {
+        scriptStory(sfx(kind), sfx("ST-DEFAULT"));
+        Ran r = runV4(A);
+        assertStoryCompleted(r.run());
+        assertThat(requests(STORY)).hasSize(2);
+        assertThat(s(2)).contains("Attempt: 2 | Reason: STORY_CORRECTION");
+        assertThat(s(2)).contains("Your previous story was invalid. Fix the errors listed in story-errors and return the complete story again.");
+        assertThat(StubResponses.dataBlock(s(2), "story-errors")).isEqualTo(LABEL_ERROR);
+        assertThat(instructionsOf(sreq(2))).isEqualTo(instructionsOf(sreq(1)));
+        assertThat(map(result(r).get("story")).get("body")).isEqualTo(StoryFixtures.body(3));
+        assertThat(storyRows(r.id())).isEqualTo(1);
+        assertThat(storyModelCalls(r.id())).extracting(m -> m.get("attempt")).containsExactly(1, 2);
+    }
+
+    // @trace FR-65
+    @Test
+    void anEvidenceIdCitationOnAttemptOneIsNamedInTheCorrection() throws Exception {
+        scriptStory(sfx("ST-CITE"), sfx("ST-DEFAULT"));
+        Ran r = runV4(A);
+        assertStoryCompleted(r.run());
+        assertThat(requests(STORY)).hasSize(2);
+        assertThat(StubResponses.dataBlock(s(2), "story-errors")).isEqualTo(CITATION_ERROR);
+    }
+
+    // @trace FR-65
+    @ParameterizedTest(name = "label or citation twice: {0}")
+    @ValueSource(strings = {"ST-FACT", "ST-FACT-COLON", "ST-CITE"})
+    void aLabelOrCitationOnBothAttemptsFailsTheRunWithInvalidScenarioAndNoDateFallback(String kind) throws Exception {
+        scriptStory(sfx(kind), sfx(kind));
+        Ran r = runV4(A);
+        assertFailed(r.run(), "INVALID_SCENARIO", STORY_INVALID, "WRITING_STORY", 10);
+        assertThat(absent(r.run(), "headline")).isTrue();
+        assertThat(requests(STORY)).hasSize(2);
+        assertThat(storyRows(r.id())).isZero();
+        assertResultNotReady(getResult(r.sid(), r.id()));
+        assertThat(StubResponses.dataBlock(s(2), "story-errors")).isEqualTo("ST-CITE".equals(kind) ? CITATION_ERROR : LABEL_ERROR);
     }
 
     // #15 (NFR-2)

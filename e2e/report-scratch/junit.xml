@@ -1,34 +1,46 @@
-<testsuites id="" name="" tests="5" failures="0" skipped="0" errors="0" time="130.86440100000002">
-<testsuite name="story-rewrite.spec.ts" timestamp="2026-10-07T23:56:32.607Z" hostname="chromium" tests="5" failures="0" skipped="0" time="126.141" errors="0">
-<testcase name="FR-67 rewrite the same future in another style or language › FR-67 REWRITE AS… tells the same future again in Kafka / Ukrainian with only a story request" classname="story-rewrite.spec.ts" time="22.931">
-<properties>
-<property name="serial" value="">
-</property>
-</properties>
+<testsuites id="" name="" tests="21" failures="0" skipped="0" errors="0" time="5.415036">
+<testsuite name="run-modes.spec.ts" timestamp="2026-10-08T08:41:53.642Z" hostname="chromium" tests="21" failures="0" skipped="0" time="0.893" errors="0">
+<testcase name="FR-42 Opt-in E2E stub with its own data: compose files and stack modes › docker-compose.override.yml is gone, so a plain compose up merges nothing" classname="run-modes.spec.ts" time="0.002">
 </testcase>
-<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a rewrite of a rewrite tells the original scenario and disables its own menu item" classname="story-rewrite.spec.ts" time="25.305">
-<properties>
-<property name="serial" value="">
-</property>
-</properties>
+<testcase name="FR-42 Opt-in E2E stub with its own data: compose files and stack modes › docker-compose.yml is the real stack: db, backend, frontend, db-data, no stub, and exactly the two ORACUL_ timeout variables on the backend" classname="run-modes.spec.ts" time="0.002">
 </testcase>
-<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a run that is not COMPLETED cannot be rewritten" classname="story-rewrite.spec.ts" time="17.277">
-<properties>
-<property name="serial" value="">
-</property>
-</properties>
+<testcase name="FR-42 Opt-in E2E stub with its own data: compose files and stack modes › docker-compose.e2e.yml adds the stub, every backend override and its own database volume" classname="run-modes.spec.ts" time="0.003">
 </testcase>
-<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a failing rewrite shows the failure and leaves the original result alone" classname="story-rewrite.spec.ts" time="21.121">
-<properties>
-<property name="serial" value="">
-</property>
-</properties>
+<testcase name="FR-42 Opt-in E2E stub with its own data: compose files and stack modes › FR-49 docker-compose.e2e.yml sets no variable of the former news provider and none of its removed settings" classname="run-modes.spec.ts" time="0.002">
 </testcase>
-<testcase name="FR-67 rewrite the same future in another style or language › FR-67 a rewrite is refused while another run of the session is active" classname="story-rewrite.spec.ts" time="39.507">
-<properties>
-<property name="serial" value="">
-</property>
-</properties>
+<testcase name="FR-42 Opt-in E2E stub with its own data: compose files and stack modes › .oracul/stack.json declares the e2e mode with the stub file and the run mode with the real stack only" classname="run-modes.spec.ts" time="0.001">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with a bare UUID as the host id answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.032">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with an upper-case hex host id answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.006">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with the redirect path /auth/callback answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.005">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with the redirect host localhost answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.005">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with a missing nonce answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.012">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with client_id oaiapp_x with an agent_name_hint answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.005">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with dynamic_agent_client without an agent_name_hint answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.005">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with a missing resource answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.006">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with code_challenge_method plain answers 400 invalid_authorize_request and no redirect" classname="run-modes.spec.ts" time="0.005">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize with a fully valid request redirects to the loopback callback with a code" classname="run-modes.spec.ts" time="0.01">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › GET /oauth/authorize accepts a registered oaiapp_ client id without an agent_name_hint" classname="run-modes.spec.ts" time="0.004">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › POST /v1/responses without stream answers 400 and the body is still recorded" classname="run-modes.spec.ts" time="0.008">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › POST /v1/responses with stream:false answers 400 and the body is still recorded" classname="run-modes.spec.ts" time="0.007">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › POST /v1/responses without store answers 400 and the body is still recorded" classname="run-modes.spec.ts" time="0.007">
+</testcase>
+<testcase name="FR-42 the stub enforces the documented OpenAI request shapes › POST /v1/responses with store:true answers 400 and the body is still recorded" classname="run-modes.spec.ts" time="0.006">
+</testcase>
+<testcase name="FR-42 real-mode isolation: the stack under test is wired to the stub › a sign-in through the UI reaches the stub and registers oaiapp_stub_client" classname="run-modes.spec.ts" time="0.76">
 </testcase>
 </testsuite>
 </testsuites>

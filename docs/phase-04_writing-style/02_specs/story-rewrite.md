@@ -71,7 +71,8 @@ profile no longer in the file → the profileId. `languageLabel` = `English` for
   - The rewrite's attempt-1 STORY_WRITING input text equals the parent's attempt-1 STORY_WRITING input text (parent
     created in this phase, so its request has a WRITING STYLE section) except inside the WRITING STYLE section: the
     `structured-scenario` block is byte-identical, the SETTINGS lines (Attempt … Future event date), TASK lines and
-    trailer are identical, and `instructions` is identical.
+    trailer are identical, and `instructions` is equal to the parent's after the trailing WRITING STYLE section is
+    removed (each ends with its own run's `styleSection`; `styled-story.md` post-release correction 2026-10-08).
   - Rewrite of a rewrite: `scenarioRunId` = the parent's `scenarioRunId` (the original STANDARD / ALTERNATIVE run);
     its STORY_WRITING uses that run's scenario. A rewrite of an ALTERNATIVE run tells the alternative's own scenario.
   - Any style / language combination is accepted by the API, also the parent's own; the UI disables the menu item of
@@ -244,7 +245,9 @@ E2E (new spec, e.g. `e2e/tests/story-rewrite.spec.ts`, desktop, stubbed stack, r
    by Franz Kafka`; the panel shows NARRATIVE / kafka / `Ukrainian`. Stub deltas: exactly 1 new `responses` request,
    whose input contains `ORACUL REQUEST STORY_WRITING`; 0 new `rss`, `google-page`, `decode`, `article` requests.
    The new request's input equals R1's attempt-1 STORY_WRITING input except the lines from `WRITING STYLE` up to the
-   line before `TASK`; its `structured-scenario` block is byte-identical; `instructions` identical.
+   line before `TASK`; its `structured-scenario` block is byte-identical; `instructions` equal R1's attempt-1
+   `instructions` except the trailing WRITING STYLE section (from the line `WRITING STYLE` to the end), which is the
+   Kafka / Ukrainian section (`styled-story.md` post-release correction 2026-10-08).
    `GET /api/runs/<R2>`: kind REWRITE, `parentRunId` R1, `scenarioRunId` R1, `evidencePackId` and `counts` = R1's.
    `GET /api/runs/<R1>` and `/api/runs/<R1>/result` unchanged (deep-equal to before).
 2. Rewrite of a rewrite: on R2 choose `rewrite-option-poe-en` → R3: `parentRunId` R2, `scenarioRunId` R1, exactly 1
