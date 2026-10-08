@@ -36,9 +36,12 @@ public class FutureResultService {
     private final FutureStoryRepository stories;
     private final ScenarioAttemptRepository attempts;
     private final EvidencePackRepository packs;
+    private final com.oracul.app.style.StyleLabels styleLabels;
 
     FutureResultService(GenerationRunRepository runs, FutureStoryRepository stories,
-                        ScenarioAttemptRepository attempts, EvidencePackRepository packs) {
+                        ScenarioAttemptRepository attempts, EvidencePackRepository packs,
+                        com.oracul.app.style.StyleLabels styleLabels) {
+        this.styleLabels = styleLabels;
         this.runs = runs;
         this.stories = stories;
         this.attempts = attempts;
@@ -105,6 +108,12 @@ public class FutureResultService {
             : new ArrayList<>(run.searchPlan().getIntents());
         var metadata = ScenarioMetadataMapper.map(run.configuration(), run.counts());
         metadata.setModel(run.model());
+        metadata.setStyleLabel(styleLabels.style(run.configuration()));
+        metadata.setLanguageLabel(styleLabels.language(run.configuration()));
+        if (run.kind() == com.oracul.app.api.model.RunKind.REWRITE && run.parentRunId() != null) {
+            runs.find(run.parentRunId(), sessionId).ifPresent(parent -> metadata.setRewrittenFrom(
+                new com.oracul.app.api.model.RewriteOrigin(parent.id(), parent.headline())));
+        }
         FutureResult result = new FutureResult(run.id(), run.generationId(), new ArrayList<>(LABELS), story,
             metadata,
             new ArrayList<>(scenario.getCausalChain()), sources, new ResearchExplanation(intents, run.counts()),

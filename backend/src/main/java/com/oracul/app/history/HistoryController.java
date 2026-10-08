@@ -18,7 +18,11 @@ public class HistoryController implements HistoryApi {
     private final ObjectProvider<CurrentSession> session;
     private final ObjectProvider<GenerationRunRepository> runs;
 
-    HistoryController(ObjectProvider<CurrentSession> session, ObjectProvider<GenerationRunRepository> runs) {
+    private final ObjectProvider<com.oracul.app.style.StyleLabels> labels;
+
+    HistoryController(ObjectProvider<CurrentSession> session, ObjectProvider<GenerationRunRepository> runs,
+                      ObjectProvider<com.oracul.app.style.StyleLabels> labels) {
+        this.labels = labels;
         this.session = session;
         this.runs = runs;
     }
@@ -29,7 +33,8 @@ public class HistoryController implements HistoryApi {
             .map(r -> new RecentRunSummary(r.id(), r.generationId(), r.kind(), r.createdAt(),
                 r.configuration()).status(r.status())
                 .headline(r.status() == com.oracul.app.api.model.RunStatus.COMPLETED ? r.headline() : null)
-                .completedAt(r.completedAt()))
+                .completedAt(r.completedAt())
+                .styleLabel(labels.getObject().style(r.configuration())).languageLabel(labels.getObject().language(r.configuration())))
             .toList();
         return ResponseEntity.ok(new RecentRunList(items));
     }

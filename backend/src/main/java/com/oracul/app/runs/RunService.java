@@ -75,7 +75,7 @@ public class RunService {
         for (int attempt = 0; attempt < ID_ATTEMPTS; attempt++) {
             try {
                 tx.executeWithoutResult(status -> {
-                    if (!runs.isCompletedWithScenario(parentId)) {
+                    if (!runs.isEligibleForAlternative(parentId)) {
                         throw new ApiException(HttpStatus.CONFLICT, "RUN_NOT_COMPLETED",
                             "Only a completed future can have an alternative");
                     }

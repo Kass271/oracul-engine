@@ -306,13 +306,105 @@ E2E (new spec, e.g. `e2e/tests/story-rewrite.spec.ts`, desktop, stubbed stack, r
 - Errors: none new — the metadata comes with `getFutureResult` (404 `RUN_NOT_FOUND` / 409 `RESULT_NOT_READY` as
   FR-23), the list with `listRecentRuns` (500 `INTERNAL_ERROR`; UI "Recent futures are unavailable"); ALTERNATIVE /
   quick regeneration errors unchanged (FR-29 / FR-30).
-- Ranges & invariants: `styleLabel` classes — each of the 9 shipped profiles → its label; configuration without
-  `writingStyle` → `Official / Briefing (legacy)`; a profileId missing from the file → the id; `languageLabel` classes
-  `en` → English, `uk` → Ukrainian, absent → English; `meta-style` / `meta-language` texts are exactly `Style: ` /
-  `Language: ` + the API value; for every real run `metadata.styleLabel` = the same run's `RecentRunSummary.styleLabel`;
-  `rewrittenFrom` present ⇔ kind REWRITE, with `runId` = `parentRunId` and `headline` = the parent's `getRun.headline`;
-  for each quick action and ALTERNATIVE FUTURE on a run with style S and language L (tested with Poe / uk) the new run's
-  `output.writingStyle` and `output.language` deep-equal S and L; texts rendered by interpolation (never `innerHTML`).
+#### Slice 05_style-labels — precise delta (step 4a)
+Scope of the slice: FR-68 only. No new operation, schema, property, route, Flyway migration or stub change; the
+contract fields (`ScenarioMetadata.styleLabel` / `languageLabel` / `rewrittenFrom`, `RewriteOrigin`,
+`RecentRunSummary.styleLabel` / `languageLabel`) exist since step 2 and stay optional in the schema (always sent from
+now on, so frontend fixtures without them stay valid). `.oracul/stack.json` and the compose files are unchanged.
+
+Backend — label rules (one helper, e.g. `com.oracul.app.style.StyleLabels` using `WritingStyles`; tests address it
+over HTTP only, through `getFutureResult` and `listRecentRuns`; `ScenarioMetadataMapper.map(ScenarioConfiguration,
+ResearchCounts)` keeps its signature — `StoryHarness` calls it by reflection — and the labels are set after it):
+| stored `configuration.output` | `styleLabel` | `languageLabel` |
+|---|---|---|
+| no `writingStyle` key, or `writingStyle` JSON `null` | `Official / Briefing (legacy)` | by `language` |
+| `writingStyle.profileId` = a profile of the loaded style file (any of the 9 shipped) | that profile's `label`, byte-identical (e.g. `{"mode":"OFFICIAL","profileId":"official-briefing"}` → `Official / Briefing`, not the legacy label; `kafka` → `Narrative — inspired by Franz Kafka`) | by `language` |
+| `writingStyle.profileId` not in the loaded file (e.g. a stored `{"mode":"NARRATIVE","profileId":"tolstoy"}`) | the profileId, `tolstoy` | by `language` |
+| `language` `"uk"` | | `Ukrainian` |
+| `language` `"en"`, no `language` key, or `null` | | `English` |
+The label is chosen by `profileId` alone (the stored mode is not re-checked). Tests produce the classes with a real
+stub run and then `update generation_run set configuration = cast(? as jsonb) where id = ?` (no other column), or with
+an API `startRun` whose `output` has no `writingStyle` / `language` (legacy class).
+
+Backend — `GET /api/runs/{runId}/result` (`getFutureResult`), 200 only (404 / 409 unchanged):
+- `metadata.styleLabel` and `metadata.languageLabel` are present for every run kind (STANDARD, ALTERNATIVE, REWRITE),
+  computed from the run's own stored configuration (a REWRITE uses its own, never the scenario run's).
+- `metadata.rewrittenFrom` = `{"runId": <parentRunId>, "headline": <the parent row's stored headline>}` exactly (no
+  other key) iff `kind` is REWRITE; absent (key not in the JSON) for STANDARD and ALTERNATIVE. A rewrite of a rewrite
+  names the direct parent (the parent rewrite and its headline), not the scenario run.
+- Every other `metadata` key (`configuration`, `horizonLabel`, `wildcards`, `counts`, `model`) is unchanged.
+
+Backend — `GET /api/runs` (`listRecentRuns`): every item (COMPLETED and STOPPED, every kind) carries `styleLabel` and
+`languageLabel` by the same rules from the item's `configuration`; selection, order, limit 20 and every other key are
+unchanged; for a COMPLETED run `items[i].styleLabel` / `languageLabel` equal `getFutureResult(id).metadata`'s.
+
+Backend — `POST /api/runs/{runId}/alternatives` (`startAlternativeRun`) on a REWRITE parent:
+- Check order and bodies unchanged (404 `RUN_NOT_FOUND` → 401 / 403 / 503 ChatGPT → 409 `RUN_NOT_COMPLETED` "Only a
+  completed future can have an alternative" → 409 `RUN_ALREADY_ACTIVE` → 500 `INTERNAL_ERROR`); nothing stored on an
+  error.
+- Eligibility: a STANDARD / ALTERNATIVE parent as before (COMPLETED, `final_attempt` and `evidence_pack_id` set — the
+  seeded `COMPLETED-no-final-attempt` STANDARD row of `AlternativeRunIT` stays 409); a REWRITE parent is eligible
+  when it is COMPLETED, has its own `future_story` row and an `evidence_pack_id`. A REWRITE parent QUEUED, RUNNING,
+  FAILED, STOPPED, or COMPLETED without a `future_story` row → 409 `RUN_NOT_COMPLETED` "Only a completed future can
+  have an alternative" (one case each).
+- 202 `GenerationRun`: `kind` ALTERNATIVE, `parentRunId` = the rewrite's id, no `scenarioRunId` key, status QUEUED,
+  stageIndex 0, `configuration` deep-equal to the rewrite's stored configuration (so its `output.writingStyle` and
+  `output.language`), `evidencePackId` / `counts` / `evidenceNote` / `suggestedRealism` deep-equal to the rewrite's
+  (= the scenario run's pack).
+- Pipeline: the existing ALTERNATIVE path (no search; QUEUED → EXPLORING_FUTURES …). Futures to avoid (the
+  `futures-to-avoid` data block of its SCENARIO_GENERATION input): Future 1 = the accepted cleaned scenario of the
+  rewrite's `scenarioRunId` (`Future 1: <its futureEvent.title>`), then the other eligible runs (same session, same
+  pack, COMPLETED with `final_attempt`, created before the alternative) except that run, in the existing order and
+  limit (at most 10 in total). A REWRITE run is never listed (no `final_attempt`). The distinctness check "same
+  causal steps as future 1" compares with that scenario. A STANDARD / ALTERNATIVE parent is handled exactly as
+  before (effective Future 1 run = `coalesce(parent.scenario_run_id, parent.id)`).
+- Its STORY_WRITING request carries the rewrite's style and language (`styled-story.md` FR-65), e.g. a Poe / uk
+  rewrite → stub headline `Заголовок із майбутнього — Narrative — inspired by Edgar Allan Poe`; its result metadata
+  has `styleLabel` `Narrative — inspired by Edgar Allan Poe`, `languageLabel` `Ukrainian`, no `rewrittenFrom`.
+- The rewrite row and the scenario run's rows (`generation_run`, `future_story`, `scenario_attempt`) are unchanged.
+
+Backend / frontend — quick regeneration, Try again, LOWER REALISM: no code change expected (the panel holds the opened
+run's configuration since slice 02 / 04); proven by the E2E below.
+
+Frontend — route `/futures/:runId`, `ScenarioMetadataComponent` (`src/app/result/scenario-metadata.ts`):
+- Settings `mat-chip-set`, in this order: `meta-realism`, `meta-darkness`, `meta-optimism`, `meta-horizon`, then
+  `mat-chip` `meta-style` with text exactly `Style: <metadata.styleLabel>` (rendered iff `styleLabel` present), then
+  `mat-chip` `meta-language` `Language: <metadata.languageLabel>` (iff `languageLabel` present), then `meta-model`
+  (unchanged, still the last chip). All present → ids `meta-realism, meta-darkness, meta-optimism, meta-horizon,
+  meta-style, meta-language, meta-model`; without the two labels → exactly the earlier list.
+- `p` `meta-rewritten-from` directly after the Settings chip set (before `meta-wildcards`), text exactly
+  `Rewritten from: <metadata.rewrittenFrom.headline>`, rendered iff `rewrittenFrom` present. Not a link.
+- Values only from the result (`metadata`), never from the panel, `ScenarioStore.writingStyles()` or the run's
+  configuration; interpolation only (a headline `<b>x</b>` shows literally, no `b` element).
+
+Frontend — `RecentFuturesComponent` (`src/app/history/recent-futures.ts`): in each entry, after
+`recent-future-settings-<runId>`, a `span` `recent-future-style-<runId>` with text exactly `<styleLabel> · <languageLabel>`
+(U+00B7 with one space each side), rendered iff both fields are present; for COMPLETED and STOPPED entries alike. The
+entry button's test id `recent-future-<runId>` and the other spans are unchanged.
+
+E2E (new spec, e.g. `e2e/tests/style-labels.spec.ts`, desktop, stubbed stack, reset stub before each test):
+1. GENERATE with the defaults → R1: `meta-style` "Style: Official / Briefing", `meta-language` "Language: English",
+   no `meta-rewritten-from`. `rewrite-option-kafka-uk` → R2: `meta-style` "Style: Narrative — inspired by Franz
+   Kafka", `meta-language` "Language: Ukrainian", `meta-rewritten-from` "Rewritten from: Stub headline from the
+   future" (= `GET /api/runs/<R1>`.headline); `GET /api/runs/<R2>/result` metadata `rewrittenFrom` = `{runId: R1,
+   headline: …}`.
+2. Legacy: `page.request.post('/api/runs')` with a configuration whose `output` is `{"story":true,"illustration":false}`
+   → COMPLETED run L; open `/futures/<L>`: `meta-style` "Style: Official / Briefing (legacy)", `meta-language`
+   "Language: English".
+3. Recent futures (after 1 and 2): `recent-future-style-<R2>` "Narrative — inspired by Franz Kafka · Ukrainian",
+   `recent-future-style-<R1>` "Official / Briefing · English", `recent-future-style-<L>` "Official / Briefing (legacy) ·
+   English"; each equals `GET /api/runs` item `styleLabel + " · " + languageLabel`.
+4. Poe / uk keeps its telling: R1 → `rewrite-option-poe-uk` → P (REWRITE). Click DARKER: the `POST /api/runs` body has
+   `output.writingStyle` `{"mode":"NARRATIVE","profileId":"poe"}` and `output.language` `uk`; the new run's result
+   shows "Style: Narrative — inspired by Edgar Allan Poe" / "Language: Ukrainian". Back on P (`/futures/<P>`), click
+   ALTERNATIVE FUTURE → A: `GET /api/runs/<A>` kind ALTERNATIVE, `parentRunId` P, configuration `output.writingStyle` /
+   `language` = Poe / uk; the new SCENARIO_GENERATION request's `futures-to-avoid` block has `Future 1: <R1's
+   structured-scenario futureEvent.title>`; A's `story-headline` `Заголовок із майбутнього — Narrative — inspired by
+   Edgar Allan Poe`; metadata Poe / Ukrainian, no `meta-rewritten-from`.
+
+- Changes earlier behaviour: `startAlternativeRun` on a COMPLETED REWRITE parent with a story answers 409 `RUN_NOT_COMPLETED` → 202 ALTERNATIVE with the rewrite's configuration and pack, Future 1 = the scenario of its `scenarioRunId` (grep `alternatives` / "Only a completed future can have an alternative": `AlternativeRunIT` and `StopRunIT` 409 cases seed STANDARD rows or a stopped run, `quick-actions.spec.ts` mocks the 409 answer, no backend, frontend or E2E test starts an alternative on a REWRITE; ALTERNATIVE of STANDARD / ALTERNATIVE parents and `AvoidedFutures` order unchanged) (tests: none)
+- Changes earlier behaviour: `getFutureResult.metadata` gains `styleLabel` / `languageLabel` (and `rewrittenFrom` for REWRITE), `listRecentRuns` items gain `styleLabel` / `languageLabel`, the metadata card gains `meta-style` / `meta-language` / `meta-rewritten-from` and Recent futures entries gain `recent-future-style-<id>` (grep: `FutureResultIT` asserts the exact key set of the result's top level only and `metadata` keys one by one; `RecentRunsIT` / `RewriteRunIT` check items field by field; `ScenarioMetadataMapperTest` uses the unchanged 2-arg mapper; frontend fixtures in `scenario-metadata.spec.ts`, `meta-model.spec.ts`, `future-result.spec.ts`, `recent-futures.spec.ts` carry no labels, so the new elements are not rendered there and `meta-model.spec.ts`'s exact chip list holds; `recent-futures.spec.ts` and E2E `recent-futures.spec.ts` / `quick-regeneration.spec.ts` select entries by `^recent-future-[0-9a-f-]{36}$`, which `recent-future-style-<id>` does not match; E2E `future-story.spec.ts` addresses chips by test id) (tests: none)
+- Ranges & invariants: `styleLabel` classes (parameterized over `getFutureResult` and `listRecentRuns`, one case each) — each of the 9 shipped profiles in its own mode → its label (9 cases); no `writingStyle` key and `writingStyle` `null` → `Official / Briefing (legacy)`; `{OFFICIAL, official-briefing}` → `Official / Briefing`; a pattern-valid profileId missing from the file (`tolstoy`) → `tolstoy`; `languageLabel` classes `en` → English, `uk` → Ukrainian, no key → English, `null` → English; the cross product of the 3 style kinds (shipped, legacy, missing) × 3 language kinds (en, uk, absent) gives the two labels independently (9 cases); `meta-style` / `meta-language` / `meta-rewritten-from` / `recent-future-style-*` texts are exactly `Style: ` / `Language: ` / `Rewritten from: ` + the API value and `<styleLabel> · <languageLabel>` (frontend parameterized over the 9 shipped labels, the legacy label, `tolstoy`, both languages and a markup headline), and each element is absent when its field is absent. Invariants: for every listed COMPLETED run `RecentRunSummary.styleLabel` / `languageLabel` = `metadata.styleLabel` / `languageLabel` of the same run; `rewrittenFrom` present ⇔ kind REWRITE, with `runId` = `parentRunId` and `headline` = `getRun(parentRunId).headline`, for chains of length 1 and 2 (rewrite of a rewrite names the parent rewrite); a REWRITE's labels come from its own configuration (rewrite kafka/uk of an official/en run → Kafka / Ukrainian, the parent's stay Official / Briefing / English); for each quick action (MORE REALISTIC, DARKER, MORE OPTIMISTIC, MORE EXTREME) and ALTERNATIVE FUTURE on a Poe / uk run the new run's `output.writingStyle` and `output.language` deep-equal `{NARRATIVE, poe}` / `uk`; ALTERNATIVE on a REWRITE: parent eligibility classes REWRITE COMPLETED with story → 202, REWRITE QUEUED / RUNNING / FAILED / STOPPED / COMPLETED without story → 409 (5 cases); its Future 1 is the scenario run's title for a rewrite of a STANDARD run, of an ALTERNATIVE run and for a rewrite of a rewrite (3 cases), no avoided future is a REWRITE run, the avoided list has no duplicate run and at most 10 entries; the rewrite and scenario run rows are unchanged after the alternative.
 
 ## API (must match api/openapi.yaml)
 | Method | Path | operationId | Request | Responses |

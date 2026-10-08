@@ -51,6 +51,9 @@ const FALLBACK_LABELS: Record<string, string> = {
                       <span class="headline" [attr.data-testid]="'recent-future-headline-' + it.id">{{ it.headline }}</span>
                     }
                     <span class="settings" [attr.data-testid]="'recent-future-settings-' + it.id">{{ settings(it) }}</span>
+                    @if (it.styleLabel && it.languageLabel) {
+                      <span class="settings" [attr.data-testid]="'recent-future-style-' + it.id">{{ it.styleLabel }} · {{ it.languageLabel }}</span>
+                    }
                   </span>
                 </button>
               }

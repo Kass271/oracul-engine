@@ -32,8 +32,8 @@ public class AvoidedFutures {
     }
 
     public List<AvoidedFuture> load(UUID runId) {
-        UUID parentId = jdbc.query("select parent_run_id from generation_run where id = ?",
-            (rs, i) -> rs.getObject("parent_run_id", UUID.class), runId).stream().findFirst().orElse(null);
+        UUID parentId = jdbc.query("select coalesce(p.scenario_run_id, p.id) from generation_run me join generation_run p on p.id = me.parent_run_id where me.id = ?",
+            (rs, i) -> rs.getObject(1, UUID.class), runId).stream().findFirst().orElse(null);
         List<Found> rows = jdbc.query("select r.id, a.cleaned_scenario from generation_run me "
                 + "join generation_run r on r.session_id = me.session_id and r.evidence_pack_id = me.evidence_pack_id "
                 + "and r.status = 'COMPLETED' and r.final_attempt is not null and r.created_at < me.created_at "

@@ -377,7 +377,9 @@ paths:
         to the parent's (phase-02 run-control.md FR-47). The run skips stages 1–6 (no search;
         it goes from QUEUED to EXPLORING_FUTURES), lists the parent's and every earlier future on the same Evidence Pack
         as futures to avoid, and ends FAILED ALTERNATIVE_NOT_DISTINCT when its future repeats one of them after one
-        regeneration (FR-30).
+        regeneration (FR-30). For a REWRITE parent the futures to avoid list as Future 1 the accepted scenario of the
+        parent's scenarioRunId, then the other earlier futures on the pack without that run; REWRITE runs (no scenario
+        of their own) are never listed (phase-04 story-rewrite.md FR-68).
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -2606,8 +2608,8 @@ components:
     RewriteOrigin:
       type: object
       description: |
-        Present in ScenarioMetadata iff the run's kind is REWRITE: the run it was rewritten from (its parentRunId).
-        UI "Rewritten from: <headline>".
+        Present in ScenarioMetadata iff the run's kind is REWRITE: the run it was rewritten from (its parentRunId, the
+        direct parent — for a rewrite of a rewrite the parent rewrite, not the scenario run). UI "Rewritten from: <headline>".
       required: [runId, headline]
       properties:
         runId:
@@ -2617,7 +2619,7 @@ components:
           type: string
           minLength: 1
           maxLength: 160
-          description: Story headline of the parent run
+          description: Story headline of the parent run (its stored headline = getRun(parentRunId).headline)
 
     ResultSource:
       type: object

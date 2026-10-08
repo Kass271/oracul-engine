@@ -24,10 +24,19 @@ import type { ScenarioMetadata } from '../api/models/scenario-metadata';
             >Optimism {{ metadata().configuration.optimism }}/10</mat-chip
           >
           <mat-chip data-testid="meta-horizon">Horizon {{ metadata().horizonLabel }}</mat-chip>
+          @if (metadata().styleLabel; as styleLabel) {
+            <mat-chip data-testid="meta-style">Style: {{ styleLabel }}</mat-chip>
+          }
+          @if (metadata().languageLabel; as languageLabel) {
+            <mat-chip data-testid="meta-language">Language: {{ languageLabel }}</mat-chip>
+          }
           @if (metadata().model; as model) {
             <mat-chip data-testid="meta-model">Model {{ model }}</mat-chip>
           }
         </mat-chip-set>
+        @if (metadata().rewrittenFrom; as origin) {
+          <p data-testid="meta-rewritten-from">Rewritten from: {{ origin.headline }}</p>
+        }
         @if (metadata().wildcards.length > 0) {
           <mat-chip-set aria-label="Wildcards" data-testid="meta-wildcards">
             @for (w of metadata().wildcards; track $index) {

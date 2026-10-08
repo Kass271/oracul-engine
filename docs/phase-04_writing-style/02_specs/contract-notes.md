@@ -126,3 +126,10 @@ E2E stub only gains the per-style STORY_WRITING answers (`styled-story.md` "Stub
   an empty or non-`application/json` body answers "Request body is not valid JSON"; a JSON body that is `null` or not
   an object answers "Unknown writing style"). No operation, schema, property or enum value added, renamed or removed;
   no `Renamed:` line. Docker compose files, profiles and `.oracul/stack.json` unchanged (no stub change).
+- 05_style-labels: description-only precision in `api/openapi.yaml` — `startAlternativeRun` (for a REWRITE parent
+  Future 1 of the futures to avoid is the scenario of its `scenarioRunId`; REWRITE runs are never listed) and
+  `RewriteOrigin` (`rewrittenFrom` names the direct parent; `headline` = the parent's stored headline). The label
+  fields stay optional in the schema although the backend always sends `styleLabel` / `languageLabel` (frontend
+  fixtures without them stay valid; the UI renders each element only when its field is present). No operation,
+  schema, property or enum value added, renamed or removed; no `Renamed:` line. Docker compose files, profiles and
+  `.oracul/stack.json` unchanged (no stub change).

@@ -73,6 +73,13 @@ public class GenerationRunRepository {
             Boolean.class, id));
     }
 
+    /** FR-68: a STANDARD / ALTERNATIVE parent needs an accepted scenario, a REWRITE parent its own story. */
+    boolean isEligibleForAlternative(UUID id) {
+        boolean rewrite = Boolean.TRUE.equals(jdbc.queryForObject(
+            "select exists (select 1 from generation_run where id = ? and kind = 'REWRITE')", Boolean.class, id));
+        return rewrite ? isCompletedWithStory(id) : isCompletedWithScenario(id);
+    }
+
     /** Inserts a QUEUED ALTERNATIVE run that copies the parent's configuration, research data and pack. */
     void insertAlternativeQueued(UUID id, String generationId, UUID sessionId, UUID parentId,
                                  OffsetDateTime now, OffsetDateTime deadline) {

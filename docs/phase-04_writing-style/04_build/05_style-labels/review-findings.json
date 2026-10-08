@@ -1,0 +1,56 @@
+{
+  "slice": "05_style-labels",
+  "round": 2,
+  "reviewer": "reviewer",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "medium",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/AlternativeOfRewriteIT.java",
+      "line": 141,
+      "fr": "FR-68",
+      "problem": "Missing exhaustive test for the futures-to-avoid list of an ALTERNATIVE on a REWRITE parent. The range is the window limit (at most 10 entries, Future 1 kept) and distinctness against Future 1. The test claims to prove 'at most 10 entries' and 'no duplicate run', but every case builds only 1-2 eligible runs, so `isLessThanOrEqualTo(10)` and the distinct check can never fail. The new `coalesce(p.scenario_run_id, p.id)` lookup makes the scenario run the 'parent' that `AvoidedFutures` always keeps when it trims `others` to MAX-1. No test covers the case where the scenario run is the oldest of more than 10 eligible runs on the pack: there Future 1 must still be the scenario run, the list must have exactly 10 entries and no rewrite may appear. The spec rule 'the distinctness check compares with that scenario' (ALTERNATIVE_NOT_DISTINCT when the candidate repeats the scenario run's causal steps or title, for a REWRITE parent) is not exercised either.",
+      "fix": "Add a case that seeds 11 or more COMPLETED runs with final_attempt on the same session and pack, all created after the scenario run, then rewrites the oldest one and starts an ALTERNATIVE on the rewrite. Assert exactly 10 'Future n:' lines, Future 1 = the scenario run's title, and no REWRITE id. Add a case where the scenario stub repeats Future 1 twice, so a rewrite parent's alternative ends FAILED ALTERNATIVE_NOT_DISTINCT.",
+      "status": "fixed",
+      "resolution": "Round 2: AlternativeOfRewriteIT.theWindowOfTenKeepsTheScenarioRunAsFuture1WhenItIsTheOldestOfManyEligibleRuns seeds 11 COMPLETED runs with final_attempt on p's session/pack at p.created_at + k*100us (deterministic order, fresh session per test), rewrites p and asserts the exact list [Future 1: Stub future A, Future 2..10: Seeded future 3..11]. Discriminates: without coalesce (Future 1 = rewrite id, not found) the window would be Seeded 2..11; a window of 11 fails hasSize(10); chronological trimming would drop p. aCandidateThatRepeatsTheScenarioRunTwiceFailsAsNotDistinct (STANDARD / ALTERNATIVE scenario run) asserts FAILED ALTERNATIVE_NOT_DISTINCT, INITIAL + ALTERNATIVE_DISTINCT, the exact duplicate-future block with 'same future event title as future 1'; the ALTERNATIVE case discriminates the coalesce (wrong Future 1 would be Stub future A, title mismatch). Matches story-rewrite.md step-4a pipeline rules."
+    },
+    {
+      "id": "R2",
+      "severity": "low",
+      "kind": "hardening",
+      "dimension": "tests",
+      "file": "backend/src/test/java/com/oracul/app/runs/StyleLabelsIT.java",
+      "line": 42,
+      "fr": "FR-68",
+      "problem": "The spec says the label is chosen by profileId alone and the stored mode is not re-checked. No case stores a cross-mode selection (e.g. {\"mode\":\"OFFICIAL\",\"profileId\":\"kafka\"}) to prove the mode is ignored. The code (StyleLabels.style) does ignore it.",
+      "fix": "Add one LabelCase 'cross-mode stored' with styleJson(\"OFFICIAL\", \"kafka\") -> KAFKA.",
+      "status": "open"
+    },
+    {
+      "id": "R3",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/reasoning/AvoidedFutures.java",
+      "line": 13,
+      "fr": "FR-68",
+      "problem": "The class Javadoc still says 'the parent first'. For a REWRITE parent, Future 1 is now the rewrite's scenarioRunId, not the parent. The variable name `parentId` is misleading for the same reason.",
+      "fix": "Rename `parentId` to `future1RunId`. Update the Javadoc: 'Future 1 = coalesce(parent.scenario_run_id, parent.id)'.",
+      "status": "open"
+    },
+    {
+      "id": "R4",
+      "severity": "low",
+      "kind": "defect",
+      "dimension": "correctness",
+      "file": "backend/src/main/java/com/oracul/app/history/HistoryController.java",
+      "line": 37,
+      "fr": "FR-68",
+      "problem": "Fully-qualified `com.oracul.app.style.StyleLabels` in the field, the constructor and FutureResultService instead of an import. `labels.getObject()` is resolved twice per item. Style only.",
+      "fix": "Import StyleLabels and resolve the provider once per request.",
+      "status": "open"
+    }
+  ]
+}
